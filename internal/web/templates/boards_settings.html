@@ -1,0 +1,219 @@
+{{define "title"}}{{.Data.Board.Name}} settings - Weave{{end}}
+{{define "page"}}{{template "boards_settings_in" .Data}}{{end}}
+
+{{/* Toggle switch row. Args: Name, Title, Help, On, Off(disabled), ID */}}
+{{define "bs_toggle"}}<label class="bs-row bs-row-toggle" for="{{.ID}}">
+    <span class="bs-text"><b>{{.Title}}</b><small>{{.Help}}</small></span>
+    <span class="bs-switch"><input id="{{.ID}}" type="checkbox" role="switch" name="{{.Name}}" value="true"{{if .On}} checked{{end}}{{if .Off}} disabled{{end}}><input type="hidden" name="{{.Name}}" value="false"><i aria-hidden="true"></i></span>
+  </label>{{end}}
+
+{{define "bs_status"}}<span class="bs-status" role="status" aria-live="polite">{{if .Done}}<span class="bs-saved">&#10003; Saved</span>{{end}}</span>{{end}}
+
+{{define "boards_settings_in"}}<link rel="stylesheet" href="/static/boards_board.css">
+<link rel="stylesheet" href="/static/boards_colors.css">
+<div class="boards-settings" data-active="{{.Active}}" data-board="{{.Board.ID}}">
+  <header class="bs-head">
+    <div>
+      <p class="bs-crumbs">{{if .ProjectName}}<a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a> / {{end}}<a href="/boards/{{.Board.ID}}">{{.Board.Name}}</a></p>
+      <h1>Board settings</h1>
+    </div>
+    <a class="boards-btn" href="/boards/{{.Board.ID}}">&larr; Back to board</a>
+  </header>
+  <div class="bs-layout">
+    <nav class="bs-nav" aria-label="Settings sections">
+      {{range .Sections}}<a href="?section={{.ID}}#{{.ID}}" data-section="{{.ID}}" class="{{if eq .ID "danger"}}bs-nav-danger{{end}}"{{if eq .ID $.Active}} aria-current="true"{{end}}>{{.Title}}</a>{{end}}
+    </nav>
+    <div class="bs-panels">
+      {{template "boards_set_general_in" .}}
+      {{template "boards_set_members_in" .}}
+      {{template "boards_set_labels_in" .}}
+      {{template "boards_set_views_in" .}}
+      {{template "boards_set_filters_in" .}}
+      {{template "boards_set_sharing_in" .}}
+      {{template "boards_set_templates_in" .}}
+      {{if .CanManage}}{{template "boards_set_notifications_in" .}}
+      {{template "boards_set_danger_in" .}}{{end}}
+    </div>
+  </div>
+</div>
+<script src="/static/boards_settings.js" defer></script>
+<script src="/static/boards_colors.js" defer></script>{{end}}
+
+{{define "boards_set_general"}}{{template "boards_set_general_in" .Data}}{{end}}
+{{define "boards_set_general_in"}}<section id="set-general" class="boards-sec bs-panel" data-panel="general" aria-labelledby="set-general-h">
+  <div class="bs-sec-head"><h2 id="set-general-h">General</h2>{{template "bs_status" .}}</div>
+  <form hx-patch="/ui/boards/{{.Board.ID}}" hx-trigger="change, submit" hx-target="#set-general" hx-swap="outerHTML" class="bs-form">
+    <input type="hidden" name="_section" value="general">
+    <div class="bs-row bs-row-stack">
+      <span class="bs-text"><b><label for="bs-name">Board name</label></b><small>Shown in the project, in the top bar and in notifications.</small></span>
+      <input id="bs-name" name="name" value="{{.Board.Name}}" required maxlength="128"{{if not .CanEdit}} disabled{{end}}>
+    </div>
+    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-color-l">Board colour</b><small>Tints the board background and adds an accent bar under the header. Shown as a stripe on the project page.</small></span>
+      {{template "boards_color_picker" dict "Name" "color" "Current" .Board.Color "Label" "Board colour" "Off" (not .CanEdit)}}</div>
+    <div class="bs-row"><span class="bs-text"><b>Project</b><small>The project this board belongs to.</small></span><span class="bs-value">{{if .ProjectName}}<a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a>{{else}}-{{end}}</span></div>
+    <div class="bs-row"><span class="bs-text"><b>Your access</b><small>What you may do on this board.</small></span><span class="bs-value"><span class="boards-badge">{{.Level}}</span></span></div>
+  </form>
+  {{if .CanEdit}}<p class="bs-hint">Changes save automatically.</p>{{end}}
+</section>{{end}}
+
+{{define "boards_set_views"}}{{template "boards_set_views_in" .Data}}{{end}}
+{{define "boards_set_views_in"}}{{$off := not .CanEdit}}<section id="set-views" class="boards-sec bs-panel" data-panel="views" aria-labelledby="set-views-h">
+  <div class="bs-sec-head"><h2 id="set-views-h">Views &amp; cards</h2>{{template "bs_status" .}}</div>
+  <form hx-patch="/ui/boards/{{.Board.ID}}" hx-trigger="change" hx-target="#set-views" hx-swap="outerHTML" class="bs-form">
+    <input type="hidden" name="_section" value="views">
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b id="bs-view-l">Default view</b><small>The view people land on when they open the board.</small></span>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-view-l">{{$v := .Board.DefaultView}}{{range .Views}}<label><input type="radio" name="defaultView" value="{{.}}"{{if eq . $v}} checked{{end}}{{if $off}} disabled{{end}}><span>{{.}}</span></label>{{end}}</div></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b id="bs-type-l">Default card type</b><small>New cards start as this type.</small></span>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-type-l">{{$t := .Board.DefaultCardType}}{{range $x := .CardTypes}}<label><input type="radio" name="defaultCardType" value="{{$x}}"{{if eq $x $t}} checked{{end}}{{if $off}} disabled{{end}}><span>{{$x}}</span></label>{{end}}</div></div>
+    <div class="bs-row bs-row-stack bs-cardcolor"><span class="bs-text"><b id="bs-cc-l">Card colouring</b><small>How labels colour cards on this board. <b>First label (by label order) decides the card colour; colours are never mixed.</b> Reorder labels under Labels to change which colour wins.</small></span>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-cc-l">{{$m := .Board.CardColorMode}}<label><input type="radio" name="cardColorMode" value="pill"{{if ne $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Label pill</span></label><label><input type="radio" name="cardColorMode" value="fill"{{if eq $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Colour the whole card</span></label></div>
+      <div class="bs-cc-preview" aria-hidden="true"><span class="bs-cc-cap">Preview</span>{{template "bs_cc_preview" .}}</div></div>
+    {{template "bs_toggle" dict "ID" "bs-limit" "Name" "limitCardTypesToDefault" "Title" "Limit card types to the default" "Help" "Hide the other card type in the card editor." "On" .Board.LimitCardTypesToDefault "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-creator" "Name" "alwaysDisplayCardCreator" "Title" "Always show card creator" "Help" "Display who created each card on the board." "On" .Board.AlwaysDisplayCardCreator "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-counter" "Name" "showCardCounter" "Title" "Card counter" "Help" "Show the number of cards in each list header." "On" .Board.ShowCardCounter "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-ages" "Name" "showCardAges" "Title" "Card ages" "Help" "Fade cards that have not been touched for a while." "On" .Board.ShowCardAges "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-tasks" "Name" "expandTaskListsByDefault" "Title" "Expand task lists" "Help" "Open task lists automatically when a card is opened." "On" .Board.ExpandTaskListsByDefault "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-inbox" "Name" "hasInbox" "Title" "Board inbox" "Help" "Keep a drafts inbox for quickly capturing cards before triage." "On" .Board.HasInbox "Off" $off}}
+  </form>
+</section>{{end}}
+
+{{define "boards_set_members"}}{{template "boards_set_members_in" .Data}}{{end}}
+{{define "boards_set_members_in"}}<section id="set-members" class="boards-sec bs-panel" data-panel="members" aria-labelledby="set-members-h">
+  <div class="bs-sec-head"><h2 id="set-members-h">Members &amp; access</h2></div>
+  <p class="bs-desc">Editors can change cards, commenters can read and comment, viewers can only read. Group members get access through the group.</p>
+  {{if .CanManage}}<form class="bs-add" hx-post="/ui/boards/{{.Board.ID}}/members" hx-target="#set-members" hx-swap="outerHTML">
+    <div class="bs-combo" data-combo>
+      <label class="sr-only" for="bs-combo-in">Search people and groups</label>
+      <input id="bs-combo-in" type="text" role="combobox" aria-expanded="false" aria-controls="bs-combo-list" aria-autocomplete="list" autocomplete="off" placeholder="Add people or groups...">
+      <input type="hidden" name="userId" value=""><input type="hidden" name="groupId" value="">
+      <ul id="bs-combo-list" role="listbox" aria-label="People and groups" hidden>
+        {{range .Users}}<li role="option" data-user="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm avatar-ph" aria-hidden="true">{{authInitial .Name}}</span><span class="bs-opt-t"><b>{{.Name}}</b><small>{{.Email}}</small></span></li>{{end}}
+        {{range .Groups}}<li role="option" data-group="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm bs-group-av" aria-hidden="true">&#9679;&#9679;</span><span class="bs-opt-t"><b>{{.Name}}</b><small>Group</small></span></li>{{end}}
+        <li class="bs-empty" role="presentation" hidden>No matches</li>
+      </ul>
+    </div>
+    <label class="sr-only" for="bs-add-role">Role</label>
+    <select id="bs-add-role" name="role"><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option></select>
+    <button class="primary" disabled data-add>Add</button>
+  </form>{{end}}
+  <ul class="bs-members">
+  {{$cm := .CanManage}}{{range .Members}}<li class="bs-member">
+    {{if .GroupID}}<span class="avatar avatar-ph bs-group-av" aria-hidden="true">&#9679;&#9679;</span>{{else}}<span class="avatar avatar-ph" aria-hidden="true">{{authInitial .Name}}</span>{{end}}
+    <span class="bs-member-t"><b>{{.Name}}{{if .GroupID}} <span class="boards-badge">Group</span>{{end}}{{if .IsAgent}} <span class="boards-badge" title="AI agent">Agent</span>{{end}}</b>{{if .Email}}<small>{{.Email}}</small>{{else if .GroupID}}<small>Everyone in this group</small>{{end}}</span>
+    {{$cc := boardsBool .CanComment}}
+    {{if $cm}}<form class="bs-member-act" hx-patch="/ui/board-members/{{.ID}}" hx-trigger="change" hx-target="#set-members" hx-swap="outerHTML">
+      <label class="sr-only" for="bs-role-{{.ID}}">Role for {{.Name}}</label>
+      <select id="bs-role-{{.ID}}" name="role"><option value="editor"{{if eq .Role "editor"}} selected{{end}}>Editor</option><option value="commenter"{{if and (eq .Role "viewer") $cc}} selected{{end}}>Commenter</option><option value="viewer"{{if and (eq .Role "viewer") (not $cc)}} selected{{end}}>Viewer</option></select>
+      <input type="hidden" name="_board" value="{{.BoardID}}"></form>
+      <button class="bs-x" aria-label="Remove {{.Name}}" title="Remove" hx-delete="/ui/board-members/{{.ID}}" hx-vals='{"_board":"{{.BoardID}}"}' hx-target="#set-members" hx-swap="outerHTML" hx-confirm="Remove {{.Name}} from this board?">&times;</button>
+    {{else}}<span class="boards-badge">{{if and (eq .Role "viewer") $cc}}commenter{{else}}{{.Role}}{{end}}</span>{{end}}
+  </li>{{else}}<li class="bs-empty-row">No members yet.</li>{{end}}
+  </ul>
+</section>{{end}}
+
+{{define "boards_set_labels"}}{{template "boards_set_labels_in" .Data}}{{end}}
+{{define "boards_set_labels_in"}}<section id="set-labels" class="boards-sec bs-panel" data-panel="labels" aria-labelledby="set-labels-h">
+  <div class="bs-sec-head"><h2 id="set-labels-h">Labels</h2></div>
+  <p class="bs-desc">Colour-code cards. Drag the handle (or use the arrows) to reorder; rename inline.{{if .UseProjectLabels}} This project uses project-wide labels, which only project managers can change.{{end}}</p>
+  {{if .CanEdit}}<form class="bs-add bs-add-label" hx-post="/ui/boards/{{.Board.ID}}/labels" hx-target="#set-labels" hx-swap="outerHTML">
+    <details class="bs-pop"><summary class="bs-swatch" style="background:{{boardsColor "muddy-grey"}}" aria-label="Choose colour"></summary>
+      <div class="bs-palette" role="radiogroup" aria-label="Colour">{{range $i, $c := boardsColors}}<label title="{{$c}}"><input type="radio" name="color" value="{{$c}}"{{if eq $i 0}} checked{{end}}><i style="background:{{boardsColor $c}}"></i><span class="sr-only">{{$c}}</span></label>{{end}}</div></details>
+    <label class="sr-only" for="bs-newlabel">New label name</label>
+    <input id="bs-newlabel" name="name" placeholder="New label name">
+    <label class="sr-only" for="bs-newlabel-g">Group</label>
+    <select id="bs-newlabel-g" name="groupId"><option value="">No group</option>{{range .LabelGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+    <input type="hidden" name="_board" value="{{.Board.ID}}"><button class="primary">Add label</button></form>{{end}}
+  <div class="bs-labels" data-sortable="/ui/boards/{{.Board.ID}}/labels/drop" data-target="#set-labels">
+  {{range .LabelRows}}{{$cur := .Color}}{{$grp := deref .GroupID}}<form class="bs-label" data-id="{{.ID}}" hx-patch="/ui/labels/{{.ID}}" hx-trigger="change" hx-target="#set-labels" hx-swap="outerHTML">
+    {{if $.CanEdit}}<span class="bs-grip" aria-hidden="true" title="Drag to reorder">&#8942;&#8942;</span>{{end}}
+    <details class="bs-pop"><summary class="bs-swatch" style="background:{{boardsColor .Color}}" aria-label="Colour: {{.Color}}"></summary>
+      <div class="bs-palette" role="radiogroup" aria-label="Colour">{{range boardsColors}}<label title="{{.}}"><input type="radio" name="color" value="{{.}}"{{if eq . $cur}} checked{{end}}><i style="background:{{boardsColor .}}"></i><span class="sr-only">{{.}}</span></label>{{end}}</div></details>
+    <label class="sr-only" for="bs-ln-{{.ID}}">Label name</label>
+    <input id="bs-ln-{{.ID}}" name="name" value="{{deref .Name}}" placeholder="Unnamed label">
+    <label class="sr-only" for="bs-lg-{{.ID}}">Group</label>
+    <select id="bs-lg-{{.ID}}" name="groupId"><option value="">No group</option>{{range $.LabelGroups}}<option value="{{.ID}}"{{if eq .ID $grp}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+    <input type="hidden" name="_board" value="{{$.Board.ID}}">
+    {{if $.CanEdit}}<span class="bs-moves"><button type="button" aria-label="Move up"{{if not .PrevID}} disabled{{end}} hx-post="/ui/labels/{{.ID}}/move" hx-vals='{"beforeId":"{{.PrevID}}","_board":"{{$.Board.ID}}"}' hx-target="#set-labels" hx-swap="outerHTML">&#9650;</button><button type="button" aria-label="Move down"{{if not .NextID}} disabled{{end}} hx-post="/ui/labels/{{.ID}}/move" hx-vals='{"afterId":"{{.NextID}}","_board":"{{$.Board.ID}}"}' hx-target="#set-labels" hx-swap="outerHTML">&#9660;</button></span>
+    <button type="button" class="bs-x" aria-label="Delete label" title="Delete" hx-delete="/ui/labels/{{.ID}}" hx-vals='{"_board":"{{$.Board.ID}}"}' hx-target="#set-labels" hx-swap="outerHTML" hx-confirm="Delete this label from all cards?">&times;</button>{{end}}
+  </form>{{else}}<p class="bs-empty-row">No labels yet.</p>{{end}}
+  </div>
+  <h3 class="bs-sub">Label groups</h3>
+  <p class="bs-desc">Group related labels. A single-select group lets a card carry only one of its labels.</p>
+  {{range .LabelGroups}}<form class="bs-group" hx-patch="/ui/label-groups/{{.ID}}" hx-trigger="change" hx-target="#set-labels" hx-swap="outerHTML">
+    <label class="sr-only" for="bs-gn-{{.ID}}">Group name</label>
+    <input id="bs-gn-{{.ID}}" name="name" value="{{.Name}}" required>
+    <label class="bs-inline-toggle"><span class="bs-switch"><input type="checkbox" role="switch" name="singleSelect" value="true"{{if .SingleSelect}} checked{{end}}><input type="hidden" name="singleSelect" value="false"><i aria-hidden="true"></i></span> Single select</label>
+    <input type="hidden" name="_board" value="{{$.Board.ID}}">
+    <button type="button" class="bs-x" aria-label="Delete group {{.Name}}" title="Delete group" hx-delete="/ui/label-groups/{{.ID}}" hx-vals='{"_board":"{{$.Board.ID}}"}' hx-target="#set-labels" hx-swap="outerHTML" hx-confirm="Delete group (labels are kept)?">&times;</button>
+  </form>{{else}}<p class="bs-empty-row">No groups.</p>{{end}}
+  {{if .CanEdit}}<form class="bs-add" hx-post="/ui/boards/{{.Board.ID}}/label-groups" hx-target="#set-labels" hx-swap="outerHTML">
+    <label class="sr-only" for="bs-newgroup">New group name</label><input id="bs-newgroup" name="name" placeholder="New group name" required>
+    <label class="bs-inline-toggle"><span class="bs-switch"><input type="checkbox" role="switch" name="singleSelect" value="true"><input type="hidden" name="singleSelect" value="false"><i aria-hidden="true"></i></span> Single select</label>
+    <input type="hidden" name="_board" value="{{.Board.ID}}"><button>Add group</button></form>{{end}}
+</section>{{end}}
+
+{{define "boards_set_filters"}}{{template "boards_set_filters_in" .Data}}{{end}}
+{{define "boards_set_filters_in"}}<section id="set-filters" class="boards-sec bs-panel" data-panel="filters" aria-labelledby="set-filters-h">
+  <div class="bs-sec-head"><h2 id="set-filters-h">Saved filters</h2></div>
+  <p class="bs-desc">Reusable searches shown in the board's filter bar. Create one from the filter bar, then rename or edit the query here.</p>
+  {{range .Saved}}<form class="bs-group" hx-patch="/ui/filters/{{.ID}}" hx-trigger="change" hx-target="#set-filters" hx-swap="outerHTML">
+    <label class="sr-only" for="bs-fn-{{.ID}}">Filter name</label><input id="bs-fn-{{.ID}}" name="name" value="{{.Name}}" required>
+    <label class="sr-only" for="bs-fq-{{.ID}}">Filter query</label><input id="bs-fq-{{.ID}}" name="query" value="{{.Query}}" class="bs-mono">
+    <input type="hidden" name="_board" value="{{$.Board.ID}}"><input type="hidden" name="_ctx" value="settings">
+    <button type="button" class="bs-x" aria-label="Delete filter {{.Name}}" title="Delete" hx-delete="/ui/filters/{{.ID}}" hx-vals='{"_board":"{{$.Board.ID}}","_ctx":"settings"}' hx-target="#set-filters" hx-swap="outerHTML">&times;</button>
+  </form>{{else}}<p class="bs-empty-row">No saved filters yet.</p>{{end}}
+</section>{{end}}
+
+{{define "boards_set_sharing"}}{{template "boards_set_sharing_in" .Data}}{{end}}
+{{define "boards_set_sharing_in"}}<section id="set-sharing" class="boards-sec bs-panel" data-panel="sharing" aria-labelledby="set-sharing-h">
+  <div class="bs-sec-head"><h2 id="set-sharing-h">Sharing &amp; public link</h2>{{template "bs_status" .}}</div>
+  {{if .CanManage}}
+  <form class="bs-form" hx-post="/ui/boards/{{.Board.ID}}/public" hx-trigger="change" hx-target="#set-sharing" hx-swap="outerHTML">
+    {{template "bs_toggle" dict "ID" "bs-public" "Name" "isPublic" "Title" "Public board" "Help" "Anyone with the link can view this board, read-only, without signing in." "On" .Board.IsPublic "Off" false}}
+  </form>
+  {{if .Board.IsPublic}}<div class="bs-link">
+    <label class="sr-only" for="bs-link-in">Public link</label>
+    <input id="bs-link-in" readonly value="/public/{{.Board.PublicToken}}" data-link>
+    <button type="button" class="primary" data-copy="bs-link-in">Copy link</button>
+    <button type="button" hx-post="/ui/boards/{{.Board.ID}}/public" hx-vals='{"isPublic":"true","rotate":"true"}' hx-target="#set-sharing" hx-swap="outerHTML" hx-confirm="The old link stops working. Continue?">Regenerate</button>
+  </div>{{end}}
+  {{else}}<p class="bs-desc">Only board managers can change sharing.</p>{{end}}
+</section>{{end}}
+
+{{define "boards_set_templates"}}{{template "boards_set_templates_in" .Data}}{{end}}
+{{define "boards_set_templates_in"}}<section id="set-templates" class="boards-sec bs-panel" data-panel="templates" aria-labelledby="set-templates-h">
+  <div class="bs-sec-head"><h2 id="set-templates-h">Templates &amp; export</h2>{{template "bs_status" .}}</div>
+  {{if .CanManage}}<form class="bs-form" hx-post="/ui/boards/{{.Board.ID}}/template" hx-trigger="change" hx-target="#set-templates" hx-swap="outerHTML">
+    {{template "bs_toggle" dict "ID" "bs-tpl" "Name" "isTemplate" "Title" "Publish as board template" "Help" "Let people start new boards from this one's lists, labels and cards." "On" .Board.IsTemplate "Off" false}}
+  </form>{{end}}
+  <div class="bs-row"><span class="bs-text"><b>Export</b><small>Download the board with all lists, cards and labels.</small></span>
+    <span class="bs-btns"><a class="boards-btn" href="/ui/boards/{{.Board.ID}}/export?format=json" download>JSON</a><a class="boards-btn" href="/ui/boards/{{.Board.ID}}/export?format=csv" download>CSV</a></span></div>
+  <div class="bs-row"><span class="bs-text"><b>Import</b><small>Create a board from Weave/Planka JSON, Trello JSON or CSV from the project page.</small></span>
+    <span class="bs-btns"><a class="boards-btn" href="/projects/{{.Board.ProjectID}}">Open project</a></span></div>
+</section>{{end}}
+
+{{define "boards_set_notifications_in"}}<section id="set-notifications" class="boards-sec bs-panel" data-panel="notifications" aria-labelledby="set-notifications-h">
+  <div class="bs-sec-head"><h2 id="set-notifications-h">Notifications</h2></div>
+  <p class="bs-desc">Send this board's activity to chat or email services (Slack, Discord, email and more). Your personal in-app notification preferences are in <a href="/settings">your settings</a>.</p>
+  <div hx-get="/ui/boards/{{.Board.ID}}/notification-services" hx-trigger="load" hx-swap="innerHTML"><p class="bs-hint">Loading...</p></div>
+</section>{{end}}
+
+{{define "boards_set_danger_in"}}<section id="set-danger" class="boards-sec bs-panel danger-zone" data-panel="danger" aria-labelledby="set-danger-h">
+  <div class="bs-sec-head"><h2 id="set-danger-h">Danger zone</h2></div>
+  <p class="bs-desc">Deleting the board removes all its lists, cards, labels and history. This cannot be undone.</p>
+  <div class="bs-delete" data-name="{{.Board.Name}}">
+    <label for="bs-del-in"><b>Type the board name to confirm</b><small>{{.Board.Name}}</small></label>
+    <input id="bs-del-in" autocomplete="off" spellcheck="false" placeholder="{{.Board.Name}}" data-del-in>
+    <button class="danger" disabled data-del hx-delete="/ui/boards/{{.Board.ID}}">Delete this board</button>
+  </div>
+</section>{{end}}
+
+{{/* Preview of the card colouring mode: a real tile built from the board's first two labels (or sample colours). */}}
+{{define "bs_cc_preview"}}{{$a := "#8a5cf0"}}{{$b := "#d6455d"}}{{$an := "Design"}}{{$bn := "Urgent"}}
+  {{range $i, $l := .LabelRows}}{{if eq $i 0}}{{$a = boardsHexOf $l.Color}}{{$an = deref $l.Name}}{{else if eq $i 1}}{{$b = boardsHexOf $l.Color}}{{$bn = deref $l.Name}}{{end}}{{end}}
+  <article class="boards-tile bs-cc-tile"{{if eq .Board.CardColorMode "fill"}} data-card-fill="1" style="--card-color:{{$a}}"{{end}}>
+    {{if eq .Board.CardColorMode "fill"}}<div class="boards-tile-labels boards-lchips"><span class="boards-lchip">{{$bn}}</span></div>
+    {{else}}<div class="boards-tile-labels"><span class="boards-label bs-cc-label" style="background:{{$a}}"><span class="boards-label-text">{{$an}}</span></span><span class="boards-label bs-cc-label" style="background:{{$b}}"><span class="boards-label-text">{{$bn}}</span></span></div>{{end}}
+    <div class="boards-tile-name"><span class="boards-tile-link">Write the launch announcement</span></div>
+    <div class="boards-tile-meta"><span class="boards-due boards-due-overdue">Overdue &middot; Nov 9</span></div>
+  </article>{{end}}

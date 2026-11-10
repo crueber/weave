@@ -1,0 +1,6115 @@
+[
+ {
+  "name": "activity.board",
+  "tag": "activity",
+  "summary": "Board activity feed (actions), newest first",
+  "method": "GET",
+  "path": "/boards/{boardId}/actions",
+  "auth": "public",
+  "ui": "GET /ui/boards/{id}/activity",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Action id cursor: return actions older than this one"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "Page size (default 50, max 200)"
+   }
+  ]
+ },
+ {
+  "name": "activity.card",
+  "tag": "activity",
+  "summary": "Card activity feed (actions), newest first",
+  "method": "GET",
+  "path": "/cards/{cardId}/actions",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/activity",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Action id cursor: return actions older than this one"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "Page size (default 50, max 200)"
+   }
+  ]
+ },
+ {
+  "name": "admin.backup",
+  "tag": "admin",
+  "summary": "Download a consistent SQLite snapshot (VACUUM INTO). Files under data/files must be copied separately.",
+  "method": "GET",
+  "path": "/admin/backup",
+  "auth": "admin",
+  "ui": "GET /admin/backup",
+  "fields": null
+ },
+ {
+  "name": "admin.stats",
+  "tag": "admin",
+  "summary": "Row counts per entity, storage and version (admin)",
+  "method": "GET",
+  "path": "/admin/stats",
+  "auth": "admin",
+  "ui": "GET /admin",
+  "fields": null
+ },
+ {
+  "name": "agent.access",
+  "tag": "agent",
+  "summary": "Grant (editor|viewer|commenter) or revoke an agent's access to a board",
+  "method": "POST",
+  "path": "/agents/{id}/access",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agents/{id}/access",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "agent user id"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "role",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "editor (default) | viewer | commenter"
+   },
+   {
+    "name": "revoke",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "true removes the agent from the board"
+   }
+  ]
+ },
+ {
+  "name": "agent.create",
+  "tag": "agent",
+  "summary": "Create an AI agent account (no login) and return its API key once",
+  "method": "POST",
+  "path": "/agents",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agents",
+  "fields": [
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "display name shown on cards and in activity"
+   },
+   {
+    "name": "boardIds",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "boards to grant access to"
+   },
+   {
+    "name": "role",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "user role: worker (default) | boardUser | guest"
+   },
+   {
+    "name": "boardRole",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "access on boardIds: editor (default) | viewer | commenter"
+   },
+   {
+    "name": "expiresInDays",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "optional: the API key stops working after this many days (1-3650); 0 or omitted = never"
+   }
+  ]
+ },
+ {
+  "name": "agent.delete",
+  "tag": "agent",
+  "summary": "Delete an agent account; its claims are released",
+  "method": "DELETE",
+  "path": "/agents/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agents/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "agent user id"
+   }
+  ]
+ },
+ {
+  "name": "agent.list",
+  "tag": "agent",
+  "summary": "List AI agent accounts with their board access",
+  "method": "GET",
+  "path": "/agents",
+  "auth": "admin",
+  "ui": "GET /admin/agents",
+  "fields": null
+ },
+ {
+  "name": "agent.rotateKey",
+  "tag": "agent",
+  "summary": "Issue a new API key for an agent (the old key stops working); returned once",
+  "method": "POST",
+  "path": "/agents/{id}/key",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agents/{id}/key",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "agent user id"
+   },
+   {
+    "name": "expiresInDays",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "optional: the new API key stops working after this many days (1-3650); 0 or omitted = never"
+   }
+  ]
+ },
+ {
+  "name": "agent.update",
+  "tag": "agent",
+  "summary": "Rename an agent, change its role or deactivate it",
+  "method": "PATCH",
+  "path": "/agents/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agents/{id}/update",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "role",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "worker | boardUser | guest"
+   },
+   {
+    "name": "isDeactivated",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "true disables the key without deleting the account"
+   }
+  ]
+ },
+ {
+  "name": "apikey.generate",
+  "tag": "apikey",
+  "summary": "Create or rotate a personal API key (Bearer / X-API-Key); the old key stops working",
+  "method": "POST",
+  "path": "/users/{id}/api-key",
+  "auth": "user",
+  "ui": "POST /ui/settings/apikey",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   },
+   {
+    "name": "expiresInDays",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "optional: the key stops working after this many days (1-3650); 0 or omitted = never expires"
+   }
+  ]
+ },
+ {
+  "name": "apikey.revoke",
+  "tag": "apikey",
+  "summary": "Revoke a user's API key (admins may revoke others')",
+  "method": "DELETE",
+  "path": "/users/{id}/api-key",
+  "auth": "user",
+  "ui": "POST /ui/settings/apikey/revoke",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "attachment.cover",
+  "tag": "attachment",
+  "summary": "Set (or unset) an image attachment as the card cover",
+  "method": "POST",
+  "path": "/attachments/{id}/cover",
+  "auth": "user",
+  "ui": "POST /ui/attachments/{id}/cover",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "unset",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Remove this attachment as the card cover instead of setting it"
+   }
+  ]
+ },
+ {
+  "name": "attachment.create",
+  "tag": "attachment",
+  "summary": "Attach a file (multipart upload) or a link to a card",
+  "method": "POST",
+  "path": "/cards/{cardId}/attachments",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/attachments",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "file",
+    "in": "file",
+    "type": "file",
+    "required": false,
+    "desc": "File to upload (multipart). Omit for a link attachment."
+   },
+   {
+    "name": "url",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Link URL (http/https) for a link attachment"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Display name (defaults to the file name or URL host)"
+   }
+  ]
+ },
+ {
+  "name": "attachment.delete",
+  "tag": "attachment",
+  "summary": "Delete an attachment and its stored files",
+  "method": "DELETE",
+  "path": "/attachments/{id}",
+  "auth": "user",
+  "ui": "POST /ui/attachments/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "attachment.download",
+  "tag": "attachment",
+  "summary": "Download an attachment file (authorized by board access)",
+  "method": "GET",
+  "path": "/attachments/{id}/download/{name}",
+  "auth": "public",
+  "ui": "GET /attachments/{id}/download/{name}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "File name (cosmetic; the id decides)"
+   }
+  ]
+ },
+ {
+  "name": "attachment.list",
+  "tag": "attachment",
+  "summary": "List a card's attachments",
+  "method": "GET",
+  "path": "/cards/{cardId}/attachments",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/attachments",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "attachment.media",
+  "tag": "attachment",
+  "summary": "Board media view: all attachments of a board, filterable by image|video|doc",
+  "method": "GET",
+  "path": "/boards/{boardId}/media",
+  "auth": "public",
+  "ui": "GET /boards/{boardId}/media",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "type",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Filter: all (default) | image | video | doc"
+   }
+  ]
+ },
+ {
+  "name": "attachment.thumbnail",
+  "tag": "attachment",
+  "summary": "Download an image attachment's thumbnail",
+  "method": "GET",
+  "path": "/attachments/{id}/thumbnail",
+  "auth": "public",
+  "ui": "GET /attachments/{id}/thumbnail",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "attachment.update",
+  "tag": "attachment",
+  "summary": "Rename an attachment",
+  "method": "PATCH",
+  "path": "/attachments/{id}",
+  "auth": "user",
+  "ui": "POST /ui/attachments/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "auth.logout",
+  "tag": "auth",
+  "summary": "End the current session",
+  "method": "POST",
+  "path": "/auth/logout",
+  "auth": "public",
+  "ui": "POST /logout",
+  "fields": null
+ },
+ {
+  "name": "auth.me",
+  "tag": "auth",
+  "summary": "The authenticated user",
+  "method": "GET",
+  "path": "/auth/me",
+  "auth": "user",
+  "ui": "GET /settings",
+  "fields": null
+ },
+ {
+  "name": "auth.oidc.authorize",
+  "tag": "auth",
+  "summary": "Build the identity-provider authorization URL (browser flow)",
+  "method": "GET",
+  "path": "/auth/oidc/authorize",
+  "auth": "public",
+  "ui": "GET /auth/oidc/login",
+  "fields": null
+ },
+ {
+  "name": "auth.oidc.callback",
+  "tag": "auth",
+  "summary": "Complete SSO: exchange the code, provision/link the user and return a session token",
+  "method": "GET",
+  "path": "/auth/oidc/callback",
+  "auth": "public",
+  "ui": "GET /auth/oidc/callback",
+  "fields": [
+   {
+    "name": "code",
+    "in": "query",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "state",
+    "in": "query",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "code_verifier",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "PKCE verifier returned by auth.oidc.authorize"
+   }
+  ]
+ },
+ {
+  "name": "auth.oidc.info",
+  "tag": "auth",
+  "summary": "Whether single sign-on is available",
+  "method": "GET",
+  "path": "/auth/oidc",
+  "auth": "public",
+  "ui": "GET /login (SSO button)",
+  "fields": null
+ },
+ {
+  "name": "auth.oidc.settings.get",
+  "tag": "auth",
+  "summary": "Read the SSO configuration (admin)",
+  "method": "GET",
+  "path": "/auth/oidc/settings",
+  "auth": "admin",
+  "ui": "GET /admin/sso",
+  "fields": null
+ },
+ {
+  "name": "auth.oidc.settings.update",
+  "tag": "auth",
+  "summary": "Update the SSO configuration stored in the database (admin; env vars still override)",
+  "method": "PUT",
+  "path": "/auth/oidc/settings",
+  "auth": "admin",
+  "ui": "POST /ui/admin/sso",
+  "fields": [
+   {
+    "name": "issuer",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "clientId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "clientSecret",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "write-only"
+   },
+   {
+    "name": "scopes",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "space separated, default \"openid profile email groups\""
+   },
+   {
+    "name": "emailClaim",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "nameClaim",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "usernameClaim",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "groupsClaim",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "adminGroup",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "ownerGroup",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "userGroup",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "workerGroup",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "guestGroup",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "requireGroup",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "teamPrefix",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "autoProvision",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "auth.terms.accept",
+  "tag": "auth",
+  "summary": "Accept the current terms (completes a pending login or records acceptance while signed in)",
+  "method": "POST",
+  "path": "/auth/terms/accept",
+  "auth": "public",
+  "ui": "POST /login/terms",
+  "fields": [
+   {
+    "name": "pendingToken",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "pending token from login (omit when already signed in)"
+   },
+   {
+    "name": "signature",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "signature from auth.terms.get"
+   }
+  ]
+ },
+ {
+  "name": "auth.terms.get",
+  "tag": "auth",
+  "summary": "Current terms of service (public)",
+  "method": "GET",
+  "path": "/auth/terms",
+  "auth": "public",
+  "ui": "GET /auth/oidc/callback (terms step)",
+  "fields": null
+ },
+ {
+  "name": "auth.terms.set",
+  "tag": "auth",
+  "summary": "Set the terms of service text (admin); empty disables acceptance",
+  "method": "PUT",
+  "path": "/auth/terms",
+  "auth": "admin",
+  "ui": "POST /ui/admin/sso/terms",
+  "fields": [
+   {
+    "name": "text",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "terms of service text; empty disables the requirement"
+   }
+  ]
+ },
+ {
+  "name": "auth.whoami",
+  "tag": "auth",
+  "summary": "The caller (user, role, isAgent) and every board they can access with their role",
+  "method": "GET",
+  "path": "/auth/whoami",
+  "auth": "user",
+  "ui": "exempt:the browser shows identity in the header and /settings; this is the machine summary",
+  "fields": null
+ },
+ {
+  "name": "board.create",
+  "tag": "board",
+  "summary": "Create a board in a project (project manager)",
+  "method": "POST",
+  "path": "/projects/{projectId}/boards",
+  "auth": "user",
+  "ui": "POST /ui/projects/{projectId}/boards",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "project id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "board name"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "explicit position; default end of project"
+   },
+   {
+    "name": "defaultView",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "kanban|grid|list|calendar|map (default kanban)"
+   }
+  ]
+ },
+ {
+  "name": "board.delete",
+  "tag": "board",
+  "summary": "Delete a board and everything on it (project manager)",
+  "method": "DELETE",
+  "path": "/boards/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/boards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   }
+  ]
+ },
+ {
+  "name": "board.export",
+  "tag": "board",
+  "summary": "Export a board as JSON (round-trips through board.import) or CSV",
+  "method": "GET",
+  "path": "/boards/{id}/export",
+  "auth": "user",
+  "ui": "GET /ui/boards/{id}/export",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "format",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "json (default) | csv"
+   }
+  ]
+ },
+ {
+  "name": "board.get",
+  "tag": "board",
+  "summary": "Get a board with lists, labels, label groups and members",
+  "method": "GET",
+  "path": "/boards/{id}",
+  "auth": "user",
+  "ui": "GET /boards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   }
+  ]
+ },
+ {
+  "name": "board.import",
+  "tag": "board",
+  "summary": "Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (project manager)",
+  "method": "POST",
+  "path": "/projects/{projectId}/boards/import",
+  "auth": "user",
+  "ui": "POST /ui/projects/{projectId}/boards/import",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "format",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "planka (Weave/Planka JSON) | trello | csv"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board name (default: name from the file)"
+   },
+   {
+    "name": "data",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "file content (alternative to file upload)"
+   },
+   {
+    "name": "file",
+    "in": "file",
+    "type": "file",
+    "required": false,
+    "desc": "uploaded export file"
+   }
+  ]
+ },
+ {
+  "name": "board.instantiate",
+  "tag": "board",
+  "summary": "Create a board from a template in a project",
+  "method": "POST",
+  "path": "/projects/{projectId}/boards/from-template",
+  "auth": "user",
+  "ui": "POST /ui/projects/{projectId}/boards/from-template",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "target project"
+   },
+   {
+    "name": "templateId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "template board id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "new board name"
+   }
+  ]
+ },
+ {
+  "name": "board.list",
+  "tag": "board",
+  "summary": "List boards of a project visible to the caller",
+  "method": "GET",
+  "path": "/projects/{projectId}/boards",
+  "auth": "user",
+  "ui": "GET /ui/projects/{projectId}/boards",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "project id"
+   }
+  ]
+ },
+ {
+  "name": "board.listeners",
+  "tag": "board",
+  "summary": "Who is listening to any list of this board right now",
+  "method": "GET",
+  "path": "/boards/{id}/listeners",
+  "auth": "user",
+  "ui": "exempt:rendered server-side as the robot indicator in the board list headers (updates live via SSE listener.joined/left)",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   }
+  ]
+ },
+ {
+  "name": "board.member.add",
+  "tag": "board",
+  "summary": "Add a user or user group to a board (project manager)",
+  "method": "POST",
+  "path": "/boards/{boardId}/members",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/members",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "user to add (exclusive with groupId)"
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "user group to add (exclusive with userId)"
+   },
+   {
+    "name": "role",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "editor (default) | viewer"
+   },
+   {
+    "name": "canComment",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "viewers only: may comment"
+   }
+  ]
+ },
+ {
+  "name": "board.member.list",
+  "tag": "board",
+  "summary": "List board memberships (users and groups)",
+  "method": "GET",
+  "path": "/boards/{boardId}/members",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/members",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "board.member.remove",
+  "tag": "board",
+  "summary": "Remove a membership (project manager, or the member themself)",
+  "method": "DELETE",
+  "path": "/board-members/{memberId}",
+  "auth": "user",
+  "ui": "DELETE /ui/board-members/{memberId}",
+  "fields": [
+   {
+    "name": "memberId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "board.member.update",
+  "tag": "board",
+  "summary": "Change a membership's role / comment permission (project manager)",
+  "method": "PATCH",
+  "path": "/board-members/{memberId}",
+  "auth": "user",
+  "ui": "PATCH /ui/board-members/{memberId}",
+  "fields": [
+   {
+    "name": "memberId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "role",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "editor | viewer"
+   },
+   {
+    "name": "canComment",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "viewers only: may comment"
+   }
+  ]
+ },
+ {
+  "name": "board.move",
+  "tag": "board",
+  "summary": "Reorder a board within its project (project manager)",
+  "method": "POST",
+  "path": "/boards/{id}/move",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/move",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board to place after (optional)"
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board to place before (optional)"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "explicit position (overrides afterId/beforeId)"
+   }
+  ]
+ },
+ {
+  "name": "board.public.get",
+  "tag": "board",
+  "summary": "Anonymous read-only view of a public board",
+  "method": "GET",
+  "path": "/public/boards/{token}",
+  "auth": "public",
+  "ui": "GET /public/{token}",
+  "fields": [
+   {
+    "name": "token",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "public board token"
+   }
+  ]
+ },
+ {
+  "name": "board.setPublic",
+  "tag": "board",
+  "summary": "Enable/disable anonymous read-only access (and rotate the public token)",
+  "method": "POST",
+  "path": "/boards/{id}/public",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/public",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "isPublic",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "enable anonymous read-only access"
+   },
+   {
+    "name": "rotate",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "generate a fresh public token"
+   }
+  ]
+ },
+ {
+  "name": "board.template.list",
+  "tag": "board",
+  "summary": "List board templates visible to the caller",
+  "method": "GET",
+  "path": "/board-templates",
+  "auth": "user",
+  "ui": "GET /ui/board-templates",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "limit to a project (optional)"
+   }
+  ]
+ },
+ {
+  "name": "board.template.publish",
+  "tag": "board",
+  "summary": "Publish/unpublish a board as a template",
+  "method": "POST",
+  "path": "/boards/{id}/template",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/template",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "isTemplate",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "mark the board as a reusable template"
+   }
+  ]
+ },
+ {
+  "name": "board.tree",
+  "tag": "board",
+  "summary": "Board, lists and compact cards (id, name, description, labels, members, claim) in one call",
+  "method": "GET",
+  "path": "/boards/{id}/tree",
+  "auth": "user",
+  "ui": "exempt:the board page renders the same data as HTML; this is the compact machine read",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   },
+   {
+    "name": "includeClosed",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "also return closed lists and closed cards (default false)"
+   },
+   {
+    "name": "listIds",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "comma separated list ids to restrict the tree to"
+   }
+  ]
+ },
+ {
+  "name": "board.update",
+  "tag": "board",
+  "summary": "Update board name and settings",
+  "method": "PATCH",
+  "path": "/boards/{id}",
+  "auth": "user",
+  "ui": "PATCH /ui/boards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "project managers only"
+   },
+   {
+    "name": "defaultView",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "kanban|grid|list|calendar|map"
+   },
+   {
+    "name": "defaultCardType",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "project|story"
+   },
+   {
+    "name": "limitCardTypesToDefault",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "alwaysDisplayCardCreator",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "expandTaskListsByDefault",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "showCardCounter",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "showCardAges",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "hasInbox",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it"
+   },
+   {
+    "name": "cardColorMode",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"
+   }
+  ]
+ },
+ {
+  "name": "card.archive",
+  "tag": "card",
+  "summary": "Move a card to the board's archive (or trash) list",
+  "method": "POST",
+  "path": "/cards/{id}/archive",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/archive",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "trash",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "true = move to the trash list, false = archive list"
+   }
+  ]
+ },
+ {
+  "name": "card.calendar",
+  "tag": "card",
+  "summary": "Cards of a board by due date for a month grid",
+  "method": "GET",
+  "path": "/boards/{boardId}/calendar",
+  "auth": "user",
+  "ui": "GET /boards/{id}/calendar",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "month",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "YYYY-MM, default current month"
+   }
+  ]
+ },
+ {
+  "name": "card.claim",
+  "tag": "card",
+  "summary": "Claim a card with a lease (409 when someone else holds an unexpired claim); optionally move it",
+  "method": "POST",
+  "path": "/cards/{id}/claim",
+  "auth": "user",
+  "ui": "exempt:claims are taken by agents; the UI shows the claim on tiles and in the card sheet and people use card.move/member ops",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "also move the card to this list when the claim succeeds (e.g. 'In progress')"
+   },
+   {
+    "name": "ttlSeconds",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "lease length in seconds (default 900, 10..86400); renew before it ends"
+   },
+   {
+    "name": "note",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "short free text shown next to the claim"
+   }
+  ]
+ },
+ {
+  "name": "card.close",
+  "tag": "card",
+  "summary": "Close (or re-open) a card; moves to the closed list when the board has one",
+  "method": "POST",
+  "path": "/cards/{id}/close",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/close",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "closed",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "default true; false re-opens"
+   }
+  ]
+ },
+ {
+  "name": "card.cover.set",
+  "tag": "card",
+  "summary": "Set or clear the card cover (an image attachment)",
+  "method": "PUT",
+  "path": "/cards/{id}/cover",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/cover",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "attachmentId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "image attachment of this card; empty removes the cover"
+   }
+  ]
+ },
+ {
+  "name": "card.create",
+  "tag": "card",
+  "summary": "Create a card at the end (or given position) of a list",
+  "method": "POST",
+  "path": "/lists/{listId}/cards",
+  "auth": "user",
+  "ui": "POST /ui/lists/{listId}/cards",
+  "fields": [
+   {
+    "name": "listId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "list to create the card in (active or closed list)"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "card title"
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "project | story (default: board default card type)"
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "dueDate",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "RFC3339, YYYY-MM-DD or YYYY-MM-DDTHH:MM"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "explicit position; default end of list"
+   }
+  ]
+ },
+ {
+  "name": "card.delete",
+  "tag": "card",
+  "summary": "Delete a card (must be in the trash list, or a draft/template)",
+  "method": "DELETE",
+  "path": "/cards/{id}",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.draft.create",
+  "tag": "card",
+  "summary": "Capture a draft card into the board inbox",
+  "method": "POST",
+  "path": "/boards/{boardId}/drafts",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/inbox",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "card.draft.publish",
+  "tag": "card",
+  "summary": "Publish an inbox draft into a list",
+  "method": "POST",
+  "path": "/cards/{id}/publish",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/publish",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "draft card id"
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "card.due.complete",
+  "tag": "card",
+  "summary": "Mark the due date completed/uncompleted (may spawn a recurring card)",
+  "method": "POST",
+  "path": "/cards/{id}/due/complete",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/due/complete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "completed",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "default true"
+   }
+  ]
+ },
+ {
+  "name": "card.due.set",
+  "tag": "card",
+  "summary": "Set or clear the due date",
+  "method": "PUT",
+  "path": "/cards/{id}/due",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/due",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "dueDate",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "empty clears the due date"
+   }
+  ]
+ },
+ {
+  "name": "card.duplicate",
+  "tag": "card",
+  "summary": "Duplicate a card (labels, members, extras via hooks)",
+  "method": "POST",
+  "path": "/cards/{id}/duplicate",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/duplicate",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "name of the copy (default '\u003cname\u003e (copy)')"
+   }
+  ]
+ },
+ {
+  "name": "card.edit.list",
+  "tag": "card",
+  "summary": "Who is editing which fields of a card",
+  "method": "GET",
+  "path": "/cards/{id}/editing",
+  "auth": "user",
+  "ui": "GET /ui/cards/{id}/editing",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.edit.release",
+  "tag": "card",
+  "summary": "Release your edit lock on a card field",
+  "method": "DELETE",
+  "path": "/cards/{id}/editing",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/editing/release",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "field",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "default description"
+   }
+  ]
+ },
+ {
+  "name": "card.edit.touch",
+  "tag": "card",
+  "summary": "Claim/heartbeat the collaborative edit lock on a card field",
+  "method": "POST",
+  "path": "/cards/{id}/editing",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/editing/touch",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "field",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "field being edited, default description"
+   },
+   {
+    "name": "takeover",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "claim the lock from a holder who has been idle \u003e 60s"
+   }
+  ]
+ },
+ {
+  "name": "card.fromTemplate",
+  "tag": "card",
+  "summary": "Create a card from a card template",
+  "method": "POST",
+  "path": "/card-templates/{id}/cards",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/from-template",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "template card id"
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "list to create the new card in"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "default: template name"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "card.get",
+  "tag": "card",
+  "summary": "Get a card with labels, members and claim; full=true adds tasks, comments, attachments, custom fields, activity",
+  "method": "GET",
+  "path": "/cards/{id}",
+  "auth": "user",
+  "ui": "GET /ui/cards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "full",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "true adds tasks, comments (last 50), attachments, custom fields and activity (last 50)"
+   }
+  ]
+ },
+ {
+  "name": "card.inbox.list",
+  "tag": "card",
+  "summary": "List the drafts in the board inbox",
+  "method": "GET",
+  "path": "/boards/{boardId}/inbox",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/inbox",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.inbox.set",
+  "tag": "card",
+  "summary": "Enable or disable the board inbox (drafts)",
+  "method": "PUT",
+  "path": "/boards/{boardId}/inbox",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/inbox/settings",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "enabled",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "card.label.add",
+  "tag": "card",
+  "summary": "Add a label to a card (single-select groups replace the group's other label)",
+  "method": "POST",
+  "path": "/cards/{id}/labels",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/labels",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "labelId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.label.remove",
+  "tag": "card",
+  "summary": "Remove a label from a card",
+  "method": "DELETE",
+  "path": "/cards/{id}/labels/{labelId}",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/labels/{labelId}/remove",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "labelId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.list",
+  "tag": "card",
+  "summary": "List the cards of a board (excludes drafts and templates)",
+  "method": "GET",
+  "path": "/boards/{boardId}/cards",
+  "auth": "user",
+  "ui": "exempt:cards are rendered by the board shell (kanban/list/grid) and calendar/map views",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   },
+   {
+    "name": "listId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only cards of this list"
+   },
+   {
+    "name": "labelId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only cards with this label"
+   },
+   {
+    "name": "memberId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only cards this user is a member of"
+   },
+   {
+    "name": "claimed",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "true | false | any (default): filter by active claim (expired leases count as unclaimed)"
+   },
+   {
+    "name": "q",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "substring match on name or description"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "page size (default: all, max 500)"
+   },
+   {
+    "name": "cursor",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "nextCursor of the previous page"
+   }
+  ]
+ },
+ {
+  "name": "card.location.set",
+  "tag": "card",
+  "summary": "Set or clear the card's map location",
+  "method": "PUT",
+  "path": "/cards/{id}/location",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/location",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "lat",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "lng",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "locationName",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "clear",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "remove the location"
+   }
+  ]
+ },
+ {
+  "name": "card.map",
+  "tag": "card",
+  "summary": "Cards of a board that have a map location",
+  "method": "GET",
+  "path": "/boards/{boardId}/map",
+  "auth": "user",
+  "ui": "GET /boards/{id}/map",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.member.add",
+  "tag": "card",
+  "summary": "Add a board member to a card",
+  "method": "POST",
+  "path": "/cards/{id}/members",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/members",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.member.remove",
+  "tag": "card",
+  "summary": "Remove a member from a card",
+  "method": "DELETE",
+  "path": "/cards/{id}/members/{userId}",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/members/{userId}/remove",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "userId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.move",
+  "tag": "card",
+  "summary": "Move/reorder a card between lists or boards (applies list-type rules)",
+  "method": "POST",
+  "path": "/cards/{id}/move",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/move",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "target list (may be on another board of the caller)"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "explicit position"
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "place after this sibling card"
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "place before this sibling card"
+   }
+  ]
+ },
+ {
+  "name": "card.next",
+  "tag": "card",
+  "summary": "Next unclaimed open card of a list in position order, optionally claiming it atomically ({item:null} when none)",
+  "method": "POST",
+  "path": "/lists/{listId}/next",
+  "auth": "user",
+  "ui": "exempt:work-queue pull for agents",
+  "fields": [
+   {
+    "name": "listId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "claim",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "true = claim the card atomically (requires edit access)"
+   },
+   {
+    "name": "ttlSeconds",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "lease length when claiming (default 900)"
+   },
+   {
+    "name": "moveTo",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "with claim=true: move the claimed card to this list"
+   },
+   {
+    "name": "note",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "claim note"
+   }
+  ]
+ },
+ {
+  "name": "card.notifications.read",
+  "tag": "card",
+  "summary": "Mark all of the caller's notifications for this card as read",
+  "method": "POST",
+  "path": "/cards/{id}/notifications/read",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/notifications/read",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.options",
+  "tag": "card",
+  "summary": "Lists, board members and labels available to a card (drives the card modal pickers)",
+  "method": "GET",
+  "path": "/cards/{id}/options",
+  "auth": "user",
+  "ui": "GET /ui/cards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.recurrence.run",
+  "tag": "card",
+  "summary": "Create the next occurrence of a recurring card now",
+  "method": "POST",
+  "path": "/cards/{id}/recurrence/run",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/recurrence/run",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.recurrence.set",
+  "tag": "card",
+  "summary": "Set or clear the card's recurrence rule (requires a due date)",
+  "method": "PUT",
+  "path": "/cards/{id}/recurrence",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/recurrence",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "recurrence",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "JSON {freq,interval,trigger,weekdays,until,count,listId}; empty string clears"
+   }
+  ]
+ },
+ {
+  "name": "card.release",
+  "tag": "card",
+  "summary": "Release your claim on a card (managers may release anyone's); optionally move it",
+  "method": "POST",
+  "path": "/cards/{id}/release",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/release",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "also move the card to this list (e.g. back to 'Ready' or on to 'Review')"
+   }
+  ]
+ },
+ {
+  "name": "card.renew",
+  "tag": "card",
+  "summary": "Extend your claim lease",
+  "method": "POST",
+  "path": "/cards/{id}/renew",
+  "auth": "user",
+  "ui": "exempt:lease renewal is a machine heartbeat",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "ttlSeconds",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "new lease length from now (default 900)"
+   }
+  ]
+ },
+ {
+  "name": "card.restore",
+  "tag": "card",
+  "summary": "Restore an archived/trashed card to its previous list",
+  "method": "POST",
+  "path": "/cards/{id}/restore",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/restore",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.share.create",
+  "tag": "card",
+  "summary": "Create (or return) the anonymous read-only share link",
+  "method": "POST",
+  "path": "/cards/{id}/share",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/share",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.share.revoke",
+  "tag": "card",
+  "summary": "Revoke the card's share link",
+  "method": "DELETE",
+  "path": "/cards/{id}/share",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/share/revoke",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.share.view",
+  "tag": "card",
+  "summary": "Read a shared card anonymously",
+  "method": "GET",
+  "path": "/share/{token}",
+  "auth": "public",
+  "ui": "GET /share/{token}",
+  "fields": [
+   {
+    "name": "token",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.subscribe",
+  "tag": "card",
+  "summary": "Subscribe to card notifications",
+  "method": "PUT",
+  "path": "/cards/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/subscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.template.list",
+  "tag": "card",
+  "summary": "List the card templates of a project",
+  "method": "GET",
+  "path": "/projects/{projectId}/card-templates",
+  "auth": "user",
+  "ui": "GET /ui/projects/{projectId}/card-templates",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "card.template.save",
+  "tag": "card",
+  "summary": "Save a card as a project-wide card template",
+  "method": "POST",
+  "path": "/cards/{id}/template",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/template",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card to snapshot"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "template name (default: card name)"
+   }
+  ]
+ },
+ {
+  "name": "card.unsubscribe",
+  "tag": "card",
+  "summary": "Unsubscribe from card notifications",
+  "method": "DELETE",
+  "path": "/cards/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/unsubscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   }
+  ]
+ },
+ {
+  "name": "card.update",
+  "tag": "card",
+  "summary": "Update card title, description, type, due date or completion",
+  "method": "PATCH",
+  "path": "/cards/{id}",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/update",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "markdown-lite; empty string clears"
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "project | story"
+   },
+   {
+    "name": "dueDate",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "empty string clears"
+   },
+   {
+    "name": "isDueCompleted",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "comment.create",
+  "tag": "comment",
+  "summary": "Comment on a card (requires comment permission)",
+  "method": "POST",
+  "path": "/cards/{cardId}/comments",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/comments",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "text",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Comment text (markdown)"
+   }
+  ]
+ },
+ {
+  "name": "comment.delete",
+  "tag": "comment",
+  "summary": "Delete a comment (author, or a project manager/admin)",
+  "method": "DELETE",
+  "path": "/comments/{id}",
+  "auth": "user",
+  "ui": "POST /ui/comments/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "comment.list",
+  "tag": "comment",
+  "summary": "List a card's comments, newest first",
+  "method": "GET",
+  "path": "/cards/{cardId}/comments",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/comments",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Comment id cursor: return comments older than this one"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "Page size (default 50, max 200)"
+   }
+  ]
+ },
+ {
+  "name": "comment.update",
+  "tag": "comment",
+  "summary": "Edit a comment (author only)",
+  "method": "PATCH",
+  "path": "/comments/{id}",
+  "auth": "user",
+  "ui": "POST /ui/comments/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "text",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "config.get",
+  "tag": "config",
+  "summary": "Admin configuration (secrets masked)",
+  "method": "GET",
+  "path": "/config/settings",
+  "auth": "admin",
+  "ui": "GET /admin/config",
+  "fields": null
+ },
+ {
+  "name": "config.logo.delete",
+  "tag": "config",
+  "summary": "Remove the branding logo",
+  "method": "DELETE",
+  "path": "/config/logo",
+  "auth": "admin",
+  "ui": "POST /ui/admin/config/logo/delete",
+  "fields": null
+ },
+ {
+  "name": "config.logo.get",
+  "tag": "config",
+  "summary": "Download the branding logo",
+  "method": "GET",
+  "path": "/config/logo",
+  "auth": "public",
+  "ui": "GET /branding/logo",
+  "fields": null
+ },
+ {
+  "name": "config.logo.upload",
+  "tag": "config",
+  "summary": "Upload the branding logo",
+  "method": "POST",
+  "path": "/config/logo",
+  "auth": "admin",
+  "ui": "POST /ui/admin/config/logo",
+  "fields": [
+   {
+    "name": "logo",
+    "in": "file",
+    "type": "file",
+    "required": false,
+    "desc": "PNG, JPEG, GIF, WebP or SVG image, max 1 MiB"
+   }
+  ]
+ },
+ {
+  "name": "config.public",
+  "tag": "config",
+  "summary": "Public branding/login configuration",
+  "method": "GET",
+  "path": "/config/public",
+  "auth": "public",
+  "ui": "exempt:consumed by the login page via notify.Public",
+  "fields": null
+ },
+ {
+  "name": "config.update",
+  "tag": "config",
+  "summary": "Update admin configuration (branding, SMTP, OIDC, registration, terms)",
+  "method": "PATCH",
+  "path": "/config/settings",
+  "auth": "admin",
+  "ui": "POST /ui/admin/config",
+  "fields": [
+   {
+    "name": "branding.appName",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Application name shown in the header and emails"
+   },
+   {
+    "name": "branding.loginText",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Text shown on the login page"
+   },
+   {
+    "name": "branding.primaryColor",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Accent colour (CSS colour)"
+   },
+   {
+    "name": "smtp.host",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "SMTP server host"
+   },
+   {
+    "name": "smtp.port",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "SMTP port (default 587, or 465 for tls)"
+   },
+   {
+    "name": "smtp.user",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "SMTP username"
+   },
+   {
+    "name": "smtp.password",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "SMTP password (write-only; empty keeps the current one)"
+   },
+   {
+    "name": "smtp.from",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "From address, e.g. Weave \u003cnoreply@example.com\u003e"
+   },
+   {
+    "name": "smtp.secure",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Transport security: none | starttls | tls"
+   },
+   {
+    "name": "smtp.skipVerify",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "true to skip TLS certificate verification"
+   },
+   {
+    "name": "smtp.notifications",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "false to disable e-mail for in-app notifications"
+   },
+   {
+    "name": "oidc.issuer",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "OIDC issuer URL"
+   },
+   {
+    "name": "oidc.clientId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "OIDC client id"
+   },
+   {
+    "name": "oidc.clientSecret",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "OIDC client secret (write-only; empty keeps the current one)"
+   },
+   {
+    "name": "oidc.scopes",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Space separated scopes (default: openid profile email groups)"
+   },
+   {
+    "name": "oidc.usernameClaim",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Claim used as username (default preferred_username)"
+   },
+   {
+    "name": "oidc.nameClaim",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Claim used as display name (default name)"
+   },
+   {
+    "name": "oidc.emailClaim",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Claim used as e-mail (default email)"
+   },
+   {
+    "name": "oidc.groupsClaim",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Claim containing the user's groups (default groups)"
+   },
+   {
+    "name": "oidc.adminGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group granting admin (default weave-admins)"
+   },
+   {
+    "name": "oidc.ownerGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group granting projectOwner (default weave-project-owners)"
+   },
+   {
+    "name": "oidc.userGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group granting boardUser (default weave-users)"
+   },
+   {
+    "name": "oidc.workerGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group granting worker (default weave-workers)"
+   },
+   {
+    "name": "oidc.guestGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group granting guest (default weave-guests)"
+   },
+   {
+    "name": "oidc.requireGroup",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "true to deny sign-in unless the user is in a role group"
+   },
+   {
+    "name": "oidc.teamPrefix",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Groups with this prefix sync into Weave user groups (default weave-team-)"
+   },
+   {
+    "name": "oidc.autoProvision",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "true to create users on first SSO login"
+   },
+   {
+    "name": "oidc.buttonText",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Label of the SSO button"
+   },
+   {
+    "name": "terms.enabled",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "true to require terms acceptance"
+   },
+   {
+    "name": "terms.text",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Terms of service text (markdown)"
+   },
+   {
+    "name": "terms.version",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Bump to force re-acceptance"
+   },
+   {
+    "name": "session.maxIdleMinutes",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"
+   }
+  ]
+ },
+ {
+  "name": "customfield.create",
+  "tag": "customfield",
+  "summary": "Add a field to a custom-field group or a project base group",
+  "method": "POST",
+  "path": "/custom-fields",
+  "auth": "user",
+  "ui": "POST /ui/custom-fields",
+  "fields": [
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Add the field to this group"
+   },
+   {
+    "name": "baseGroupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "or add it to this project base group"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text|number|date|checkbox|select|url (default text)"
+   },
+   {
+    "name": "options",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "Choices for select fields"
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "customfield.delete",
+  "tag": "customfield",
+  "summary": "Delete a custom field and its values",
+  "method": "DELETE",
+  "path": "/custom-fields/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-fields/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "customfield.update",
+  "tag": "customfield",
+  "summary": "Edit a custom field (name, type, options, front-of-card, position)",
+  "method": "PATCH",
+  "path": "/custom-fields/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-fields/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Changing the type clears the field's existing values"
+   },
+   {
+    "name": "options",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "customfieldgroup.create",
+  "tag": "customfieldgroup",
+  "summary": "Create a custom-field group for a board (all cards) or a single card",
+  "method": "POST",
+  "path": "/custom-field-groups",
+  "auth": "user",
+  "ui": "POST /ui/custom-field-groups",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Create a board-wide group (applies to every card of the board)"
+   },
+   {
+    "name": "cardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Create a group for this card only"
+   },
+   {
+    "name": "baseGroupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Derive fields from a project base custom-field group"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Group name (defaults to the base group name)"
+   },
+   {
+    "name": "repeatable",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Repeatable groups are a table: each card can hold many rows"
+   }
+  ]
+ },
+ {
+  "name": "customfieldgroup.delete",
+  "tag": "customfieldgroup",
+  "summary": "Delete a custom-field group with its fields and values",
+  "method": "DELETE",
+  "path": "/custom-field-groups/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-field-groups/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "customfieldgroup.list",
+  "tag": "customfieldgroup",
+  "summary": "Custom-field groups applying to a card (board-wide + card-level) with fields, rows and values",
+  "method": "GET",
+  "path": "/cards/{cardId}/custom-field-groups",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/fields",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "customfieldgroup.update",
+  "tag": "customfieldgroup",
+  "summary": "Rename, reposition or toggle repeatable on a custom-field group",
+  "method": "PATCH",
+  "path": "/custom-field-groups/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-field-groups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "repeatable",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Only changeable while the group holds no values"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "customfieldrow.create",
+  "tag": "customfieldrow",
+  "summary": "Add a row to a repeatable custom-field group on a card",
+  "method": "POST",
+  "path": "/cards/{cardId}/custom-field-groups/{groupId}/rows",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/custom-field-groups/{groupId}/rows",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "groupId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "customfieldrow.delete",
+  "tag": "customfieldrow",
+  "summary": "Delete a row of a repeatable group and its values",
+  "method": "DELETE",
+  "path": "/custom-field-rows/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-field-rows/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "customfieldrow.update",
+  "tag": "customfieldrow",
+  "summary": "Reorder a row of a repeatable group",
+  "method": "PATCH",
+  "path": "/custom-field-rows/{id}",
+  "auth": "user",
+  "ui": "POST /ui/custom-field-rows/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "customfieldvalue.clear",
+  "tag": "customfieldvalue",
+  "summary": "Remove a card's value for a custom field",
+  "method": "POST",
+  "path": "/cards/{cardId}/custom-field-values/clear",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/custom-field-values/clear",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "fieldId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "rowId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "customfieldvalue.set",
+  "tag": "customfieldvalue",
+  "summary": "Set a card's value for a custom field (validated by field type); empty clears",
+  "method": "PUT",
+  "path": "/cards/{cardId}/custom-field-values",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/custom-field-values",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "fieldId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "rowId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Row id for repeatable groups; empty otherwise"
+   },
+   {
+    "name": "content",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Value; empty clears (checkbox: true|false)"
+   }
+  ]
+ },
+ {
+  "name": "dashboard.get",
+  "tag": "dashboard",
+  "summary": "Personal dashboard: my cards, due soon, overdue, recent activity (panels per my settings)",
+  "method": "GET",
+  "path": "/dashboard",
+  "auth": "user",
+  "ui": "GET /dashboard",
+  "fields": null
+ },
+ {
+  "name": "dashboard.update",
+  "tag": "dashboard",
+  "summary": "Choose and order my dashboard panels and row limit",
+  "method": "PATCH",
+  "path": "/dashboard",
+  "auth": "user",
+  "ui": "POST /ui/dashboard",
+  "fields": [
+   {
+    "name": "panels",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "comma separated panel ids to show, in order: myCards,dueSoon,overdue,recentActivity"
+   },
+   {
+    "name": "limit",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "rows per panel (1-50, default 10)"
+   }
+  ]
+ },
+ {
+  "name": "export.board",
+  "tag": "export",
+  "summary": "Export a board as standalone HTML, or print-optimised HTML / PDF (PDF only with WEAVE_PDF_CMD; otherwise print-ready HTML to save as PDF from the browser)",
+  "method": "GET",
+  "path": "/export/boards/{id}",
+  "auth": "user",
+  "ui": "GET /export/boards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   },
+   {
+    "name": "format",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "html (standalone page, default) | pdf (see description)"
+   }
+  ]
+ },
+ {
+  "name": "export.card",
+  "tag": "export",
+  "summary": "Export a card as standalone HTML, or print-optimised HTML / PDF (see export.board)",
+  "method": "GET",
+  "path": "/export/cards/{id}",
+  "auth": "user",
+  "ui": "GET /export/cards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   },
+   {
+    "name": "format",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "html (standalone page, default) | pdf (see description)"
+   }
+  ]
+ },
+ {
+  "name": "filter.create",
+  "tag": "filter",
+  "summary": "Save a board filter",
+  "method": "POST",
+  "path": "/boards/{boardId}/filters",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/filters",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "query",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "URL query: q, label, member, due"
+   }
+  ]
+ },
+ {
+  "name": "filter.delete",
+  "tag": "filter",
+  "summary": "Delete a saved filter",
+  "method": "DELETE",
+  "path": "/filters/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/filters/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "filter.list",
+  "tag": "filter",
+  "summary": "List the caller's saved filters of a board",
+  "method": "GET",
+  "path": "/boards/{boardId}/filters",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/filters",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "filter.update",
+  "tag": "filter",
+  "summary": "Rename or change a saved filter",
+  "method": "PATCH",
+  "path": "/filters/{id}",
+  "auth": "user",
+  "ui": "PATCH /ui/filters/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "query",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "group.create",
+  "tag": "group",
+  "summary": "Create a user group (admin)",
+  "method": "POST",
+  "path": "/user-groups",
+  "auth": "admin",
+  "ui": "POST /ui/admin/groups",
+  "fields": [
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "memberIds",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "initial member user ids"
+   }
+  ]
+ },
+ {
+  "name": "group.delete",
+  "tag": "group",
+  "summary": "Delete a user group (admin); board memberships of the group go with it",
+  "method": "DELETE",
+  "path": "/user-groups/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/groups/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "group.get",
+  "tag": "group",
+  "summary": "Get a user group",
+  "method": "GET",
+  "path": "/user-groups/{id}",
+  "auth": "user",
+  "ui": "GET /admin/groups",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "group.list",
+  "tag": "group",
+  "summary": "List user groups with members",
+  "method": "GET",
+  "path": "/user-groups",
+  "auth": "user",
+  "ui": "GET /admin/groups",
+  "fields": null
+ },
+ {
+  "name": "group.member.add",
+  "tag": "group",
+  "summary": "Add a user to a group (admin)",
+  "method": "POST",
+  "path": "/user-groups/{id}/members",
+  "auth": "admin",
+  "ui": "POST /ui/admin/groups/{id}/members",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "group id"
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "group.member.remove",
+  "tag": "group",
+  "summary": "Remove a user from a group (admin)",
+  "method": "DELETE",
+  "path": "/user-groups/{id}/members/{userId}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/groups/{id}/members/{userId}/remove",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "group id"
+   },
+   {
+    "name": "userId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "group.update",
+  "tag": "group",
+  "summary": "Rename a user group (admin)",
+  "method": "PATCH",
+  "path": "/user-groups/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/groups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "label.create",
+  "tag": "label",
+  "summary": "Create a label on a board (project-wide when the project uses project labels)",
+  "method": "POST",
+  "path": "/boards/{boardId}/labels",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/labels",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "label name (may be empty for colour-only labels)"
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "palette colour name (e.g. berry-red) or #rrggbb"
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "label group id"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "label.delete",
+  "tag": "label",
+  "summary": "Delete a label (removed from all cards)",
+  "method": "DELETE",
+  "path": "/labels/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/labels/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "label.list",
+  "tag": "label",
+  "summary": "List labels visible on a board (incl. project-wide labels when enabled)",
+  "method": "GET",
+  "path": "/boards/{boardId}/labels",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/labels",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "label.move",
+  "tag": "label",
+  "summary": "Reorder a label",
+  "method": "POST",
+  "path": "/labels/{id}/move",
+  "auth": "user",
+  "ui": "POST /ui/labels/{id}/move",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "label.project.create",
+  "tag": "label",
+  "summary": "Create a project-wide label (project manager)",
+  "method": "POST",
+  "path": "/projects/{projectId}/labels",
+  "auth": "user",
+  "ui": "POST /ui/projects/{projectId}/labels",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "label.project.list",
+  "tag": "label",
+  "summary": "List project-wide labels",
+  "method": "GET",
+  "path": "/projects/{projectId}/labels",
+  "auth": "user",
+  "ui": "GET /ui/projects/{projectId}/labels",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "label.update",
+  "tag": "label",
+  "summary": "Update a label's name, colour or group",
+  "method": "PATCH",
+  "path": "/labels/{id}",
+  "auth": "user",
+  "ui": "PATCH /ui/labels/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "empty string removes the label from its group"
+   }
+  ]
+ },
+ {
+  "name": "labelgroup.create",
+  "tag": "labelgroup",
+  "summary": "Create a label group on a board",
+  "method": "POST",
+  "path": "/boards/{boardId}/label-groups",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/label-groups",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "singleSelect",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "only one label of the group per card"
+   }
+  ]
+ },
+ {
+  "name": "labelgroup.delete",
+  "tag": "labelgroup",
+  "summary": "Delete a label group (labels are kept, ungrouped)",
+  "method": "DELETE",
+  "path": "/label-groups/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/label-groups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "labelgroup.list",
+  "tag": "labelgroup",
+  "summary": "List label groups visible on a board",
+  "method": "GET",
+  "path": "/boards/{boardId}/label-groups",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/label-groups",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "labelgroup.project.create",
+  "tag": "labelgroup",
+  "summary": "Create a project-wide label group (project manager)",
+  "method": "POST",
+  "path": "/projects/{projectId}/label-groups",
+  "auth": "user",
+  "ui": "POST /ui/projects/{projectId}/label-groups",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "singleSelect",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "labelgroup.update",
+  "tag": "labelgroup",
+  "summary": "Rename / reorder a label group or toggle single-select",
+  "method": "PATCH",
+  "path": "/label-groups/{id}",
+  "auth": "user",
+  "ui": "PATCH /ui/label-groups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "singleSelect",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "list.archive",
+  "tag": "list",
+  "summary": "Archive a list: its cards move to the archive list and the list is removed",
+  "method": "POST",
+  "path": "/lists/{id}/archive",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/archive",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.clear",
+  "tag": "list",
+  "summary": "Permanently delete all cards of the trash list",
+  "method": "POST",
+  "path": "/lists/{id}/clear",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/clear",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.create",
+  "tag": "list",
+  "summary": "Create a list (column) on a board",
+  "method": "POST",
+  "path": "/boards/{boardId}/lists",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/lists",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "active (default) | closed"
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "list.delete",
+  "tag": "list",
+  "summary": "Delete a list; its cards are moved to the trash list",
+  "method": "DELETE",
+  "path": "/lists/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/lists/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.list",
+  "tag": "list",
+  "summary": "List a board's lists (including archive and trash system lists)",
+  "method": "GET",
+  "path": "/boards/{boardId}/lists",
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/lists",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.listeners",
+  "tag": "list",
+  "summary": "Who is listening to this list right now (open /events streams with lists=)",
+  "method": "GET",
+  "path": "/lists/{id}/listeners",
+  "auth": "user",
+  "ui": "exempt:rendered server-side as the robot indicator in the board list headers (updates live via SSE listener.joined/left)",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "list id"
+   }
+  ]
+ },
+ {
+  "name": "list.move",
+  "tag": "list",
+  "summary": "Reorder a list among the board's lists",
+  "method": "POST",
+  "path": "/lists/{id}/move",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/move",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "list to place after"
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "list to place before"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "list.moveCards",
+  "tag": "list",
+  "summary": "Move all cards of a list into another list of the same board",
+  "method": "POST",
+  "path": "/lists/{id}/move-cards",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/move-cards",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "target list id (same board)"
+   }
+  ]
+ },
+ {
+  "name": "list.sort",
+  "tag": "list",
+  "summary": "Sort a list's cards by name, due date or creation time",
+  "method": "POST",
+  "path": "/lists/{id}/sort",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/sort",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "field",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "name | dueDate | createdAt"
+   },
+   {
+    "name": "order",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "asc (default) | desc"
+   }
+  ]
+ },
+ {
+  "name": "list.update",
+  "tag": "list",
+  "summary": "Rename / recolour a list, change its type or position",
+  "method": "PATCH",
+  "path": "/lists/{id}",
+  "auth": "user",
+  "ui": "PATCH /ui/lists/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "color",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "column colour: #rrggbb or a preset name; empty string clears the colour"
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "switch between active and closed"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "notification.list",
+  "tag": "notification",
+  "summary": "List my notifications",
+  "method": "GET",
+  "path": "/notifications",
+  "auth": "user",
+  "ui": "GET /notifications",
+  "fields": [
+   {
+    "name": "unread",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "only unread notifications"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "max items (default 50, max 200)"
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "cursor: return notifications older than this id"
+   }
+  ]
+ },
+ {
+  "name": "notification.read",
+  "tag": "notification",
+  "summary": "Mark one notification as read",
+  "method": "POST",
+  "path": "/notifications/{id}/read",
+  "auth": "user",
+  "ui": "POST /ui/notifications/{id}/read",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "notification.read_all",
+  "tag": "notification",
+  "summary": "Mark all my notifications as read",
+  "method": "POST",
+  "path": "/notifications/read-all",
+  "auth": "user",
+  "ui": "POST /ui/notifications/read-all",
+  "fields": null
+ },
+ {
+  "name": "notification.unread_count",
+  "tag": "notification",
+  "summary": "Number of my unread notifications",
+  "method": "GET",
+  "path": "/notifications/unread-count",
+  "auth": "user",
+  "ui": "GET /ui/notifications/badge",
+  "fields": null
+ },
+ {
+  "name": "notification_service.create",
+  "tag": "notification_service",
+  "summary": "Add a notification service (shoutrrr URL) to me or a board",
+  "method": "POST",
+  "path": "/notification-services",
+  "auth": "user",
+  "ui": "POST /ui/notification-services",
+  "fields": [
+   {
+    "name": "url",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "shoutrrr service URL, e.g. discord://token@id or generic://host/path"
+   },
+   {
+    "name": "format",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text (default) | markdown | html"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "attach to a board instead of myself (needs board manage rights)"
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "admin only: attach to another user"
+   }
+  ]
+ },
+ {
+  "name": "notification_service.delete",
+  "tag": "notification_service",
+  "summary": "Remove a notification service",
+  "method": "DELETE",
+  "path": "/notification-services/{id}",
+  "auth": "user",
+  "ui": "POST /ui/notification-services/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "notification_service.list",
+  "tag": "notification_service",
+  "summary": "List my (or a board's) notification services",
+  "method": "GET",
+  "path": "/notification-services",
+  "auth": "user",
+  "ui": "GET /notification-services",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "board whose services to list (needs board manage rights); omit for my own"
+   }
+  ]
+ },
+ {
+  "name": "notification_service.test",
+  "tag": "notification_service",
+  "summary": "Send a test message through a notification service",
+  "method": "POST",
+  "path": "/notification-services/{id}/test",
+  "auth": "user",
+  "ui": "POST /ui/notification-services/{id}/test",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "notification_service.update",
+  "tag": "notification_service",
+  "summary": "Change a notification service",
+  "method": "PATCH",
+  "path": "/notification-services/{id}",
+  "auth": "user",
+  "ui": "POST /ui/notification-services/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "url",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "new shoutrrr URL"
+   },
+   {
+    "name": "format",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text | markdown | html"
+   }
+  ]
+ },
+ {
+  "name": "presence.list",
+  "tag": "presence",
+  "summary": "Presence of every user who is not offline",
+  "method": "GET",
+  "path": "/presence",
+  "auth": "user",
+  "ui": "GET /admin/users (presence dot)",
+  "fields": null
+ },
+ {
+  "name": "presence.set",
+  "tag": "presence",
+  "summary": "Report your presence (heartbeat; call at least every minute while active)",
+  "method": "POST",
+  "path": "/presence",
+  "auth": "user",
+  "ui": "POST /ui/presence (static/auth_presence.js heartbeat)",
+  "fields": [
+   {
+    "name": "state",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "online|idle|away|offline"
+   }
+  ]
+ },
+ {
+  "name": "project.background.delete",
+  "tag": "project",
+  "summary": "Delete an uploaded background image",
+  "method": "DELETE",
+  "path": "/projects/{id}/background-images/{imageId}",
+  "auth": "user",
+  "ui": "DELETE /ui/projects/{id}/background-images/{imageId}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "imageId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Background image id"
+   }
+  ]
+ },
+ {
+  "name": "project.background.file",
+  "tag": "project",
+  "summary": "Download a background image (variant: original|thumbnail)",
+  "method": "GET",
+  "path": "/projects/{id}/background-images/{imageId}/{variant}",
+  "auth": "user",
+  "ui": "GET /projects/{id}/background-images/{imageId}/{variant}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "imageId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Background image id"
+   },
+   {
+    "name": "variant",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "original | thumbnail"
+   }
+  ]
+ },
+ {
+  "name": "project.background.list",
+  "tag": "project",
+  "summary": "List uploaded background images",
+  "method": "GET",
+  "path": "/projects/{id}/background-images",
+  "auth": "user",
+  "ui": "GET /ui/projects/{id}/settings/background",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.background.upload",
+  "tag": "project",
+  "summary": "Upload a background image (thumbnail generated)",
+  "method": "POST",
+  "path": "/projects/{id}/background-images",
+  "auth": "user",
+  "ui": "POST /ui/projects/{id}/background-images",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "file",
+    "in": "file",
+    "type": "file",
+    "required": true,
+    "desc": "Image file (png, jpeg, gif, webp; max 20MB)"
+   },
+   {
+    "name": "apply",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Also set it as the project's background"
+   }
+  ]
+ },
+ {
+  "name": "project.create",
+  "tag": "project",
+  "summary": "Create a project (you become its manager)",
+  "method": "POST",
+  "path": "/projects",
+  "auth": "user",
+  "ui": "POST /ui/projects",
+  "fields": [
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Project name (max 128)"
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Description (max 1024)"
+   }
+  ]
+ },
+ {
+  "name": "project.delete",
+  "tag": "project",
+  "summary": "Delete a project and everything in it",
+  "method": "DELETE",
+  "path": "/projects/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/projects/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.favorite",
+  "tag": "project",
+  "summary": "Mark a project as your favorite",
+  "method": "POST",
+  "path": "/projects/{id}/favorite",
+  "auth": "user",
+  "ui": "POST /ui/projects/{id}/favorite",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.field.create",
+  "tag": "project",
+  "summary": "Create a field template in a base custom field group",
+  "method": "POST",
+  "path": "/base-custom-field-groups/{id}/custom-fields",
+  "auth": "user",
+  "ui": "POST /ui/fieldgroups/{id}/fields",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Base custom field group id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Field name (max 128)"
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text|number|date|checkbox|select|url (default text)"
+   },
+   {
+    "name": "options",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "Choices for type select"
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Show the value on the card front"
+   }
+  ]
+ },
+ {
+  "name": "project.field.delete",
+  "tag": "project",
+  "summary": "Delete a base custom field template",
+  "method": "DELETE",
+  "path": "/base-custom-fields/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/basefields/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Base custom field id"
+   }
+  ]
+ },
+ {
+  "name": "project.field.update",
+  "tag": "project",
+  "summary": "Update a base custom field template",
+  "method": "PATCH",
+  "path": "/base-custom-fields/{id}",
+  "auth": "user",
+  "ui": "POST /ui/basefields/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Base custom field id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Field name"
+   },
+   {
+    "name": "type",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text|number|date|checkbox|select|url"
+   },
+   {
+    "name": "options",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "Choices for type select"
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Show the value on the card front"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "Sort position"
+   }
+  ]
+ },
+ {
+  "name": "project.fieldgroup.create",
+  "tag": "project",
+  "summary": "Create a base custom field group",
+  "method": "POST",
+  "path": "/projects/{id}/base-custom-field-groups",
+  "auth": "user",
+  "ui": "POST /ui/projects/{id}/fieldgroups",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Group name (max 128)"
+   }
+  ]
+ },
+ {
+  "name": "project.fieldgroup.delete",
+  "tag": "project",
+  "summary": "Delete a base custom field group and its field templates",
+  "method": "DELETE",
+  "path": "/base-custom-field-groups/{id}",
+  "auth": "user",
+  "ui": "DELETE /ui/fieldgroups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Base custom field group id"
+   }
+  ]
+ },
+ {
+  "name": "project.fieldgroup.list",
+  "tag": "project",
+  "summary": "List base custom field groups (with fields) of a project",
+  "method": "GET",
+  "path": "/projects/{id}/base-custom-field-groups",
+  "auth": "user",
+  "ui": "GET /ui/projects/{id}/settings/fields",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.fieldgroup.update",
+  "tag": "project",
+  "summary": "Rename a base custom field group",
+  "method": "PATCH",
+  "path": "/base-custom-field-groups/{id}",
+  "auth": "user",
+  "ui": "POST /ui/fieldgroups/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Base custom field group id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Group name (max 128)"
+   }
+  ]
+ },
+ {
+  "name": "project.get",
+  "tag": "project",
+  "summary": "Get a project",
+  "method": "GET",
+  "path": "/projects/{id}",
+  "auth": "user",
+  "ui": "GET /projects/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.list",
+  "tag": "project",
+  "summary": "List projects visible to you",
+  "method": "GET",
+  "path": "/projects",
+  "auth": "user",
+  "ui": "GET /",
+  "fields": [
+   {
+    "name": "search",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Filter by name substring"
+   },
+   {
+    "name": "hidden",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "Include hidden projects"
+   },
+   {
+    "name": "order",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "byDefault | alphabetically | byCreationTime (default: your preference)"
+   }
+  ]
+ },
+ {
+  "name": "project.manager.add",
+  "tag": "project",
+  "summary": "Add a project manager",
+  "method": "POST",
+  "path": "/projects/{id}/managers",
+  "auth": "user",
+  "ui": "POST /ui/projects/{id}/managers",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "User to promote (must be admin or projectOwner role)"
+   }
+  ]
+ },
+ {
+  "name": "project.manager.list",
+  "tag": "project",
+  "summary": "List project managers",
+  "method": "GET",
+  "path": "/projects/{id}/managers",
+  "auth": "user",
+  "ui": "GET /ui/projects/{id}/settings/managers",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.manager.remove",
+  "tag": "project",
+  "summary": "Remove a project manager (the last manager cannot be removed)",
+  "method": "DELETE",
+  "path": "/projects/{id}/managers/{managerId}",
+  "auth": "user",
+  "ui": "DELETE /ui/projects/{id}/managers/{managerId}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "managerId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project manager id (see project.manager.list)"
+   }
+  ]
+ },
+ {
+  "name": "project.unfavorite",
+  "tag": "project",
+  "summary": "Remove a project from your favorites",
+  "method": "DELETE",
+  "path": "/projects/{id}/favorite",
+  "auth": "user",
+  "ui": "DELETE /ui/projects/{id}/favorite",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   }
+  ]
+ },
+ {
+  "name": "project.update",
+  "tag": "project",
+  "summary": "Update a project (name, description, hidden, labels toggle, background)",
+  "method": "PATCH",
+  "path": "/projects/{id}",
+  "auth": "user",
+  "ui": "POST /ui/projects/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Project name (max 128)"
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Description (max 1024); empty clears"
+   },
+   {
+    "name": "isHidden",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Hide from the home page"
+   },
+   {
+    "name": "useProjectLabels",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Share one label set across all boards of the project"
+   },
+   {
+    "name": "backgroundType",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "color | gradient | image | empty to clear"
+   },
+   {
+    "name": "backgroundColor",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Hex colour like #1d6fa5 (type color)"
+   },
+   {
+    "name": "backgroundGradient",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Named gradient (type gradient), e.g. ocean-dive"
+   },
+   {
+    "name": "backgroundImageId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Uploaded background image id (type image)"
+   }
+  ]
+ },
+ {
+  "name": "search.query",
+  "tag": "search",
+  "summary": "Global full-text search over cards, comments, boards and projects the caller can see",
+  "method": "GET",
+  "path": "/search",
+  "auth": "user",
+  "ui": "GET /search",
+  "fields": [
+   {
+    "name": "q",
+    "in": "query",
+    "type": "string",
+    "required": true,
+    "desc": "search text (words are AND-ed, the last one matches as a prefix)"
+   },
+   {
+    "name": "kind",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "restrict to card | comment | board | project"
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "restrict to one board"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "max results (default 30, max 100)"
+   }
+  ]
+ },
+ {
+  "name": "search.reindex",
+  "tag": "search",
+  "summary": "Rebuild the search index from scratch (admin)",
+  "method": "POST",
+  "path": "/search/reindex",
+  "auth": "admin",
+  "ui": "POST /ui/admin/search/reindex",
+  "fields": null
+ },
+ {
+  "name": "session.list",
+  "tag": "session",
+  "summary": "List your active sessions",
+  "method": "GET",
+  "path": "/sessions",
+  "auth": "user",
+  "ui": "GET /settings (Sessions)",
+  "fields": null
+ },
+ {
+  "name": "session.revoke",
+  "tag": "session",
+  "summary": "Revoke one of your sessions",
+  "method": "DELETE",
+  "path": "/sessions/{id}",
+  "auth": "user",
+  "ui": "POST /ui/settings/sessions/{id}/revoke",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "session.revoke_others",
+  "tag": "session",
+  "summary": "Revoke all your sessions except the current one",
+  "method": "POST",
+  "path": "/sessions/revoke-others",
+  "auth": "user",
+  "ui": "POST /ui/settings/sessions/revoke-others",
+  "fields": null
+ },
+ {
+  "name": "smtp.test",
+  "tag": "smtp",
+  "summary": "Send a test e-mail using the current SMTP settings",
+  "method": "POST",
+  "path": "/config/smtp/test",
+  "auth": "admin",
+  "ui": "POST /ui/admin/config/smtp-test",
+  "fields": [
+   {
+    "name": "to",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Recipient of the test message"
+   }
+  ]
+ },
+ {
+  "name": "system.health",
+  "tag": "system",
+  "summary": "Liveness/readiness (checks the database)",
+  "method": "GET",
+  "path": "/health",
+  "auth": "public",
+  "ui": "exempt:healthcheck endpoint (/healthz)",
+  "fields": null
+ },
+ {
+  "name": "system.storage",
+  "tag": "system",
+  "summary": "Disk usage of the data directory (admin)",
+  "method": "GET",
+  "path": "/system/storage",
+  "auth": "admin",
+  "ui": "GET /admin",
+  "fields": null
+ },
+ {
+  "name": "system.version",
+  "tag": "system",
+  "summary": "Server version",
+  "method": "GET",
+  "path": "/version",
+  "auth": "public",
+  "ui": "exempt:footer",
+  "fields": null
+ },
+ {
+  "name": "task.create",
+  "tag": "task",
+  "summary": "Add a task (optionally linked to another card) to a task list",
+  "method": "POST",
+  "path": "/task-lists/{taskListId}/tasks",
+  "auth": "user",
+  "ui": "POST /ui/task-lists/{taskListId}/tasks",
+  "fields": [
+   {
+    "name": "taskListId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Task list id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Task text (optional when linkedCardId is given: defaults to the card name)"
+   },
+   {
+    "name": "assigneeUserId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "linkedCardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Link this task to another card"
+   },
+   {
+    "name": "isCompleted",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "task.delete",
+  "tag": "task",
+  "summary": "Delete a task",
+  "method": "DELETE",
+  "path": "/tasks/{id}",
+  "auth": "user",
+  "ui": "POST /ui/tasks/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "task.update",
+  "tag": "task",
+  "summary": "Edit, complete, assign, link, move or reorder a task",
+  "method": "PATCH",
+  "path": "/tasks/{id}",
+  "auth": "user",
+  "ui": "POST /ui/tasks/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Task id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "isCompleted",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "assigneeUserId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "User id; empty string clears"
+   },
+   {
+    "name": "linkedCardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Card id; empty string unlinks"
+   },
+   {
+    "name": "taskListId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Move the task to another task list of the same card"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tasklist.create",
+  "tag": "tasklist",
+  "summary": "Add a task list to a card",
+  "method": "POST",
+  "path": "/cards/{cardId}/task-lists",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/task-lists",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Card id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "Task list name"
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Show progress on the card face"
+   },
+   {
+    "name": "hideCompletedTasks",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Hide completed tasks"
+   }
+  ]
+ },
+ {
+  "name": "tasklist.delete",
+  "tag": "tasklist",
+  "summary": "Delete a task list and its tasks",
+  "method": "DELETE",
+  "path": "/task-lists/{id}",
+  "auth": "user",
+  "ui": "POST /ui/task-lists/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "tasklist.list",
+  "tag": "tasklist",
+  "summary": "List a card's task lists with their tasks",
+  "method": "GET",
+  "path": "/cards/{cardId}/task-lists",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/tasks",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Card id"
+   }
+  ]
+ },
+ {
+  "name": "tasklist.update",
+  "tag": "tasklist",
+  "summary": "Rename, reposition or change display flags of a task list",
+  "method": "PATCH",
+  "path": "/task-lists/{id}",
+  "auth": "user",
+  "ui": "POST /ui/task-lists/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Task list id"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "showOnFrontOfCard",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "hideCompletedTasks",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "Explicit position"
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Place after this task list"
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Place before this task list"
+   }
+  ]
+ },
+ {
+  "name": "time.add",
+  "tag": "time",
+  "summary": "Add a manual time entry",
+  "method": "POST",
+  "path": "/cards/{cardId}/time-entries",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/time-entries",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "hours",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "minutes",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "seconds",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "Duration = hours*3600 + minutes*60 + seconds"
+   },
+   {
+    "name": "startedAt",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "RFC3339 time the work started (default now)"
+   },
+   {
+    "name": "note",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "time.delete",
+  "tag": "time",
+  "summary": "Delete a time entry",
+  "method": "DELETE",
+  "path": "/time-entries/{id}",
+  "auth": "user",
+  "ui": "POST /ui/time-entries/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "time.list",
+  "tag": "time",
+  "summary": "Time tracking summary and entries for a card",
+  "method": "GET",
+  "path": "/cards/{cardId}/time",
+  "auth": "public",
+  "ui": "GET /ui/cards/{id}/time",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "time.reset",
+  "tag": "time",
+  "summary": "Stop the stopwatch and delete all time entries of a card",
+  "method": "POST",
+  "path": "/cards/{cardId}/time/reset",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/time/reset",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "time.start",
+  "tag": "time",
+  "summary": "Start the card stopwatch",
+  "method": "POST",
+  "path": "/cards/{cardId}/time/start",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/time/start",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "time.stop",
+  "tag": "time",
+  "summary": "Stop the stopwatch and record the elapsed time as an entry",
+  "method": "POST",
+  "path": "/cards/{cardId}/time/stop",
+  "auth": "user",
+  "ui": "POST /ui/cards/{cardId}/time/stop",
+  "fields": [
+   {
+    "name": "cardId",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "time.update",
+  "tag": "time",
+  "summary": "Edit a time entry",
+  "method": "PATCH",
+  "path": "/time-entries/{id}",
+  "auth": "user",
+  "ui": "POST /ui/time-entries/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "hours",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "minutes",
+    "in": "body",
+    "type": "number",
+    "required": false
+   },
+   {
+    "name": "seconds",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "When any of hours/minutes/seconds is given the duration is recomputed from them"
+   },
+   {
+    "name": "startedAt",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "note",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "user.activate",
+  "tag": "user",
+  "summary": "Re-activate a deactivated user",
+  "method": "POST",
+  "path": "/users/{id}/activate",
+  "auth": "admin",
+  "ui": "POST /ui/admin/users/{id}/activate",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.avatar.delete",
+  "tag": "user",
+  "summary": "Remove a user's avatar",
+  "method": "DELETE",
+  "path": "/users/{id}/avatar",
+  "auth": "user",
+  "ui": "POST /ui/settings/avatar/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.avatar.get",
+  "tag": "user",
+  "summary": "Download a user's avatar image",
+  "method": "GET",
+  "path": "/users/{id}/avatar",
+  "auth": "user",
+  "ui": "GET /avatars/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.avatar.update",
+  "tag": "user",
+  "summary": "Upload a new avatar (resized to 256px PNG)",
+  "method": "PUT",
+  "path": "/users/{id}/avatar",
+  "auth": "user",
+  "ui": "POST /ui/settings/avatar",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   },
+   {
+    "name": "file",
+    "in": "file",
+    "type": "file",
+    "required": false,
+    "desc": "png, jpeg, gif or webp image (max 5 MB)"
+   }
+  ]
+ },
+ {
+  "name": "user.deactivate",
+  "tag": "user",
+  "summary": "Deactivate a user (blocks login, revokes sessions and API key access)",
+  "method": "POST",
+  "path": "/users/{id}/deactivate",
+  "auth": "admin",
+  "ui": "POST /ui/admin/users/{id}/deactivate",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.delete",
+  "tag": "user",
+  "summary": "Permanently delete a user",
+  "method": "DELETE",
+  "path": "/users/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/users/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.get",
+  "tag": "user",
+  "summary": "Get one user",
+  "method": "GET",
+  "path": "/users/{id}",
+  "auth": "user",
+  "ui": "GET /admin/users",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.list",
+  "tag": "user",
+  "summary": "List users (admins see everything, others a directory of active users; guests and workers only see accounts that share a board with them)",
+  "method": "GET",
+  "path": "/users",
+  "auth": "user",
+  "ui": "GET /admin/users",
+  "fields": [
+   {
+    "name": "q",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "filter by name, username or (admin) email"
+   },
+   {
+    "name": "includeDeactivated",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "admin only: include deactivated accounts"
+   }
+  ]
+ },
+ {
+  "name": "user.preferences.update",
+  "tag": "user",
+  "summary": "Update language, theme, density, colour-blind mode, auto-logout, editor mode, home view, project order and subscription defaults",
+  "method": "PATCH",
+  "path": "/users/{id}/preferences",
+  "auth": "user",
+  "ui": "POST /ui/settings/preferences",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   },
+   {
+    "name": "language",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "locale tag e.g. en, de"
+   },
+   {
+    "name": "theme",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "auto|light|dark"
+   },
+   {
+    "name": "cardDensity",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "comfortable|compact"
+   },
+   {
+    "name": "colourBlindMode",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "none|protanopia|deuteranopia|tritanopia"
+   },
+   {
+    "name": "autoLogoutMinutes",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "idle minutes before the session ends; 0 disables"
+   },
+   {
+    "name": "defaultEditorMode",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "wysiwyg|markdown"
+   },
+   {
+    "name": "defaultHomeView",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "groupedByProject|gridProjects|groupedByList"
+   },
+   {
+    "name": "defaultProjectsOrder",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "byDefault|alphabetically|byCreationTime"
+   },
+   {
+    "name": "subscribeOwnCards",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "subscribeToCardWhenCommenting",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "turnOffRecentCardHighlighting",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "name": "enableFavoritesByDefault",
+    "in": "body",
+    "type": "bool",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "user.relink",
+  "tag": "user",
+  "summary": "Unlink a user's SSO identity so the next SSO login with their e-mail binds a (new) identity; ends their sessions",
+  "method": "POST",
+  "path": "/users/{id}/relink",
+  "auth": "admin",
+  "ui": "POST /ui/admin/users/{id}/relink",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.sessions.revokeAll",
+  "tag": "user",
+  "summary": "Sign a user out everywhere: revoke all of their sessions",
+  "method": "POST",
+  "path": "/users/{id}/sessions/revoke-all",
+  "auth": "admin",
+  "ui": "POST /ui/admin/users/{id}/sessions/revoke-all",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   }
+  ]
+ },
+ {
+  "name": "user.update",
+  "tag": "user",
+  "summary": "Update profile fields (phone, organization); name, email and role are managed by the identity provider",
+  "method": "PATCH",
+  "path": "/users/{id}",
+  "auth": "user",
+  "ui": "POST /ui/settings/profile (self) and POST /ui/admin/users/{id} (admin)",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\""
+   },
+   {
+    "name": "phone",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "organization",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "webhook.create",
+  "tag": "webhook",
+  "summary": "Create a webhook",
+  "method": "POST",
+  "path": "/webhooks",
+  "auth": "admin",
+  "ui": "POST /ui/admin/webhooks",
+  "fields": [
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "label"
+   },
+   {
+    "name": "url",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "http(s) endpoint receiving POSTs"
+   },
+   {
+    "name": "accessToken",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "sent as 'Authorization: Bearer \u003ctoken\u003e'; also the HMAC key when no secret is set"
+   },
+   {
+    "name": "secret",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "HMAC-SHA256 signing key (headers X-Weave-Signature: sha256=\u003chex\u003e and X-Weave-Signature-V2: t=\u003cts\u003e,v1=\u003chex\u003e; see docs/WEBHOOKS.md)"
+   },
+   {
+    "name": "events",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "only these event names (empty = all); see webhook.events"
+   },
+   {
+    "name": "excludedEvents",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "never send these event names"
+   },
+   {
+    "name": "projectId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "scope: only events inside this project"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "scope: only events inside this board"
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "scope: only events caused by this user"
+   }
+  ]
+ },
+ {
+  "name": "webhook.delete",
+  "tag": "webhook",
+  "summary": "Delete a webhook (and its delivery log)",
+  "method": "DELETE",
+  "path": "/webhooks/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/webhooks/{id}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "webhook.deliveries",
+  "tag": "webhook",
+  "summary": "Delivery log of a webhook (newest first)",
+  "method": "GET",
+  "path": "/webhooks/{id}/deliveries",
+  "auth": "admin",
+  "ui": "GET /admin/webhooks/{id}/deliveries",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "max rows (default 50, max 500)"
+   }
+  ]
+ },
+ {
+  "name": "webhook.events",
+  "tag": "webhook",
+  "summary": "List the event names webhooks can subscribe to",
+  "method": "GET",
+  "path": "/webhooks/events",
+  "auth": "admin",
+  "ui": "GET /admin/webhooks",
+  "fields": null
+ },
+ {
+  "name": "webhook.list",
+  "tag": "webhook",
+  "summary": "List webhooks",
+  "method": "GET",
+  "path": "/webhooks",
+  "auth": "admin",
+  "ui": "GET /admin/webhooks",
+  "fields": null
+ },
+ {
+  "name": "webhook.retry",
+  "tag": "webhook",
+  "summary": "Redeliver a logged webhook delivery (async, with backoff)",
+  "method": "POST",
+  "path": "/webhook-deliveries/{id}/retry",
+  "auth": "admin",
+  "ui": "POST /ui/admin/webhook-deliveries/{id}/retry",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "webhook.test",
+  "tag": "webhook",
+  "summary": "Send a synchronous 'ping' event to a webhook and report the result",
+  "method": "POST",
+  "path": "/webhooks/{id}/test",
+  "auth": "admin",
+  "ui": "POST /ui/admin/webhooks/{id}/test",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "id"
+   }
+  ]
+ },
+ {
+  "name": "webhook.update",
+  "tag": "webhook",
+  "summary": "Update a webhook",
+  "method": "PATCH",
+  "path": "/webhooks/{id}",
+  "auth": "admin",
+  "ui": "POST /ui/admin/webhooks/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "url",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "accessToken",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "secret",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "events",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false
+   },
+   {
+    "name": "excludedEvents",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false
+   },
+   {
+    "name": "projectId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": false
+   }
+  ]
+ }
+]

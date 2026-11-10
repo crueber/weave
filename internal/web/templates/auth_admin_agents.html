@@ -1,0 +1,50 @@
+{{define "title"}}AI agents - Weave{{end}}
+{{define "page"}}
+<link rel="stylesheet" href="/static/auth_pages.css">
+<link rel="stylesheet" href="/static/agents.css">
+<div class="auth-page"><h1>AI agents</h1>
+<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups">Groups</a> <a href="/admin/agents" aria-current="page">AI agents</a> <a href="/admin/sso">Single sign-on &amp; terms</a></nav>
+<div id="agents-body">{{template "agents-body" .}}</div></div>
+<script src="/static/auth_agents.js" defer></script>
+{{end}}
+
+{{define "agents-body"}}{{with .Data}}
+{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
+{{if .NewKey}}<section class="card auth-sec" role="status"><h2>API key for {{.NewKeyName}}</h2>
+  <p class="muted">Copy it now: it is shown once and cannot be recovered (rotate to issue a new one).</p>
+  <div class="agents-key"><code id="agent-key">{{.NewKey}}</code><button type="button" class="primary" data-copy="#agent-key">Copy</button></div>
+  <p class="muted">Use it as <code>WEAVE_TOKEN</code> for the CLI, or send <code>Authorization: Bearer &lt;key&gt;</code>.</p></section>{{end}}
+
+<p class="muted">Agents are service accounts without a login. They act through the API or CLI with their key, see only the boards you grant, and listen to the lists they attach to (the robot icon in a list header shows who listens).</p>
+
+<section class="card auth-sec"><h2>New agent</h2>
+  <form class="auth-form" hx-post="/ui/admin/agents" hx-target="#agents-body" method="post" action="/ui/admin/agents">
+    <label>Name<input name="name" required maxlength="100" placeholder="e.g. Triage bot"></label>
+    <div class="auth-grid">
+      <label>Role<select name="role"><option value="worker">worker</option><option value="boardUser">boardUser</option><option value="guest">guest</option></select></label>
+      <label>Board access<select name="boardRole"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select></label>
+      <label>API key expires<select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label>
+    </div>
+    {{if .Boards}}<fieldset class="agents-pick"><legend class="muted">Boards</legend>{{range .Boards}}<label class="inline"><input type="checkbox" name="boardIds" value="{{.ID}}"> {{.Name}}</label>{{end}}</fieldset>{{end}}
+    <button class="primary" type="submit">Create agent</button>
+  </form></section>
+
+{{range $a := .Agents}}
+<section class="card auth-sec {{if $a.IsDeactivated}}is-off{{end}}"><h2>{{template "auth_robot"}} {{$a.Name}} <span class="badge">{{$a.Role}}</span>{{if $a.IsDeactivated}} <span class="badge badge-warn">deactivated</span>{{end}}</h2>
+  <p class="muted">Key <code>{{if $a.KeyPrefix}}{{$a.KeyPrefix}}...{{else}}none{{end}}</code> &middot; created {{$a.CreatedAt}}{{if $a.APIKeyExpired}} &middot; <span class="badge badge-warn">key expired {{deref $a.APIKeyExpiresAt}}</span>{{else if $a.APIKeyExpiresAt}} &middot; expires {{deref $a.APIKeyExpiresAt}}{{end}}</p>
+  <ul class="agents-boards">{{range $a.Boards}}<li><a href="/boards/{{.BoardID}}">{{.BoardName}}</a> <span class="badge">{{.Role}}</span>
+    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/access"><input type="hidden" name="boardId" value="{{.BoardID}}"><input type="hidden" name="revoke" value="true"><button type="submit">Revoke</button></form></li>
+  {{else}}<li class="muted">No board access yet.</li>{{end}}</ul>
+  {{if $.Data.Boards}}<form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/access">
+    <select name="boardId" required aria-label="Board"><option value="">Grant access to...</option>{{range $.Data.Boards}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+    <select name="role" aria-label="Access"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select>
+    <button type="submit">Grant</button></form>{{end}}
+  <div class="auth-actions">
+    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/update"><input name="name" value="{{$a.Name}}" required aria-label="Name"><button type="submit">Rename</button></form>
+    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/update"><input type="hidden" name="isDeactivated" value="{{if $a.IsDeactivated}}false{{else}}true{{end}}"><button type="submit">{{if $a.IsDeactivated}}Activate{{else}}Deactivate{{end}}</button></form>
+    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/key" hx-target="#agents-body" hx-confirm="Issue a new key? The current key stops working immediately." method="post" action="/ui/admin/agents/{{$a.ID}}/key"><label class="inline">Expires <select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label> <button type="submit">Rotate key</button></form>
+    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/delete" hx-target="#agents-body" hx-confirm="Delete this agent? Its claims are released." method="post" action="/ui/admin/agents/{{$a.ID}}/delete"><button type="submit" class="danger">Delete</button></form>
+  </div>
+</section>
+{{else}}<p class="muted">No agents yet.</p>{{end}}
+{{end}}{{end}}

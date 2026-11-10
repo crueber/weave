@@ -1,0 +1,27 @@
+{{define "title"}}Search - Weave{{end}}
+{{define "notify_results"}}<div id="notify-results">
+{{if .Data.Q}}{{if not .Data.R.Items}}<p class="notify-empty">No results for "{{.Data.Q}}".</p>{{end}}{{end}}
+<ul class="notify-items">{{range .Data.R.Items}}
+<li class="notify-item"><div class="notify-body">
+  <div class="notify-summary"><span class="notify-kind">{{.Kind}}</span> <a href="{{.URL}}">{{.Title}}</a></div>
+  {{if .SnippetHTML}}<div class="notify-snippet">{{notifyHTML .SnippetHTML}}</div>{{end}}
+  <div class="notify-meta">{{if .ProjectName}}{{.ProjectName}}{{end}}{{if and .BoardName (ne .Kind "board")}} / {{.BoardName}}{{end}}</div>
+</div></li>{{end}}</ul>
+</div>{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<h1>Search</h1>
+<form action="/search" method="get" class="notify-search">
+  <input type="search" name="q" value="{{.Data.Q}}" placeholder="Search cards, comments, boards, projects" autofocus class="notify-wide"
+    hx-get="/ui/search" hx-trigger="keyup changed delay:300ms, search" hx-target="#notify-results" hx-swap="outerHTML" hx-include="[name=kind]">
+  {{$k := .Data.Kind}}<select name="kind" hx-get="/ui/search" hx-trigger="change" hx-target="#notify-results" hx-swap="outerHTML" hx-include="[name=q]">
+    <option value="">Everything</option>
+    <option value="card"{{if eq $k "card"}} selected{{end}}>Cards</option>
+    <option value="comment"{{if eq $k "comment"}} selected{{end}}>Comments</option>
+    <option value="board"{{if eq $k "board"}} selected{{end}}>Boards</option>
+    <option value="project"{{if eq $k "project"}} selected{{end}}>Projects</option>
+  </select>
+  <button class="notify-btn primary">Search</button>
+</form>
+{{template "notify_results" .}}
+</section>{{end}}

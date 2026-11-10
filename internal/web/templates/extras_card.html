@@ -1,0 +1,234 @@
+{{/* Card-sheet fragments owned by the cardextras domain. Each block renders one self-contained
+     .x-sec root that swaps itself (hx-target=this, outerHTML) after every mutation. The header row (.x-head)
+     holds the collapse toggle (state kept by cards_ui.js), the count and the section's quick "+ add" action;
+     everything else in .x-sec is hidden while the section is collapsed. */}}
+
+{{define "x-toggle"}}<h3 class="x-h"><button type="button" class="x-toggle" data-sec-toggle aria-expanded="true"><span class="x-chev" aria-hidden="true"></span>{{.title}}</button></h3>{{end}}
+
+{{define "tasks"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec" id="x-tasks" data-sec="tasks" hx-target="this" hx-swap="outerHTML">
+<header class="x-head">{{template "x-toggle" (xDict "title" "Checklists")}}
+  {{if $d.TasksTotal}}<span class="x-count" title="Items completed">{{$d.TasksDone}}/{{$d.TasksTotal}}</span>{{end}}
+  <div class="x-actions">{{if $d.CanEdit}}{{if $d.Lists}}<details class="x-pop x-addlist"><summary class="x-addbtn" title="Add a checklist">+ Checklist</summary>
+    <form class="x-popbody" hx-post="/ui/cards/{{$d.CardID}}/task-lists">
+      <input name="name" placeholder="New task list" aria-label="Checklist title" required autocomplete="off">
+      <label class="x-check"><input type="checkbox" name="showOnFrontOfCard"> on card face</label>
+      <button class="primary">Add list</button></form></details>{{end}}{{end}}</div>
+</header>
+{{if $d.TasksTotal}}<div class="x-bar x-bar-main" role="progressbar" aria-label="Checklist progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{xPct $d.TasksDone $d.TasksTotal}}"><i style="width:{{xPct $d.TasksDone $d.TasksTotal}}%"></i></div>{{end}}
+<div data-sortable="/ui/task-lists/reorder?_card={{$d.CardID}}" data-container="{{$d.CardID}}">
+{{range $l := $d.Lists}}
+<section class="x-tl" data-id="{{$l.ID}}">
+  <header class="x-tl-head"{{if $d.CanEdit}} draggable="true"{{end}}>
+    <strong class="x-tl-name">{{$l.Name}}</strong>
+    <span class="x-count">{{$l.TasksCompleted}}/{{$l.TasksTotal}}</span>
+    {{if $l.HideCompletedTasks}}<span class="x-chip">completed hidden</span>{{end}}
+    {{if $l.ShowOnFrontOfCard}}<span class="x-chip">on card face</span>{{end}}
+    {{if $d.CanEdit}}<details class="x-menu x-pop x-tl-menu"><summary aria-label="Checklist options" title="Checklist options">&hellip;</summary><div class="x-popbody">
+      <form hx-post="/ui/task-lists/{{$l.ID}}"><input name="name" value="{{$l.Name}}" aria-label="Checklist name" required><button>Rename</button></form>
+      <button hx-post="/ui/task-lists/{{$l.ID}}" hx-vals='{"hideCompletedTasks":"{{if $l.HideCompletedTasks}}false{{else}}true{{end}}"}'>{{if $l.HideCompletedTasks}}Show{{else}}Hide{{end}} completed tasks</button>
+      <button hx-post="/ui/task-lists/{{$l.ID}}" hx-vals='{"showOnFrontOfCard":"{{if $l.ShowOnFrontOfCard}}false{{else}}true{{end}}"}'>{{if $l.ShowOnFrontOfCard}}Hide from{{else}}Show on{{end}} card face</button>
+      <button class="x-danger" hx-post="/ui/task-lists/{{$l.ID}}/delete" hx-confirm="Delete this task list and its tasks?">Delete list</button>
+    </div></details>{{end}}
+  </header>
+  <div class="x-bar" role="progressbar" aria-label="{{$l.Name}} progress" aria-valuemin="0" aria-valuemax="{{$l.TasksTotal}}" aria-valuenow="{{$l.TasksCompleted}}"><i style="width:{{xPct $l.TasksCompleted $l.TasksTotal}}%"></i></div>
+  <ul class="x-tasks" data-sortable="/ui/tasks/reorder?_card={{$d.CardID}}" data-container="{{$l.ID}}">
+  {{range $t := $l.Tasks}}{{if or (not $t.IsCompleted) (not $l.HideCompletedTasks)}}
+    <li class="x-task{{if $t.IsCompleted}} done{{end}}" data-id="{{$t.ID}}"{{if $d.CanEdit}} draggable="true"{{end}}>
+      <input type="checkbox" aria-label="Completed: {{$t.Name}}"{{if $t.IsCompleted}} checked{{end}}{{if not $d.CanEdit}} disabled{{else}} hx-post="/ui/tasks/{{$t.ID}}" hx-trigger="change" data-bool-param="isCompleted"{{end}}>
+      <span class="x-grow x-ttext">{{$t.Name}}</span>
+      {{if $t.LinkedCardID}}<a class="x-chip" href="/cards/{{deref $t.LinkedCardID}}">card: {{deref $t.LinkedCardName}}{{if $t.LinkedCardClosed}} (closed){{end}}</a>{{end}}
+      {{if $t.AssigneeName}}<span class="x-chip" title="Assignee">{{deref $t.AssigneeName}}</span>{{end}}
+      {{if $d.CanEdit}}<details class="x-menu x-pop x-tmenu"><summary aria-label="Edit task" title="Edit task">&hellip;</summary><div class="x-popbody">
+        <form hx-post="/ui/tasks/{{$t.ID}}">
+          <input name="name" value="{{$t.Name}}" aria-label="Task" required>
+          <select name="assigneeUserId" aria-label="Assignee"><option value="">Unassigned</option>
+            {{range $d.Members}}<option value="{{.ID}}"{{if and $t.AssigneeUserID (eq (deref $t.AssigneeUserID) .ID)}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+          <select name="linkedCardId" aria-label="Linked card"><option value="">No linked card</option>
+            {{range $d.Cards}}<option value="{{.ID}}"{{if and $t.LinkedCardID (eq (deref $t.LinkedCardID) .ID)}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+          <button class="primary">Save</button>
+        </form>
+        <button class="x-danger" hx-post="/ui/tasks/{{$t.ID}}/delete" hx-confirm="Delete this task?">Delete task</button>
+      </div></details>{{end}}
+    </li>
+  {{end}}{{end}}
+  </ul>
+  {{if $d.CanEdit}}<form class="x-additem" hx-post="/ui/task-lists/{{$l.ID}}/tasks" data-add-task="{{$l.ID}}">
+    <input name="name" class="x-grow" placeholder="Add an item (Enter adds, paste a list for many)" aria-label="Add an item to {{$l.Name}}" autocomplete="off" required data-task-input>
+    <details class="x-more x-pop"><summary aria-label="Assign or link a card" title="Assign or link a card">&hellip;</summary><div class="x-popbody">
+      <select name="assigneeUserId" aria-label="Assignee"><option value="">Unassigned</option>{{range $d.Members}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+      <select name="linkedCardId" aria-label="Link a card"><option value="">No linked card</option>{{range $d.Cards}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></div></details>
+    <button class="x-addbtn">Add</button></form>{{end}}
+</section>
+{{else}}<p class="x-muted x-empty">No task lists yet.</p>{{end}}
+</div>
+{{if $d.CanEdit}}{{if not $d.Lists}}<form class="x-row x-newlist" hx-post="/ui/cards/{{$d.CardID}}/task-lists">
+  <input name="name" class="x-grow" placeholder="New task list (e.g. Launch steps)" aria-label="Checklist title" required autocomplete="off" data-task-input>
+  <label class="x-check"><input type="checkbox" name="showOnFrontOfCard"> on card face</label>
+  <button class="primary">Add list</button></form>{{end}}{{end}}
+</div>{{end}}
+
+{{define "comments"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec x-comments" id="x-comments" data-sec="comments" data-count="{{$d.Comments.Total}}" hx-target="this" hx-swap="outerHTML">
+<h3 class="sr-only">Comments <span>({{$d.Comments.Total}})</span></h3>
+{{if not $d.Comments.CanComment}}<p class="x-muted">You do not have permission to comment.</p>{{end}}
+{{range $c := $d.Comments.Items}}
+<article class="x-comment">
+  <span class="x-avatar" aria-hidden="true">{{xInitial $c.UserName}}</span>
+  <div class="x-cbody">
+    <header class="x-chead"><strong>{{if $c.UserName}}{{deref $c.UserName}}{{else}}Deleted user{{end}}</strong>
+      <span class="x-muted" title="{{xDate $c.CreatedAt}}">{{xAgo $c.CreatedAt}}{{if $c.UpdatedAt}} (edited){{end}}</span>
+      {{if or $c.CanEdit $c.CanDelete}}<details class="x-menu x-pop x-cmenu"><summary aria-label="Comment actions" title="Comment actions">&hellip;</summary><div class="x-popbody">
+        {{if $c.CanEdit}}<form hx-post="/ui/comments/{{$c.ID}}"><textarea name="text" rows="3" class="x-full" aria-label="Edit comment" required>{{$c.Text}}</textarea><button class="primary">Save</button></form>{{end}}
+        {{if $c.CanDelete}}<button class="x-danger" hx-post="/ui/comments/{{$c.ID}}/delete" hx-confirm="Delete this comment?">Delete</button>{{end}}
+      </div></details>{{end}}</header>
+    <div class="x-text">{{$c.Text}}</div>
+  </div>
+</article>
+{{else}}<p class="x-muted x-empty">No comments yet.</p>{{end}}
+{{if $d.HasMore}}<button class="x-more-btn" hx-get="/ui/cards/{{$d.CardID}}/comments?limit={{$d.NextLimit}}">Show older comments</button>{{end}}
+</div>{{end}}
+
+{{define "attachments"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec" id="x-attachments" data-sec="attachments" hx-target="this" hx-swap="outerHTML">
+<header class="x-head">{{template "x-toggle" (xDict "title" "Attachments")}}
+  {{if $d.Files}}<span class="x-count">{{len $d.Files}}</span>{{end}}
+  <div class="x-actions">{{if $d.CanEdit}}
+  <form class="x-upload" hx-post="/ui/cards/{{$d.CardID}}/attachments" hx-encoding="multipart/form-data" hx-trigger="change">
+    <label class="x-addbtn" title="Attach files (a)">+ File<input type="file" name="file" multiple required class="x-fileinput" data-attach-input aria-label="Attach files"></label></form>
+  <details class="x-pop x-addlink"><summary class="x-addbtn">+ Link</summary>
+    <form class="x-popbody" hx-post="/ui/cards/{{$d.CardID}}/attachments">
+      <input type="url" name="url" placeholder="https://..." aria-label="Link address" required><input name="name" placeholder="Name (optional)" aria-label="Link name"><button class="primary">Add link</button></form></details>
+  {{end}}</div>
+</header>
+<ul class="x-files">
+{{range $a := $d.Files}}
+  <li class="x-file{{if $a.IsCover}} is-cover{{end}}">
+    {{if $a.ThumbnailURL}}<a class="x-thumb" href="{{$a.DownloadURL}}" target="_blank" rel="noopener"><img src="{{$a.ThumbnailURL}}" alt="{{$a.Name}}" loading="lazy"></a>
+    {{else if eq $a.Type "link"}}<a class="x-thumb x-thumb-ext" href="{{deref $a.URL}}" target="_blank" rel="noopener noreferrer" aria-hidden="true" tabindex="-1"><span class="x-ext">LINK</span></a>
+    {{else}}<a class="x-thumb x-thumb-ext" href="{{$a.DownloadURL}}" aria-hidden="true" tabindex="-1"><span class="x-ext">FILE</span></a>{{end}}
+    <div class="x-fmeta">
+      {{if eq $a.Type "link"}}<a class="x-fname" href="{{deref $a.URL}}" target="_blank" rel="noopener noreferrer" title="{{$a.Name}}">{{$a.Name}}</a>
+      {{else}}<a class="x-fname" href="{{$a.DownloadURL}}" title="{{$a.Name}}">{{$a.Name}}</a>{{end}}
+      <span class="x-muted x-fsub">{{if ne $a.Type "link"}}{{xBytes $a.Size}} &middot; {{end}}{{xAgo $a.CreatedAt}}{{if $a.CreatorName}} &middot; {{deref $a.CreatorName}}{{end}}</span>
+      {{if $a.IsCover}}<span class="x-chip x-coverchip">cover</span>{{end}}
+    </div>
+    {{if $d.CanEdit}}<details class="x-menu x-pop x-fmenu"><summary aria-label="Attachment options" title="Attachment options">&hellip;</summary><div class="x-popbody">
+      <form hx-post="/ui/attachments/{{$a.ID}}"><input name="name" value="{{$a.Name}}" aria-label="Name" required><button>Rename</button></form>
+      {{if $a.IsImage}}{{if $a.IsCover}}<button hx-post="/ui/attachments/{{$a.ID}}/cover" hx-vals='{"unset":"true"}'>Remove cover</button>
+      {{else}}<button hx-post="/ui/attachments/{{$a.ID}}/cover">Make cover</button>{{end}}{{end}}
+      <button class="x-danger" hx-post="/ui/attachments/{{$a.ID}}/delete" hx-confirm="Delete this attachment?">Delete</button>
+    </div></details>{{end}}
+  </li>
+{{else}}<li class="x-empty-drop x-muted">{{if $d.CanEdit}}No attachments yet. Drop files on the card, paste an image, or use + File.{{else}}No attachments.{{end}}</li>{{end}}
+</ul>
+<p class="x-foot"><a href="/boards/{{$d.BoardID}}/media">Browse all board media</a></p>
+</div>{{end}}
+
+{{define "x-cell"}}{{$v := index .r.Values .f.ID}}{{$d := .d}}
+{{if not $d.CanEdit}}{{if eq .f.Type "checkbox"}}{{if eq $v "true"}}Yes{{else}}No{{end}}{{else if eq .f.Type "url"}}{{if $v}}<a href="{{$v}}" rel="noopener noreferrer" target="_blank">{{$v}}</a>{{end}}{{else}}{{$v}}{{end}}
+{{else}}<form hx-post="/ui/cards/{{$d.CardID}}/custom-field-values" hx-trigger="change">
+  <input type="hidden" name="groupId" value="{{.g.ID}}"><input type="hidden" name="fieldId" value="{{.f.ID}}"><input type="hidden" name="rowId" value="{{.r.ID}}">
+  {{if eq .f.Type "checkbox"}}<input type="checkbox" name="content" value="true" aria-label="{{.f.Name}}"{{if eq $v "true"}} checked{{end}}><input type="hidden" name="content" value="false">
+  {{else if eq .f.Type "select"}}<select name="content" aria-label="{{.f.Name}}"><option value="">-</option>{{range .f.Options}}<option value="{{.}}"{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq .f.Type "number"}}<input type="number" step="any" name="content" value="{{$v}}" aria-label="{{.f.Name}}" placeholder="-">
+  {{else if eq .f.Type "date"}}<input type="date" name="content" value="{{xDateInput $v}}" aria-label="{{.f.Name}}">
+  {{else if eq .f.Type "url"}}<input type="url" name="content" value="{{$v}}" placeholder="https://..." aria-label="{{.f.Name}}">
+  {{else}}<input type="text" name="content" value="{{$v}}" aria-label="{{.f.Name}}" placeholder="-">{{end}}
+</form>{{end}}{{end}}
+
+{{define "fields"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec" id="x-fields" data-sec="fields" hx-target="this" hx-swap="outerHTML">
+<header class="x-head">{{template "x-toggle" (xDict "title" "Custom fields")}}
+  <div class="x-actions">{{if $d.CanEdit}}<details class="x-pop x-addgroup"><summary class="x-addbtn">+ Group</summary><div class="x-popbody">
+  <form hx-post="/ui/custom-field-groups">
+    <input type="hidden" name="cardId" value="{{$d.CardID}}">
+    <input name="name" placeholder="Group name" aria-label="Group name" required>
+    <label class="x-check"><input type="checkbox" name="repeatable"> repeatable table</label><button class="primary">Add to this card</button></form>
+  <form hx-post="/ui/custom-field-groups">
+    <input type="hidden" name="_card" value="{{$d.CardID}}"><input type="hidden" name="boardId" value="{{$d.BoardID}}">
+    <input name="name" placeholder="Group name" aria-label="Group name for every card" required>
+    <label class="x-check"><input type="checkbox" name="repeatable"> repeatable table</label><button>Add to every card on the board</button></form>
+  </div></details>{{end}}</div>
+</header>
+<div data-sortable="/ui/custom-field-groups/reorder?_card={{$d.CardID}}" data-container="{{$d.CardID}}">
+{{range $g := $d.Groups}}
+<section class="x-fg" data-id="{{$g.ID}}">
+  <header class="x-fg-head"{{if $d.CanEdit}} draggable="true"{{end}}>
+    <strong>{{$g.Name}}</strong>
+    {{if eq $g.Scope "board"}}<span class="x-chip">board-wide</span>{{end}}{{if $g.Repeatable}}<span class="x-chip">table</span>{{end}}
+    {{if $d.CanEdit}}<details class="x-menu x-pop x-fg-menu"><summary aria-label="Manage group" title="Manage group">&hellip;</summary><div class="x-popbody">
+      <form hx-post="/ui/custom-field-groups/{{$g.ID}}"><input type="hidden" name="_card" value="{{$d.CardID}}"><input name="name" value="{{$g.Name}}" aria-label="Group name" required><button>Rename</button></form>
+      <button hx-post="/ui/custom-field-groups/{{$g.ID}}" hx-vals='{"_card":"{{$d.CardID}}","repeatable":"{{if $g.Repeatable}}false{{else}}true{{end}}"}'>Make {{if $g.Repeatable}}single value{{else}}repeatable table{{end}}</button>
+      <button class="x-danger" hx-post="/ui/custom-field-groups/{{$g.ID}}/delete" hx-vals='{"_card":"{{$d.CardID}}"}' hx-confirm="Delete this group, its fields and values?">Delete group</button>
+      <ul class="x-flist">{{range $f := $g.Fields}}<li class="x-row"><span class="x-grow">{{$f.Name}} <span class="x-muted">({{$f.Type}}{{if $f.Options}}: {{xJoin $f.Options}}{{end}})</span></span>
+        {{if not $g.BaseGroupID}}
+        <button hx-post="/ui/custom-fields/{{$f.ID}}" hx-vals='{"_card":"{{$d.CardID}}","showOnFrontOfCard":"{{if $f.ShowOnFrontOfCard}}false{{else}}true{{end}}"}'>{{if $f.ShowOnFrontOfCard}}Hide from{{else}}Show on{{end}} card face</button>
+        <button class="x-danger" hx-post="/ui/custom-fields/{{$f.ID}}/delete" hx-vals='{"_card":"{{$d.CardID}}"}' hx-confirm="Delete this field and its values?">Delete</button>{{end}}</li>{{end}}</ul>
+      {{if not $g.BaseGroupID}}<form hx-post="/ui/custom-fields">
+        <input type="hidden" name="_card" value="{{$d.CardID}}"><input type="hidden" name="groupId" value="{{$g.ID}}">
+        <input name="name" placeholder="New field" aria-label="New field name" required>
+        <select name="type" aria-label="Field type">{{range $d.Types}}<option>{{.}}</option>{{end}}</select>
+        <input name="options" placeholder="Options (select), comma separated" aria-label="Options">
+        <label class="x-check"><input type="checkbox" name="showOnFrontOfCard"> card face</label><button class="primary">Add field</button></form>{{end}}
+    </div></details>{{end}}
+  </header>
+  {{if $g.Repeatable}}
+  <div class="x-tablewrap"><table class="x-table"><thead><tr><th class="x-grip-h"><span class="sr-only">Reorder</span></th>{{range $g.Fields}}<th scope="col">{{.Name}}</th>{{end}}<th><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody data-sortable="/ui/custom-field-rows/reorder?_card={{$d.CardID}}" data-container="{{$g.ID}}">
+    {{range $r := $g.Rows}}<tr data-id="{{$r.ID}}"{{if $d.CanEdit}} draggable="true"{{end}}><td class="x-grip" aria-hidden="true">::</td>
+      {{range $f := $g.Fields}}<td>{{template "x-cell" (xDict "d" $d "g" $g "f" $f "r" $r)}}</td>{{end}}
+      <td>{{if $d.CanEdit}}<button class="x-rowdel" aria-label="Remove row" title="Remove row" hx-post="/ui/custom-field-rows/{{$r.ID}}/delete" hx-confirm="Delete this row?">&times;<span class="sr-only">Remove</span></button>{{end}}</td></tr>
+    {{else}}<tr><td colspan="{{len $g.Fields}}" class="x-muted">No rows.</td></tr>{{end}}
+    </tbody></table></div>
+  {{if $d.CanEdit}}<button class="x-addrow" hx-post="/ui/cards/{{$d.CardID}}/custom-field-groups/{{$g.ID}}/rows">+ Add row</button>{{end}}
+  {{else}}
+  <dl class="x-dl">{{range $r := $g.Rows}}{{range $f := $g.Fields}}<dt>{{$f.Name}}</dt><dd>{{template "x-cell" (xDict "d" $d "g" $g "f" $f "r" $r)}}</dd>{{end}}{{end}}</dl>
+  {{end}}
+</section>
+{{else}}<p class="x-muted x-empty">No custom fields.</p>{{end}}
+</div>
+</div>{{end}}
+
+{{define "time"}}{{$d := .Data}}{{$t := $d.Time}}<link rel="stylesheet" href="/static/extras_card.css"><script src="/static/extras_card.js"></script>
+<div class="x-sec" id="x-time" data-sec="time" hx-target="this" hx-swap="outerHTML">
+<header class="x-head">{{template "x-toggle" (xDict "title" "Time tracking")}}</header>
+<div class="x-timer{{if $t.Running}} is-running{{end}}">
+  <span class="x-big x-clock"{{if $t.Running}} data-started="{{deref $t.StartedAt}}" data-base="{{$t.RecordedSeconds}}"{{end}}>{{xDur $t.TotalSeconds}}</span>
+  {{if $d.CanEdit}}{{if $t.Running}}<button class="x-timebtn is-stop" hx-post="/ui/cards/{{$d.CardID}}/time/stop"><span aria-hidden="true">&#9632;</span> Stop</button>
+  {{else}}<button class="x-timebtn is-start" hx-post="/ui/cards/{{$d.CardID}}/time/start"><span aria-hidden="true">&#9654;</span> Start</button>{{end}}{{end}}
+</div>
+{{if $t.Running}}<p class="x-muted x-running"><span class="x-dot" aria-hidden="true"></span>running{{if $t.RunningUserName}} ({{deref $t.RunningUserName}}){{end}}</p>{{end}}
+<details class="x-log"><summary>Time log{{if $t.Entries}} ({{len $t.Entries}}){{end}}</summary>
+<table class="x-table x-entries"><tbody>
+{{range $e := $t.Entries}}<tr><td>{{xDate $e.StartedAt}}</td><td>{{if $e.UserName}}{{deref $e.UserName}}{{end}}</td><td class="x-dur">{{xDur $e.Seconds}}</td><td>{{if $e.Note}}{{deref $e.Note}}{{end}}</td>
+  <td>{{if $d.CanEdit}}<button class="x-rowdel" aria-label="Delete entry" title="Delete entry" hx-post="/ui/time-entries/{{$e.ID}}/delete" hx-confirm="Delete this entry?">&times;<span class="sr-only">Delete</span></button>{{end}}</td></tr>
+{{else}}<tr><td class="x-muted">No time recorded.</td></tr>{{end}}
+</tbody></table>
+{{if $d.CanEdit}}<form class="x-addtime" hx-post="/ui/cards/{{$d.CardID}}/time-entries">
+  <span class="x-row"><input type="number" name="hours" min="0" value="0" aria-label="Hours" class="x-num">h
+  <input type="number" name="minutes" min="0" value="0" aria-label="Minutes" class="x-num">m</span>
+  <input name="note" class="x-grow" placeholder="Note (optional)" aria-label="Note"><button>Add time</button></form>
+<button class="x-quiet x-reset" hx-post="/ui/cards/{{$d.CardID}}/time/reset" hx-confirm="Delete all time entries?">Reset all time</button>{{end}}
+</details>
+</div>{{end}}
+
+{{define "activity"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec x-act" id="x-activity" data-sec="activity" hx-target="this" hx-swap="outerHTML">
+<h3 class="sr-only">Activity</h3>
+<ul class="x-activity">
+{{range $a := $d.Actions}}<li><span class="x-avatar x-avatar-sm" aria-hidden="true">{{xInitial $a.UserName}}</span><span class="x-atext"><strong>{{if $a.UserName}}{{deref $a.UserName}}{{else}}Someone{{end}}</strong> {{xAction $a}} <span class="x-muted" title="{{xDate $a.CreatedAt}}">{{xAgo $a.CreatedAt}}</span></span></li>
+{{else}}<li class="x-muted">No activity yet.</li>{{end}}
+</ul>
+{{if $d.HasMore}}<button class="x-more-btn" hx-get="/ui/cards/{{$d.CardID}}/activity?limit={{$d.NextLimit}}">Show more</button>{{end}}
+</div>{{end}}
+
+{{define "board-activity"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-sec" id="x-board-activity" hx-target="this" hx-swap="outerHTML">
+<h3>Board activity</h3>
+<ul class="x-activity">
+{{range $a := $d.Actions}}<li><span class="x-avatar">{{xInitial $a.UserName}}</span> <strong>{{if $a.UserName}}{{deref $a.UserName}}{{else}}Someone{{end}}</strong> {{xAction $a}}{{if $a.CardName}} on <a href="/cards/{{deref $a.CardID}}">{{deref $a.CardName}}</a>{{end}} <span class="x-muted">{{xDate $a.CreatedAt}}</span></li>
+{{else}}<li class="x-muted">No activity yet.</li>{{end}}
+</ul>
+{{if $d.HasMore}}<button hx-get="/ui/boards/{{$d.BoardID}}/activity?limit={{$d.NextLimit}}">Show more</button>{{end}}
+</div>{{end}}

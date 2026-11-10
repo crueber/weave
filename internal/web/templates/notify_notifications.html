@@ -1,0 +1,24 @@
+{{define "title"}}Notifications - Weave{{end}}
+{{define "notify_badge"}}Inbox{{if .Data.Count}} <span class="notify-count">{{.Data.Count}}</span>{{end}}{{end}}
+{{define "notify_list"}}<div id="notify-list">
+{{if not .Data.L.Items}}<p class="notify-empty">{{if .Data.Unread}}No unread notifications.{{else}}You have no notifications yet.{{end}}</p>{{end}}
+<ul class="notify-items">{{range .Data.L.Items}}
+<li class="notify-item{{if not .IsRead}} unread{{end}}" id="notif-{{.ID}}">
+  <div class="notify-body">
+    <div class="notify-summary">{{.Summary}}</div>
+    <div class="notify-meta">{{if .CardID}}<a href="/cards/{{.CardID}}">{{.CardName}}</a>{{end}}{{if .BoardName}} &middot; <a href="/boards/{{.BoardID}}">{{.BoardName}}</a>{{end}} &middot; {{notifyTime .CreatedAt}}</div>
+  </div>
+  {{if not .IsRead}}<button class="notify-btn" hx-post="/ui/notifications/{{.ID}}/read" hx-target="#notify-list" hx-swap="outerHTML" title="Mark as read">Mark read</button>{{end}}
+</li>{{end}}</ul>
+</div>{{end}}
+{{define "notify_list_oob"}}{{template "notify_list" .}}<a id="notif-badge" href="/notifications" hx-swap-oob="innerHTML:#notif-badge">{{template "notify_badge" .}}</a>{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<div class="notify-head"><h1>Notifications{{if .Data.L.UnreadCount}} <span class="notify-count">{{.Data.L.UnreadCount}}</span>{{end}}</h1>
+  <div class="notify-actions">
+    {{if .Data.Unread}}<a href="/notifications">Show all</a>{{else}}<a href="/notifications?unread=1">Only unread</a>{{end}}
+    <a href="/notification-services">Notification services</a>
+    <button class="notify-btn" hx-post="/ui/notifications/read-all" hx-target="#notify-list" hx-swap="outerHTML">Mark all as read</button>
+  </div></div>
+{{template "notify_list" .}}
+</section>{{end}}

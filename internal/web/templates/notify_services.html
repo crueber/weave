@@ -1,0 +1,24 @@
+{{define "title"}}Notification services - Weave{{end}}
+{{define "notify_services_list"}}<div id="notify-svc-list">
+{{if not .Data.Items}}<p class="notify-empty">No notification services configured.</p>{{end}}
+{{range .Data.Items}}{{$f := .Format}}<form class="notify-card notify-svc" hx-post="/ui/notification-services/{{.ID}}" hx-target="#notify-svc-list" hx-swap="outerHTML">
+  <input type="hidden" name="boardId" value="{{$.Data.BoardID}}">
+  <label>URL <input type="text" name="url" value="{{.URL}}" required class="notify-wide"></label>
+  <label>Format <select name="format"><option{{if eq $f "text"}} selected{{end}}>text</option><option{{if eq $f "markdown"}} selected{{end}}>markdown</option><option{{if eq $f "html"}} selected{{end}}>html</option></select></label>
+  <button class="notify-btn">Save</button>
+  <button class="notify-btn" type="button" hx-post="/ui/notification-services/{{.ID}}/test" hx-swap="none">Send test</button>
+  <button class="notify-btn danger" type="button" hx-post="/ui/notification-services/{{.ID}}/delete" hx-target="#notify-svc-list" hx-swap="outerHTML" hx-confirm="Remove this service?">Delete</button>
+</form>{{end}}
+<form class="notify-card notify-svc" hx-post="/ui/notification-services" hx-target="#notify-svc-list" hx-swap="outerHTML">
+  <input type="hidden" name="boardId" value="{{.Data.BoardID}}">
+  <label>New service URL <input type="text" name="url" placeholder="discord://token@webhookid" required class="notify-wide"></label>
+  <label>Format <select name="format"><option>text</option><option>markdown</option><option>html</option></select></label>
+  <button class="notify-btn primary">Add service</button>
+</form>
+</div>{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<div class="notify-head"><h1>Notification services</h1><div class="notify-actions"><a href="/notifications">Back to notifications</a></div></div>
+<p class="notify-help">Send your notifications to chat or push services using shoutrrr URLs (Discord, Slack, Telegram, ntfy, generic webhooks, ...). Board-level services are configured in the board settings.</p>
+{{template "notify_services_list" .}}
+</section>{{end}}

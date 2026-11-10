@@ -1,0 +1,12 @@
+log:
+  level: info
+runner:
+  file: .runner
+  capacity: 1
+  timeout: 3h
+container:
+  # give job containers the host docker socket so the package job can build images
+  options: "-v /var/run/docker.sock:/var/run/docker.sock"
+  valid_volumes:
+    - /var/run/docker.sock
+  docker_host: "-"

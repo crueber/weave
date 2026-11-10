@@ -1,0 +1,34 @@
+{{define "title"}}Projects - Weave{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/projects_ui.css">
+<section class="projects-home">
+  <header class="projects-bar">
+    <h1>Projects</h1>
+    <form id="projects-filter" class="projects-filter" hx-get="/ui/projects/list" hx-target="#project-list" hx-trigger="change, keyup changed delay:300ms from:input[name=search]">
+      <input type="search" name="search" placeholder="Search projects" value="{{.Data.Search}}" aria-label="Search projects">
+      <select name="view" aria-label="View">
+        <option value="groupedProjects"{{if eq .Data.View "groupedProjects"}} selected{{end}}>Grouped</option>
+        <option value="gridProjects"{{if eq .Data.View "gridProjects"}} selected{{end}}>Grid</option>
+      </select>
+      <select name="order" aria-label="Order">
+        <option value="byDefault"{{if eq .Data.Order "byDefault"}} selected{{end}}>Default order</option>
+        <option value="alphabetically"{{if eq .Data.Order "alphabetically"}} selected{{end}}>Alphabetical</option>
+        <option value="byCreationTime"{{if eq .Data.Order "byCreationTime"}} selected{{end}}>Newest first</option>
+      </select>
+      <label class="projects-check"><input type="checkbox" name="hidden" value="true"{{if .Data.Hidden}} checked{{end}}> Show hidden</label>
+    </form>
+    {{if .Data.CanCreate}}<button class="primary" hx-get="/ui/projects/new" hx-target="#modal">New project</button>{{end}}
+  </header>
+  <div id="project-list">{{template "projects-list" .}}</div>
+</section>{{end}}
+
+{{define "projects-list"}}{{if not .Data.Sections}}<div class="empty-state"><span class="empty-art" aria-hidden="true">{{if .Data.Search}}&#128270;{{else}}&#127793;{{end}}</span>{{if .Data.Search}}<h2>Nothing matches that</h2><p>No projects match your search. Try a different word, or clear the filter.</p>{{else}}<h2>A fresh start</h2><p>You have no projects yet.{{if .Data.CanCreate}} Create your first project and start weaving work together.{{else}} Ask an administrator to create a project or make you a project owner.{{end}}</p>{{if .Data.CanCreate}}<button class="primary" hx-get="/ui/projects/new" hx-target="#modal">Create a project</button>{{end}}{{end}}</div>{{end}}
+{{range .Data.Sections}}<section class="projects-section">{{if .Title}}<h2>{{.Title}}</h2>{{end}}
+  <div class="projects-grid">{{range .Projects}}{{template "projects-card" dict "P" .}}{{end}}</div>
+</section>{{end}}{{end}}
+
+{{define "projects-new"}}<form class="projects-dialog" hx-post="/ui/projects" hx-target="#toasts" hx-swap="beforeend">
+  <h2>Create project</h2>
+  <label>Name <input name="name" required maxlength="128" autofocus></label>
+  <label>Description <textarea name="description" rows="3" maxlength="1024"></textarea></label>
+  <footer><button type="button" data-close-dialog>Cancel</button> <button class="primary">Create</button></footer>
+</form>{{end}}

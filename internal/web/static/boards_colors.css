@@ -1,0 +1,127 @@
+/* Board / column / card colours, the colour picker, and the list menu popover.
+   Loaded after boards_board.css. No gradients: every colour is a flat fill; large areas are TINTS
+   (color-mix over a theme surface) and the full colour is only used for 3-4px bars and swatches.
+
+   Inputs (all validated #rrggbb, emitted by the server):
+     --board-color  on #board-shell            (board colour)
+     --list-color   on .boards-col[data-colored]
+     --card-color   on .boards-tile[data-card-fill]   (colour of the card's FIRST label; colours are never mixed) */
+
+:root{--tint-board:8%;--tint-list:6%;--tint-fill:20%}
+:root[data-theme="dark"]{--tint-board:6%;--tint-list:6%;--tint-fill:24%}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--tint-board:6%;--tint-list:6%;--tint-fill:24%}}
+
+/* ---- board colour: tinted canvas (full-bleed inside <main>) + a 4px accent bar under the header ---- */
+.boards-shell[data-board-color]{
+  background:color-mix(in oklab,var(--board-color) var(--tint-board),var(--bg));
+  margin:calc(-1*var(--space-5)) calc(-1*var(--space-4)) 0;padding:var(--space-4) var(--space-4) var(--space-5);
+  min-height:calc(100vh - var(--topbar-h));
+}
+@media(max-width:640px){.boards-shell[data-board-color]{margin:calc(-1*var(--space-4)) calc(-1*var(--space-3)) 0;padding:var(--space-3)}}
+.boards-shell[data-board-color] .boards-head{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
+
+/* ---- column colour: full-colour 3px top bar always; a faint tint of the body in PILL mode only ----
+   In FILL mode (data-card-mode="fill") the column body stays neutral: a filled card inside a tinted column would mix two
+   colours. Secondary text on a tint uses --fg-2 (checked in scripts/check-contrast.py: --muted is not AA on every tint). */
+.boards-col[data-colored] .boards-col-head{border-top-color:var(--list-color)}
+.boards-col[data-colored]:not([data-card-mode="fill"]){--muted:var(--fg-2);background:color-mix(in oklab,var(--list-color) var(--tint-list),var(--list-bg))}
+.boards-col[data-colored]:not([data-card-mode="fill"]):hover{background:color-mix(in oklab,var(--list-color) var(--tint-list),var(--list-bg-hover))}
+.boards-col[data-colored].is-origin,.boards-col[data-colored].is-origin:hover{background:var(--accent-soft)}
+
+/* ---- card fill mode: one colour (first label), tint + 3px left edge, text stays --fg ---- */
+.boards-tile[data-card-fill]{
+  --muted:var(--fg-2);
+  --card-bg:color-mix(in oklab,var(--card-color) var(--tint-fill),var(--tile-bg));
+  background:var(--card-bg);
+  border-left:3px solid var(--card-color);padding-left:calc(.6rem - 2px);
+}
+.boards-tile[data-card-fill]:hover,.boards-tile[data-card-fill]:focus-within{border-left-color:var(--card-color)}
+.boards-tile[data-card-fill] .boards-tile-cover{margin-left:calc(-.6rem + 2px)}
+/* drag placeholder keeps its dashed accent look (the ghost is a clone and keeps the fill) */
+.boards-tile[data-card-fill].is-origin{background:var(--accent-soft);border:2px dashed var(--drop-indicator,var(--accent));padding-left:.6rem}
+/* other labels on a filled card: neutral outline text chips (.boards-lchip, never the compact .boards-label bars).
+   Natural width, wrapping onto more lines; ellipsis only when one name is longer than the tile. */
+.boards-lchips{gap:.25rem}
+.boards-lchip{display:inline-block;max-width:100%;box-sizing:border-box;padding:0 .5rem;border:1px solid color-mix(in oklab,var(--fg) 35%,transparent);border-radius:var(--radius-pill);color:var(--fg-2);font-size:.72rem;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* meta on a filled tile: neutral surfaces only (an overdue red badge must never sit on a coloured tile) */
+.boards-tile[data-card-fill] .boards-tile-meta{color:var(--fg-2)}
+.boards-tile[data-card-fill] .boards-due{background:var(--surface);color:var(--fg);border:1px solid var(--border-strong)}
+.boards-tile[data-card-fill] .boards-due-overdue{color:var(--danger);border-color:var(--danger);font-weight:600}
+.boards-tile[data-card-fill] .boards-due-soon{color:var(--warning);border-color:var(--warning)}
+.boards-tile[data-card-fill] .boards-due-done{color:var(--success);border-color:var(--success)}
+.boards-tile[data-card-fill] .boards-prog.is-done{color:var(--fg-2)}
+.boards-tile[data-card-fill] .boards-bar{background:var(--surface);border:1px solid var(--border-strong);box-sizing:border-box}
+.boards-tile[data-card-fill] .boards-bar i{background:var(--fg-2)}
+.boards-tile[data-card-fill] .boards-prog.is-done .boards-bar i{background:var(--success)}
+.boards-tile[data-card-fill] .boards-avatar{background:var(--surface);color:var(--fg);border-color:var(--card-bg);box-shadow:0 0 0 1px var(--border-strong)}
+.boards-tile[data-card-fill] .boards-badge{background:var(--surface);color:var(--fg);border:1px solid var(--border-strong)}
+.boards-tile[data-card-fill] .boards-tile-edit{background:var(--surface);color:var(--fg-2)}
+
+/* ---- colour picker (boards_color_picker) ---- */
+.bcp{display:flex;flex-direction:column;gap:.5rem;min-width:0}
+.bcp-swatches{display:flex;flex-wrap:wrap;gap:.4rem}
+.bcp-sw{position:relative;width:1.5rem;height:1.5rem;display:block;cursor:pointer}
+.bcp-sw[hidden]{display:none}
+.bcp-sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.bcp-sw i{position:absolute;inset:0;border-radius:50%;background:var(--sw,var(--surface));border:1px solid color-mix(in oklab,var(--fg) 22%,transparent);box-sizing:border-box;transition:transform var(--dur-fast)}
+.bcp-sw:hover i{transform:scale(1.12)}
+.bcp-sw input:checked+i{border:2px solid var(--fg);box-shadow:0 0 0 2px var(--surface) inset}
+.bcp-sw input:focus-visible+i{outline:2px solid var(--focus-ring);outline-offset:4px}
+.bcp-sw input:disabled+i{opacity:.5}
+.bcp-none i{background:var(--surface)}
+.bcp-none i::after{content:"";position:absolute;left:50%;margin-left:-1px;top:12%;bottom:12%;width:2px;background:var(--muted);transform:rotate(45deg)}
+.bcp-custom{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.bcp-native{width:2rem;height:1.75rem;padding:0;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer}
+.bcp-hex{width:6.2rem;font-family:var(--font-mono);font-size:var(--text-sm);padding:.3rem .5rem}
+.bcp-hex[aria-invalid=true]{border-color:var(--danger)}
+.bcp-apply{padding:.3rem .65rem;font-size:var(--text-sm)}
+
+/* ---- board settings: appearance + card colouring ---- */
+.bs-appearance{flex-direction:column;align-items:stretch;gap:var(--space-3)}
+.bs-appearance .bcp{width:100%}
+.bs-appearance>.bs-text{flex:none}
+.bs-cardcolor{align-items:flex-start}
+.bs-cardcolor .bs-seg span{text-transform:none}
+.bs-cc-preview{flex:1 1 100%;display:flex;align-items:flex-start;gap:var(--space-3);padding:var(--space-3);border:1px dashed var(--border-strong);border-radius:var(--radius);background:var(--list-bg)}
+.bs-cc-cap{font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:.1rem}
+.bs-cc-tile{flex:0 1 17rem;cursor:default;display:flex;flex-direction:column;gap:.35rem}
+.bs-cc-tile .boards-tile-name{padding-right:0}
+
+/* ---- list menu: a floating popover (see boards_popover.js), never clipped by columns or the scroller ---- */
+.boards-menu-pop{position:fixed;z-index:70;width:17rem;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);padding:0;gap:0;overflow:hidden;box-shadow:var(--shadow-3)}
+.boards-menu-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:.35rem;display:flex;flex-direction:column;gap:.1rem}
+.boards-menu-foot{flex:none;display:flex;flex-direction:column;border-top:1px solid var(--border);padding:.35rem;background:var(--surface)}
+.boards-menu-items{display:flex;flex-direction:column;gap:.1rem}
+.boards-menuitem{font-size:var(--text-sm);text-align:left;justify-content:flex-start;border:0;background:none}
+.boards-menu-pop .boards-menuitem{text-align:left;justify-content:flex-start;border:0;background:none;box-shadow:none}
+.boards-menuitem:hover{background:var(--surface-2)}
+.boards-menuitem.danger:hover{background:var(--danger-soft)}
+.boards-menuitem:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px;background:var(--surface-3)}
+.boards-menu-colour{display:flex;flex-direction:column;gap:.45rem;padding:.5rem .55rem;margin:.15rem 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.boards-menu-h{font-size:var(--text-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.boards-sub>summary{display:flex;align-items:center;justify-content:space-between;list-style:none;cursor:pointer;padding:.4rem .55rem;border-radius:var(--radius-sm);color:var(--fg)}
+.boards-sub>summary::-webkit-details-marker{display:none}
+.boards-sub>summary:hover{background:var(--surface-2)}
+.boards-sub>summary::after{content:"";width:.4rem;height:.4rem;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-right:.2rem;transition:transform var(--dur-fast)}
+.boards-sub[open]>summary::after{transform:rotate(45deg)}
+.boards-sub[open]>summary{background:var(--surface-2)}
+.boards-sub-body{display:flex;flex-direction:column;gap:.5rem;padding:.4rem .55rem .6rem;font-size:var(--text-sm)}
+.boards-sub-body label{display:flex;flex-direction:column;gap:.15rem;font-size:.8rem}
+.boards-sub-body select,.boards-sub-body input:not([type=radio]){width:100%;box-sizing:border-box}
+.boards-sub-body .boards-inline{display:flex;gap:.4rem}
+.boards-sub-body .boards-inline select{flex:1 1 0;min-width:0}
+/* portal: the popover lives in #popover-root while open (see boards_popover.js); until JS has moved it, keep it invisible */
+.boards-scrim{display:none}
+.boards-scrim[hidden]{display:none!important}
+.js details.boards-menu>.boards-menu-pop{visibility:hidden}
+#popover-root .boards-menu-pop{visibility:visible}
+.js .boards-dd-pop{position:fixed;z-index:70;top:auto;left:auto;max-width:calc(100vw - 16px)}
+.boards-pop{max-height:calc(100vh - 16px);overflow-y:auto}
+@media(max-width:640px){
+  /* bottom sheet */
+  .boards-scrim{display:block;position:fixed;inset:0;background:var(--overlay);z-index:65}
+  .boards-menu-pop{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:78vh;border-radius:var(--radius-lg) var(--radius-lg) 0 0;border-bottom:0;padding-bottom:env(safe-area-inset-bottom)}
+  .boards-menuitem,.boards-sub>summary{padding:.7rem .75rem;font-size:var(--text-md)}
+  .bcp-sw{width:1.9rem;height:1.9rem}
+}
+@media(prefers-reduced-motion:reduce){.bcp-sw i,.boards-sub>summary::after{transition:none}}

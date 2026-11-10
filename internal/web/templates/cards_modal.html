@@ -1,0 +1,243 @@
+{{define "page"}}<div class="cards-fullpage"><p><a href="/boards/{{.Data.Card.BoardID}}">&larr; Back to board</a></p>{{template "cards_modal_body" .}}</div>{{end}}
+
+{{/* The card sheet. Layout: top bar (crumb, saved, prev/next, actions, close) / title / status chips,
+     then two columns: LEFT main (description, checklists, attachments, discussion) and RIGHT a compact
+     properties rail (one labelled row per property, each editing in a small popover). Lazy sections keep
+     their hx-get endpoints and ids; popovers are <details class="cards-pop" data-pop="..."> managed by cards_ui.js. */}}
+{{define "cards_modal_body"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}
+<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script>
+<div id="card-modal" class="cards-modal cm" hx-target="#card-modal" hx-swap="outerHTML" data-card="{{$c.ID}}" data-board="{{$c.BoardID}}" aria-label="Card: {{$c.Name}}">
+  <div class="cm-top">
+    <nav class="cm-crumb" aria-label="Breadcrumb">
+      {{if $o.ProjectName}}<a href="/projects/{{$o.ProjectID}}">{{$o.ProjectName}}</a><span class="cm-sep" aria-hidden="true">/</span>{{end}}<a href="/boards/{{$c.BoardID}}">{{$o.BoardName}}</a><span class="cm-sep" aria-hidden="true">/</span>
+      {{if and $edit (not $c.IsTemplate) (not $c.IsDraft) $o.Lists}}
+      <details class="cm-list cards-pop" data-pop="list"><summary title="Move to another list" aria-label="List: {{$o.ListName}}. Change list"><span>{{$o.ListName}}</span><i class="cm-chev" aria-hidden="true"></i></summary>
+        <div class="cm-popbody cards-popbody cm-lists" role="group" aria-label="Move to list">{{$cur := ""}}
+          {{range $o.Lists}}{{if ne $cur .BoardID}}{{$cur = .BoardID}}<div class="cm-pop-h">{{.BoardName}}</div>{{end}}
+          <button type="button" class="cm-opt{{if eq .ID $c.ListID}} is-on{{end}}" hx-post="/ui/cards/{{$c.ID}}/move" hx-vals='{"listId":"{{.ID}}","_part":"modal"}'{{if eq .ID $c.ListID}} aria-current="true"{{end}}><span class="cm-tick" aria-hidden="true">{{if eq .ID $c.ListID}}&#10003;{{end}}</span>{{.Name}}</button>{{end}}
+        </div></details>
+      {{else}}<span class="cm-list-ro">{{$o.ListName}}</span>{{end}}
+    </nav>
+    <span id="cards-saved" class="cards-saved cm-saved" role="status" aria-live="polite"></span>
+    <span class="cards-nav cm-nav" role="group" aria-label="Card navigation"><button type="button" class="cards-navbtn" data-card-nav="prev" aria-label="Previous card (k)" title="Previous card (k)" disabled>&#8249;</button><button type="button" class="cards-navbtn" data-card-nav="next" aria-label="Next card (j)" title="Next card (j)" disabled>&#8250;</button></span>
+    {{template "cards_menu" .}}
+    <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+  </div>
+
+  <header class="cm-head">
+    {{template "cards_title" .}}
+    <div class="cm-chips" role="group" aria-label="Status">
+      {{if $c.DueDate}}<span class="cm-chip cm-due-chip cards-due {{if cards_done $c.IsDueCompleted}}cards-due-done{{else if cards_overdue $c.DueDate}}cards-due-late{{end}}">
+        {{if $edit}}<button type="button" class="cm-tickbtn" role="checkbox" aria-checked="{{if cards_done $c.IsDueCompleted}}true{{else}}false{{end}}" aria-label="Due date completed" title="{{if cards_done $c.IsDueCompleted}}Mark incomplete{{else}}Mark complete{{end}}" hx-post="/ui/cards/{{$c.ID}}/due/complete" hx-vals='{"completed":"{{if cards_done $c.IsDueCompleted}}false{{else}}true{{end}}"}'>{{if cards_done $c.IsDueCompleted}}&#10003;{{end}}</button>
+        <button type="button" class="cm-chipbtn" data-open-pop="due" title="Change due date (d)">Due {{cards_when $c.DueDate}}</button>
+        {{else}}Due {{cards_when $c.DueDate}}{{end}}</span>{{end}}
+      {{range $o.CardLabels}}{{if $edit}}<button type="button" class="cards-label cm-lab cards-color-{{.Color}}" data-open-pop="labels" title="Edit labels (l)">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</button>{{else}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}{{end}}
+      <span class="cards-badge cards-type-{{$c.Type}}" title="Card type">{{$c.Type}}</span>
+      {{if $c.IsClosed}}<span class="cards-badge">closed</span>{{end}}
+      {{if $c.IsDraft}}<span class="cards-badge">draft</span>{{end}}
+      {{if $c.IsTemplate}}<span class="cards-badge">template</span>{{end}}
+      {{if eq $o.ListType "archive"}}<span class="cards-badge">archived</span>{{end}}
+      {{if eq $o.ListType "trash"}}<span class="cards-badge cards-badge-warn">in trash</span>{{end}}
+      {{if $c.IsSubscribed}}<span class="cards-badge" title="you are subscribed">subscribed</span>{{end}}
+    </div>
+  </header>
+
+  <div class="cm-cols">
+    <main class="cm-main" id="cm-main" aria-label="Card content">
+      {{template "cards_desc" .}}
+      <section class="cm-sec" data-section="tasks" aria-label="Checklists"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/tasks" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
+      <section class="cm-sec" data-section="attachments" aria-label="Attachments"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/attachments" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
+      <section class="cm-sec cm-disc" data-section="discussion" aria-label="Discussion">
+        <div class="cm-tabs" role="tablist" aria-label="Discussion">
+          <button type="button" class="x-toggle cm-secbtn" data-sec-toggle aria-expanded="true" aria-label="Collapse discussion"><span class="x-chev" aria-hidden="true"></span></button>
+          <button type="button" role="tab" id="cm-tab-comments" class="cm-tab" aria-selected="true" aria-controls="cm-panel-comments" data-tab="comments">Comments <span class="cm-count" data-count-for="comments">{{$c.CommentsTotal}}</span></button>
+          <button type="button" role="tab" id="cm-tab-activity" class="cm-tab" aria-selected="false" aria-controls="cm-panel-activity" data-tab="activity" tabindex="-1">Activity</button>
+        </div>
+        <div class="cm-disc-body">
+          <div role="tabpanel" id="cm-panel-comments" aria-labelledby="cm-tab-comments" data-section="comments" hx-get="/ui/cards/{{$c.ID}}/comments" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
+          <div role="tabpanel" id="cm-panel-activity" aria-labelledby="cm-tab-activity" data-section="activity" hidden hx-get="/ui/cards/{{$c.ID}}/activity" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
+        </div>
+      </section>
+      {{if $o.CanComment}}<div class="cm-dock">
+        <form id="cm-comment-form" class="cm-composer" hx-post="/ui/cards/{{$c.ID}}/comments" hx-target="#x-comments" hx-swap="outerHTML" aria-label="Write a comment">
+          <textarea name="text" rows="1" class="cm-composer-input" placeholder="Write a comment..." aria-label="Write a comment" data-comment-input maxlength="16384"></textarea>
+          <div class="cm-composer-bar">
+            <label class="cm-enter"><input type="checkbox" data-enter-send> Enter sends</label>
+            <span class="cm-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> sends</span>
+            <button type="submit" class="primary cm-send">Comment</button>
+          </div>
+        </form>
+      </div>{{end}}
+    </main>
+
+    <div class="cm-rail">
+    <aside class="cm-props" aria-label="Properties">
+      {{template "cards_props" .}}
+    </aside>
+    <aside class="cm-extra" aria-label="Custom fields and time tracking">
+      <section class="cm-sec" data-section="fields" aria-label="Custom fields"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/fields" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
+      <div data-section="claim" hx-get="/ui/cards/{{$c.ID}}/claim" hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
+      <section class="cm-sec" data-section="time" aria-label="Time tracking"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/time" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
+    </aside>
+    </div>
+  </div>
+
+  <div class="cm-drop" hidden aria-hidden="true"><div>Drop files to attach them to this card</div></div>
+  <div class="cm-help" id="cm-help" role="dialog" aria-label="Card shortcuts" tabindex="-1" hidden>
+    <h3>Card shortcuts</h3>
+    <dl>
+      <dt><kbd>m</kbd></dt><dd>Members</dd><dt><kbd>l</kbd></dt><dd>Labels</dd><dt><kbd>d</kbd></dt><dd>Due date</dd>
+      <dt><kbd>a</kbd></dt><dd>Attach a file</dd><dt><kbd>t</kbd></dt><dd>Add a checklist item</dd><dt><kbd>c</kbd></dt><dd>Write a comment</dd>
+      <dt><kbd>e</kbd></dt><dd>Edit description</dd><dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous card</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close popover, then the card</dd><dt><kbd>?</kbd></dt><dd>This help</dd>
+    </dl>
+    <p class="cards-muted">You can also drop files or paste an image anywhere on the card.</p>
+  </div>
+</div>{{end}}
+
+{{/* the "..." actions menu: rare actions, destructive ones at the bottom */}}
+{{define "cards_menu"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}
+<details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Card actions" title="Card actions" aria-haspopup="true">&hellip;</summary>
+  <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Card actions">
+    {{if $o.CanEdit}}{{if not $c.IsTemplate}}{{if not $c.IsDraft}}
+    <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/duplicate" hx-target="#modal" hx-swap="innerHTML">Duplicate</button>
+    {{end}}{{end}}
+    <button type="button" class="cm-mi" data-open-pop="recurrence">Repeat&hellip;</button>
+    {{if not $c.ShareToken}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/share" title="Anyone with the link can view this card (read-only)">Create share link</button>
+    {{else}}<div class="cm-share"><span class="cm-pop-h">Share link</span><input readonly value="{{$d.Origin}}/share/{{deref $c.ShareToken}}" data-select-on-click aria-label="Share link"><button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/share/revoke">Revoke link</button></div>{{end}}
+    {{if not $c.IsTemplate}}{{if not $c.IsDraft}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/template" title="Save as a project-wide card template">Save as template</button>{{end}}{{end}}
+    {{end}}
+    {{if $c.IsSubscribed}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/unsubscribe">Unsubscribe</button>{{else}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/subscribe">Subscribe</button>{{end}}
+    <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/notifications/read" hx-swap="none">Mark notifications read</button>
+    <button type="button" class="cm-mi" data-open-help>Keyboard shortcuts</button>
+    <a class="cm-mi" href="/cards/{{$c.ID}}">Open as page</a>
+    {{if $o.CanEdit}}{{if not $c.IsTemplate}}{{if not $c.IsDraft}}
+    <hr class="cm-sepline">
+    <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/close" hx-vals='{"closed":"{{if $c.IsClosed}}false{{else}}true{{end}}"}'>{{if $c.IsClosed}}Re-open{{else}}Close card{{end}}</button>
+    {{if or (eq $o.ListType "archive") (eq $o.ListType "trash")}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/restore">Restore</button>
+    {{else}}<button type="button" class="cm-mi cm-warn" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"false"}'>Archive</button><button type="button" class="cm-mi cm-warn cards-danger" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"true"}'>Move to trash</button>{{end}}
+    {{end}}{{end}}
+    {{if or (eq $o.ListType "trash") $c.IsDraft $c.IsTemplate}}<hr class="cm-sepline"><button type="button" class="cm-mi cards-danger" hx-post="/ui/cards/{{$c.ID}}/delete" hx-confirm="Delete this card permanently?" hx-swap="none">Delete permanently</button>{{end}}
+    {{end}}
+  </div>
+</details>{{end}}
+
+{{/* properties rail: each property is a labelled row; empty ones collapse to a quiet "+ Add" */}}
+{{define "cards_props"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}{{$r := cards_rec $c.Recurrence}}
+{{if $c.IsDraft}}{{if $edit}}<div class="cm-prop cm-prop-wide"><details class="cm-pv cards-pop" data-pop="publish" open><summary class="cm-val cm-publish"><span>Publish draft&hellip;</span></summary><div class="cm-popbody cards-popbody"><form hx-post="/ui/cards/{{$c.ID}}/publish"><select name="listId" aria-label="List">{{range $o.Lists}}<option value="{{.ID}}">{{.BoardName}} / {{.Name}}</option>{{end}}</select><button class="primary">Publish</button></form></div></details></div>{{end}}{{end}}
+
+{{if or $edit $o.CardMembers}}<div class="cm-prop" data-prop="members"><span class="cm-pl" id="cm-pl-members">Members</span>
+  {{if $edit}}<details class="cm-pv cards-pop" data-pop="members"><summary class="cm-val" aria-labelledby="cm-pl-members" title="Members (m)">
+    {{if $o.CardMembers}}<span class="cm-avs">{{range $o.CardMembers}}<span class="cards-avatar" title="{{.Name}}">{{cards_initials .Name}}</span>{{end}}</span><span class="cm-vtext">{{range $i, $m := $o.CardMembers}}{{if $i}}, {{end}}{{$m.Name}}{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Members</span></span>{{end}}</summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Members">
+      {{if gt (len $o.Members) 6}}<input type="search" class="cm-filter" placeholder="Find a person" aria-label="Find a person" data-filter>{{end}}
+      {{range $o.Members}}<div class="cm-optrow" data-filter-text="{{.Name}} {{.Username}}">
+        {{if cards_has $c.MemberIDs .ID}}<button type="button" class="cm-opt is-on" aria-pressed="true" hx-post="/ui/cards/{{$c.ID}}/members/{{.ID}}/remove"><span class="cm-tick" aria-hidden="true">&#10003;</span><span class="cards-avatar" aria-hidden="true">{{cards_initials .Name}}</span>{{.Name}}</button>
+        {{else}}<button type="button" class="cm-opt" aria-pressed="false" hx-post="/ui/cards/{{$c.ID}}/members" hx-vals='{"userId":"{{.ID}}"}'><span class="cm-tick" aria-hidden="true"></span><span class="cards-avatar" aria-hidden="true">{{cards_initials .Name}}</span>{{.Name}}</button>{{end}}</div>
+      {{else}}<p class="cards-muted">No board members.</p>{{end}}</div></details>
+  {{else}}<span class="cm-pv cm-ro"><span class="cm-avs">{{range $o.CardMembers}}<span class="cards-avatar" title="{{.Name}}">{{cards_initials .Name}}</span>{{end}}</span></span>{{end}}</div>{{end}}
+
+{{if or $edit $o.CardLabels}}<div class="cm-prop" data-prop="labels"><span class="cm-pl" id="cm-pl-labels">Labels</span>
+  {{if $edit}}<details class="cm-pv cards-pop" data-pop="labels"><summary class="cm-val" aria-labelledby="cm-pl-labels" title="Labels (l)">
+    {{if $o.CardLabels}}<span class="cm-labs">{{range $o.CardLabels}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Labels</span></span>{{end}}</summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Labels">
+      {{if gt (len $o.Labels) 8}}<input type="search" class="cm-filter" placeholder="Find a label" aria-label="Find a label" data-filter>{{end}}
+      {{range $o.Labels}}<div class="cm-optrow cm-labrow" data-filter-text="{{.Name}} {{.GroupName}}">
+        {{if cards_has $c.LabelIDs .ID}}<button type="button" class="cards-label cards-color-{{.Color}} cm-labopt is-on" aria-pressed="true" hx-post="/ui/cards/{{$c.ID}}/labels/{{.ID}}/remove"><span aria-hidden="true">&#10003;</span> {{if .Name}}{{.Name}}{{else}}(no name){{end}}</button>
+        {{else}}<button type="button" class="cards-label cards-color-{{.Color}} cm-labopt" aria-pressed="false" hx-post="/ui/cards/{{$c.ID}}/labels" hx-vals='{"labelId":"{{.ID}}"}'>{{if .Name}}{{.Name}}{{else}}(no name){{end}}</button>{{end}}
+        {{if .GroupName}}<small class="cards-muted">{{.GroupName}}{{if .SingleSelect}} (pick one){{end}}</small>{{end}}</div>
+      {{else}}<p class="cards-muted">No labels on this board.</p>{{end}}</div></details>
+  {{else}}<span class="cm-pv cm-ro cm-labs">{{range $o.CardLabels}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}</span>{{end}}</div>{{end}}
+
+{{if or $edit $c.DueDate}}<div class="cm-prop" data-prop="due"><span class="cm-pl" id="cm-pl-due">Due date</span>
+  <div class="cm-pv cm-duerow">
+  {{if $edit}}{{if $c.DueDate}}<button type="button" class="cm-tickbtn cm-tickbtn-lg" role="checkbox" aria-checked="{{if cards_done $c.IsDueCompleted}}true{{else}}false{{end}}" aria-label="Completed" title="{{if cards_done $c.IsDueCompleted}}Mark incomplete{{else}}Mark complete{{end}}" hx-post="/ui/cards/{{$c.ID}}/due/complete" hx-vals='{"completed":"{{if cards_done $c.IsDueCompleted}}false{{else}}true{{end}}"}'>{{if cards_done $c.IsDueCompleted}}&#10003;{{end}}</button>{{end}}
+    <details class="cards-pop cm-grow" data-pop="due"><summary class="cm-val" aria-labelledby="cm-pl-due" title="Due date (d)">
+      {{if $c.DueDate}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if cards_overdue $c.DueDate}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{else if cards_overdue $c.DueDate}} &middot; overdue{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Due date</span></span>{{end}}</summary>
+      <div class="cm-popbody cards-popbody" role="group" aria-label="Due date">
+        <form hx-post="/ui/cards/{{$c.ID}}/due"><input type="datetime-local" name="dueDate" value="{{cards_dt $c.DueDate}}" required aria-label="Due date and time">
+          <div class="cm-presets"><button type="button" data-due-preset="0">Today</button><button type="button" data-due-preset="1">Tomorrow</button><button type="button" data-due-preset="7">Next week</button></div>
+          <button class="primary">Save</button></form>
+        {{if $c.DueDate}}<form hx-post="/ui/cards/{{$c.ID}}/due"><input type="hidden" name="dueDate" value=""><button class="cm-quiet">Remove due date</button></form>{{end}}</div></details>
+  {{else}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if cards_overdue $c.DueDate}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{end}}</span>{{end}}
+  </div></div>{{end}}
+
+{{if or $edit $c.Recurrence}}<div class="cm-prop" data-prop="recurrence"><span class="cm-pl" id="cm-pl-recurrence">Repeat</span>
+  {{if $edit}}<details class="cm-pv cards-pop" data-pop="recurrence"><summary class="cm-val" aria-labelledby="cm-pl-recurrence">
+    {{if $r}}<span class="cm-vtext">Every {{if gt $r.Interval 1}}{{$r.Interval}} {{end}}{{$r.Freq}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Repeat</span></span>{{end}}</summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Repeat">
+        <form hx-post="/ui/cards/{{$c.ID}}/recurrence">
+          <label>Every <input name="interval" type="number" min="1" value="{{if $r}}{{$r.Interval}}{{else}}1{{end}}" class="cm-w4">
+            <select name="freq">{{range $f := cards_freqs}}<option value="{{$f}}" {{if and $r (eq $r.Freq $f)}}selected{{end}}>{{$f}}</option>{{end}}</select></label>
+          <label>Spawn next card when <select name="trigger"><option value="due" {{if and $r (eq $r.Trigger "due")}}selected{{end}}>the due date passes</option><option value="completed" {{if and $r (eq $r.Trigger "completed")}}selected{{end}}>the due date is completed</option></select></label>
+          <label>Weekly on {{range $i, $n := cards_weekdays}}<label class="cards-wd"><input type="checkbox" name="weekdays" value="{{$i}}" {{if and $r (cards_hasint $r.Weekdays $i)}}checked{{end}}>{{$n}}</label>{{end}}</label>
+          <label>Until <input type="date" name="until" value="{{if $r}}{{cards_date $r.Until}}{{end}}"></label>
+          <label>Max occurrences <input type="number" name="count" min="0" value="{{if $r}}{{$r.Count}}{{end}}" class="cm-w5"></label>
+          <button class="primary" {{if not $c.DueDate}}disabled title="Set a due date first"{{end}}>Save</button></form>
+        {{if $c.Recurrence}}<form hx-post="/ui/cards/{{$c.ID}}/recurrence"><input type="hidden" name="freq" value=""><button class="cm-quiet">Stop repeating</button></form>
+          <form hx-post="/ui/cards/{{$c.ID}}/recurrence/run"><button class="cm-quiet">Create next occurrence now</button></form>{{end}}</div></details>
+  {{else}}{{if $r}}<span class="cm-pv cm-ro"><span class="cm-vtext">Every {{if gt $r.Interval 1}}{{$r.Interval}} {{end}}{{$r.Freq}} ({{$r.Trigger}})</span></span>{{end}}{{end}}</div>{{end}}
+
+{{if or $edit $c.Lat}}<div class="cm-prop" data-prop="location"><span class="cm-pl" id="cm-pl-location">Location</span>
+  {{if $edit}}<details class="cm-pv cards-pop" data-pop="location"><summary class="cm-val" aria-labelledby="cm-pl-location">
+    {{if $c.Lat}}<span class="cm-vtext">{{if $c.LocationName}}{{deref $c.LocationName}}{{else}}{{cards_f $c.Lat}}, {{cards_f $c.Lng}}{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Location</span></span>{{end}}</summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Location">
+        <form hx-post="/ui/cards/{{$c.ID}}/location">
+          <input name="locationName" placeholder="Place name" aria-label="Place name" value="{{deref $c.LocationName}}">
+          <input name="lat" type="number" step="any" min="-90" max="90" placeholder="Latitude" aria-label="Latitude" value="{{cards_f $c.Lat}}" required>
+          <input name="lng" type="number" step="any" min="-180" max="180" placeholder="Longitude" aria-label="Longitude" value="{{cards_f $c.Lng}}" required>
+          <button class="primary">Save</button></form>
+        {{if $c.Lat}}<form hx-post="/ui/cards/{{$c.ID}}/location"><input type="hidden" name="clear" value="true"><button class="cm-quiet">Remove location</button></form>{{end}}</div></details>
+  {{else}}<span class="cm-pv cm-ro"><span class="cm-vtext">{{if $c.LocationName}}{{deref $c.LocationName}} {{end}}({{cards_f $c.Lat}}, {{cards_f $c.Lng}})</span></span>{{end}}</div>{{end}}
+
+{{if or $edit $c.CoverAttachmentID}}<div class="cm-prop" data-prop="cover"><span class="cm-pl" id="cm-pl-cover">Cover</span>
+  {{if $edit}}<details class="cm-pv cards-pop" data-pop="cover"><summary class="cm-val" aria-labelledby="cm-pl-cover">
+    {{if $c.CoverAttachmentID}}<img class="cm-cover" src="/attachments/{{deref $c.CoverAttachmentID}}/thumbnail" alt="" loading="lazy"><span class="cm-vtext">Image</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Cover</span></span>{{end}}</summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Cover">
+      <p class="cards-muted">Pick any image in Attachments and choose &ldquo;Make cover&rdquo;.</p>
+      <button type="button" data-qa-scroll="attachments">Go to attachments</button>
+      {{if $c.CoverAttachmentID}}<form hx-post="/ui/cards/{{$c.ID}}/cover"><input type="hidden" name="attachmentId" value=""><button class="cm-quiet">Remove cover</button></form>{{end}}</div></details>
+  {{else}}<span class="cm-pv cm-ro"><img class="cm-cover" src="/attachments/{{deref $c.CoverAttachmentID}}/thumbnail" alt="Cover image" loading="lazy"></span>{{end}}</div>{{end}}
+
+{{if $edit}}<div class="cm-prop" data-prop="type"><span class="cm-pl" id="cm-pl-type">Type</span>
+  <details class="cm-pv cards-pop" data-pop="type"><summary class="cm-val" aria-labelledby="cm-pl-type"><span class="cm-vtext">{{$c.Type}}</span></summary>
+    <div class="cm-popbody cards-popbody" role="group" aria-label="Card type"><form hx-post="/ui/cards/{{$c.ID}}/update"><select name="type" aria-label="Card type" data-autosubmit><option value="project" {{if eq $c.Type "project"}}selected{{end}}>project</option><option value="story" {{if eq $c.Type "story"}}selected{{end}}>story</option></select></form></div></details></div>{{end}}
+{{end}}
+
+{{define "cards_title"}}{{$d := .Data}}{{$c := $d.Card}}<div id="card-title" class="cards-title cm-title">
+  {{if $d.Opts.CanEdit}}<form hx-post="/ui/cards/{{$c.ID}}/update" hx-trigger="change, submit" hx-sync="this:replace" hx-target="#card-title" hx-swap="outerHTML"><input type="hidden" name="_part" value="title"><input class="cards-title-input" name="name" value="{{$c.Name}}" maxlength="1024" required aria-label="Card title" placeholder="Card title"></form>
+  {{else}}<h2>{{$c.Name}}</h2>{{end}}</div>{{end}}
+
+{{define "cards_desc"}}{{$d := .Data}}{{$c := $d.Card}}
+<section id="card-desc" class="cm-desc" aria-labelledby="cm-desc-h" hx-target="#card-desc" hx-swap="outerHTML"
+  {{if eq $d.DescMode "view"}}hx-get="/ui/cards/{{$c.ID}}/editing" hx-trigger="sse:card.editing, every 15s"{{end}}>
+  <div class="cm-sec-head"><h3 id="cm-desc-h">Description</h3>{{if and $d.Opts.CanEdit (eq $d.DescMode "view") $c.Description}}<button type="button" class="cm-ghost" data-desc-edit hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}' title="Edit description (e)">Edit</button>{{end}}</div>
+  {{if eq $d.DescMode "edit"}}
+    <form hx-post="/ui/cards/{{$c.ID}}/update" class="cards-editor cm-editor"><input type="hidden" name="_part" value="desc">
+      <div class="cards-toolbar cm-toolbar" role="toolbar" aria-label="Formatting">
+        <button type="button" data-md="**|**" title="Bold" aria-label="Bold"><b>B</b></button><button type="button" data-md="_|_" title="Italic" aria-label="Italic"><i>I</i></button>
+        <button type="button" data-md="~~|~~" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button><button type="button" data-md="`|`" title="Code" aria-label="Code">&lt;/&gt;</button>
+        <span class="cm-tbsep" aria-hidden="true"></span>
+        <button type="button" data-md-line="# " title="Heading" aria-label="Heading">H</button><button type="button" data-md-line="- " title="Bullet list" aria-label="Bullet list">&bull;</button>
+        <button type="button" data-md-line="- [ ] " title="Task item" aria-label="Task item">&#9745;</button><button type="button" data-md-line="> " title="Quote" aria-label="Quote">&ldquo;</button>
+        <button type="button" data-md="[|](https://)" title="Link" aria-label="Link">link</button>
+        <button type="button" class="cm-tbpreview" hx-post="/ui/cards/{{$c.ID}}/description/preview" hx-include="closest form" hx-target="#cards-preview" hx-swap="innerHTML">Preview</button></div>
+      <textarea name="description" rows="10" placeholder="Add a more detailed description (markdown supported)" aria-label="Description" data-autosave autofocus hx-post="/ui/cards/{{$c.ID}}/update" hx-vals='{"_part":"autosave"}' hx-trigger="input delay:1500ms" hx-include="closest form" hx-target="#cards-saved" hx-swap="innerHTML">{{deref $c.Description}}</textarea>
+      <div id="cards-preview" class="cards-md cm-preview"></div>
+      <div class="cards-actions cm-editor-bar"><button class="primary">Save</button>
+        <button type="button" hx-post="/ui/cards/{{$c.ID}}/editing/release" hx-vals='{"field":"description"}'>Cancel</button>
+        <span class="cm-hint">Autosaves &middot; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves &middot; <kbd>Esc</kbd> done</span></div>
+    </form>
+    <div hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}' hx-trigger="every 20s" hx-swap="none"></div>
+  {{else if eq $d.DescMode "locked"}}
+    <div class="cards-locked" role="status"><strong>{{$d.Locker.Name}}</strong> is editing this description{{if $d.Locker.Idle}} (idle for over a minute){{end}}.
+      {{if $d.Locker.Idle}}<button hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description","takeover":"true"}'>Take over</button>{{else}}<button hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}'>Try again</button>{{end}}
+      <button class="cards-linkbtn" hx-get="/ui/cards/{{$c.ID}}/editing">Cancel</button></div>
+    <div class="cards-md">{{cards_md $c.Description}}</div>
+  {{else}}
+    {{range $d.Editors}}{{if not .Me}}{{if eq .Field "description"}}<p class="cards-editing" role="status">&#9998; {{.Name}} is editing the description{{if .Idle}} (idle){{end}}</p>{{end}}{{end}}{{end}}
+    {{if $c.Description}}<div class="cards-md cm-desc-view{{if $d.Opts.CanEdit}} is-editable{{end}}"{{if $d.Opts.CanEdit}} hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}' hx-trigger="weave:edit" data-click-trigger="weave:edit"{{end}}>{{cards_md $c.Description}}</div>
+    {{else if $d.Opts.CanEdit}}<button type="button" class="cm-desc-empty" data-desc-edit hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}'>Add a description&hellip; <span class="cm-hint">notes, links, context (markdown)</span></button>
+    {{else}}<p class="cards-muted">No description yet.</p>{{end}}
+  {{end}}
+</section>{{end}}

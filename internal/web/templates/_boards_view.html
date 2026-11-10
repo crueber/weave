@@ -1,0 +1,133 @@
+{{define "boards_body_in"}}<div id="board-body" class="boards-body boards-view-{{.View}}" data-board="{{.Board.ID}}">
+{{template "boards_chips" .}}
+{{if eq .View "list"}}{{template "boards_table" .}}{{else if eq .View "grid"}}{{template "boards_grid" .}}{{else}}{{template "boards_kanban" .}}{{end}}
+</div>{{end}}
+
+{{define "boards_kanban"}}<div class="boards-lists" id="board-lists" data-board="{{.Board.ID}}" data-card-drop="/ui/boards/{{.Board.ID}}/cards/drop" data-list-drop="/ui/boards/{{.Board.ID}}/lists/drop"{{if .CanEdit}} data-can-edit="1"{{end}} role="list" aria-label="Lists">
+{{range .Columns}}{{template "boards_col" dict "C" . "P" $}}{{end}}
+{{if .CanEdit}}<div class="boards-addlist boards-composer" data-composer="list" data-board="{{.Board.ID}}">
+  <button type="button" class="boards-add-open" data-open aria-label="Add another list"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Add another list</button>
+  <form class="boards-composer-form" method="post" action="/ui/boards/{{.Board.ID}}/lists/quick">
+    <textarea name="name" rows="1" required maxlength="2048" placeholder="Enter list title&hellip;" aria-label="New list title" autocomplete="off" data-composer-input></textarea>
+    <div class="boards-composer-actions"><button class="btn btn-primary boards-btn-primary">Add list</button><button type="button" class="boards-x" data-close aria-label="Close composer">&times;</button><span class="boards-composer-hint">Enter to add &middot; Esc to close</span></div>
+  </form>
+</div>{{end}}
+{{if and (not .Columns) (not .CanEdit)}}<p class="boards-empty">This board has no lists yet.</p>{{end}}
+</div>{{end}}
+
+{{define "boards_col"}}{{$c := .C}}{{$p := .P}}{{$name := deref $c.List.Name}}<section class="boards-col" id="col-{{$c.List.ID}}" data-id="{{$c.List.ID}}" data-list-type="{{$c.List.Type}}" role="listitem" aria-label="List {{$name}}"{{boardsListAttr $c.List.Color}}{{if eq $p.Board.CardColorMode "fill"}} data-card-mode="fill"{{end}}>
+  <header class="boards-col-head" style="--list-accent:{{boardsColor $c.List.Color}}"{{if $p.CanEdit}} data-drag-handle="list" title="Drag to reorder lists"{{end}}>
+    <button type="button" class="boards-iconbtn boards-col-collapse" data-collapse aria-expanded="true" aria-label="Collapse list {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    <h2 class="boards-col-title"{{if $p.CanEdit}} data-rename="{{$c.List.ID}}" title="Click to rename"{{end}}>{{$name}}</h2>
+    {{if eq $c.List.Type "closed"}}<small class="boards-badge">closed</small>{{end}}
+    {{if $c.Listeners}}<span class="boards-listeners" tabindex="0" role="note" aria-label="Listening to {{$name}}: {{range $i, $l := $c.Listeners}}{{if $i}}, {{end}}{{$l.Label}}{{end}}"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg>{{if gt (len $c.Listeners) 1}}<span class="boards-listeners-n">{{len $c.Listeners}}</span>{{end}}
+      <span class="boards-listeners-pop" role="tooltip"><strong>Listening</strong>{{range $c.Listeners}}<span>{{if .IsAgent}}agent {{end}}{{.Label}}{{if ne .Label .Name}} <small>({{.Name}})</small>{{end}}</span>{{end}}</span></span>{{end}}
+    <span class="boards-count" title="{{len $c.Cards}} cards"><span data-count>{{len $c.Cards}}</span>{{if ne (len $c.Cards) $c.Total}}/{{$c.Total}}{{end}}</span>
+    {{if $c.AddCardURL}}<button type="button" class="boards-iconbtn boards-col-add" data-add-top aria-label="Add card to the top of {{$name}}" title="Add card to top"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>{{end}}
+    {{if $p.CanEdit}}<details class="boards-menu"><summary class="boards-iconbtn" aria-label="List actions for {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></summary>
+      {{template "boards_list_menu" dict "C" $c "P" $p "Name" $name}}
+    </details>{{end}}
+  </header>
+  <div class="boards-cards" role="list" aria-label="Cards in {{$name}}" data-list="{{$c.List.ID}}"{{if $p.CanEdit}} data-drop="card"{{end}}>
+    {{range $c.Cards}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}
+    <p class="boards-empty-list" role="note">{{if and $c.Total (not $c.Cards)}}No cards match the filter.{{else if $c.AddCardURL}}This list is empty &mdash; add the first card.{{else}}No cards.{{end}}</p>
+  </div>
+  {{if $c.AddCardURL}}<div class="boards-composer boards-addcard" data-composer="card" data-list="{{$c.List.ID}}">
+    <button type="button" class="boards-add-open" data-open aria-label="Add a card to {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Add a card</button>
+    <form class="boards-composer-form" method="post" action="/ui/lists/{{$c.List.ID}}/cards/quick">
+      <textarea name="name" rows="1" required maxlength="4096" placeholder="Enter a title for this card&hellip;" aria-label="New card title in {{$name}}" autocomplete="off" data-composer-input></textarea>
+      <div class="boards-composer-actions"><button class="btn btn-primary boards-btn-primary">Add card</button><button type="button" class="boards-x" data-close aria-label="Close composer">&times;</button><span class="boards-composer-hint">Enter to add &middot; Esc to close</span></div>
+    </form>
+  </div>{{end}}
+</section>{{end}}
+
+{{define "boards_tile"}}{{$t := .T}}{{$p := .P}}<article class="boards-tile{{if $t.Closed}} is-closed{{end}}" id="tile-{{$t.ID}}" data-id="{{$t.ID}}" role="listitem"{{boardsTileFill $t $p}}{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  {{if $t.CoverID}}<div class="boards-tile-cover"><img src="/attachments/{{$t.CoverID}}/thumbnail" alt="" loading="lazy" draggable="false"></div>{{end}}
+  {{if boardsTileFilled $t $p}}{{/* fill mode: the first label is the card colour (shown by the fill itself); only the other labels get neutral text chips */}}
+  {{$rest := boardsChipLabels $t $p}}{{if $rest}}<div class="boards-tile-labels boards-lchips">{{range $rest}}<span class="boards-lchip" title="{{.Name}}">{{.Name}}</span>{{end}}</div>{{end}}
+  {{else if $t.Labels}}<div class="boards-tile-labels">{{range $t.Labels}}<button type="button" class="boards-label" data-label-toggle style="background:{{boardsColor .Color}}" title="{{.Name}}" aria-label="Label {{.Name}}"><span class="boards-label-text">{{.Name}}</span></button>{{end}}</div>{{end}}
+  <div class="boards-tile-name">{{if boardsTileFilled $t $p}}{{with index $t.Labels 0}}{{if .Name}}<span class="boards-sr">Label {{.Name}}. </span>{{end}}{{end}}{{end}}{{if eq $t.Type "story"}}<span class="boards-badge">story</span> {{end}}{{if $p.ReadOnly}}<span class="boards-tile-link">{{$t.Name}}</span>{{else}}<a class="boards-tile-link" href="/cards/{{$t.ID}}" data-open-card="{{$t.ID}}">{{$t.Name}}</a>{{end}}</div>
+  {{if or $t.Due $t.TasksTotal $t.HasDescription $t.Comments $t.Attachments $t.Members $t.ClaimedBy (and $p.Board.ShowCardAges (gt $t.AgeDays 0))}}<div class="boards-tile-meta">
+    {{if $t.Due}}<span class="boards-due boards-due-{{$t.DueState}}" title="Due {{$t.DueRaw}}{{if eq $t.DueState "overdue"}} (overdue){{end}}"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg> {{$t.Due}}</span>{{end}}
+    {{if $t.HasDescription}}<span class="boards-meta" title="Has a description"><svg class="ico" aria-hidden="true"><use href="#i-desc"/></svg><span class="boards-sr">Has a description</span></span>{{end}}
+    {{if $t.Comments}}<span class="boards-meta" title="Comments"><svg class="ico" aria-hidden="true"><use href="#i-comment"/></svg> {{$t.Comments}}<span class="boards-sr"> comments</span></span>{{end}}
+    {{if $t.Attachments}}<span class="boards-meta" title="Attachments"><svg class="ico" aria-hidden="true"><use href="#i-clip"/></svg> {{$t.Attachments}}<span class="boards-sr"> attachments</span></span>{{end}}
+    {{if $t.TasksTotal}}<span class="boards-meta boards-prog{{if eq $t.TasksDone $t.TasksTotal}} is-done{{end}}" title="Checklist {{$t.TasksDone}} of {{$t.TasksTotal}}"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg> {{$t.TasksDone}}/{{$t.TasksTotal}}<span class="boards-bar" aria-hidden="true"><i style="width:{{div100 $t.TasksDone $t.TasksTotal}}%"></i></span></span>{{end}}
+    {{if and $p.Board.ShowCardAges (gt $t.AgeDays 0)}}<span class="boards-meta boards-age" title="Days since last change">{{$t.AgeDays}}d</span>{{end}}
+    {{if $t.ClaimedBy}}<span class="boards-meta boards-claim" title="Claimed by {{$t.ClaimedBy}} until {{$t.ClaimedUntil}}"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg> {{$t.ClaimedBy}} <small>until {{$t.ClaimedUntil}}</small></span>{{end}}
+    {{if $t.Members}}<span class="boards-avatars">{{range $t.Members}}<span class="boards-avatar avatar{{if .IsAgent}} is-agent{{end}}" title="{{.Name}}{{if .IsAgent}} (agent){{end}}">{{if .IsAgent}}<svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg>{{else}}{{boardsInitials .Name}}{{end}}</span>{{end}}</span>{{end}}
+  </div>{{end}}
+  {{if $p.CanEdit}}<button type="button" class="boards-tile-edit" data-quick aria-label="Quick edit {{$t.Name}}" title="Quick edit (e)"><svg class="ico" aria-hidden="true"><use href="#i-pencil"/></svg></button>{{end}}
+</article>{{end}}
+
+{{define "boards_table"}}<table class="boards-table">
+  <thead><tr><th>Card</th><th>List</th><th>Labels</th><th>Members</th><th>Due</th><th>Tasks</th></tr></thead>
+  <tbody>
+  {{$p := .}}{{range .Columns}}{{range .Cards}}<tr data-id="{{.ID}}"{{if not $p.ReadOnly}} hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML" tabindex="0"{{end}}>
+    <td>{{.Name}}</td><td>{{.ListName}}</td>
+    <td>{{range .Labels}}<span class="boards-label" style="background:{{boardsColor .Color}}"><span class="boards-label-text">{{.Name}}</span></span> {{end}}</td>
+    <td>{{range .Members}}<span class="boards-avatar avatar" title="{{.Name}}">{{boardsInitials .Name}}</span>{{end}}</td>
+    <td>{{if .Due}}<span class="boards-due boards-due-{{.DueState}}">{{.Due}}</span>{{end}}</td>
+    <td>{{if .TasksTotal}}{{.TasksDone}}/{{.TasksTotal}}{{end}}</td></tr>{{end}}{{end}}
+  </tbody>
+</table>
+{{if not .NoCards}}{{template "boards_nomatch" .}}{{end}}{{end}}
+
+{{define "boards_grid"}}{{$p := .}}{{range .Columns}}{{if .Cards}}<section class="boards-gridsec"><h2>{{deref .List.Name}} <span class="boards-count">{{len .Cards}}</span></h2>
+  <div class="boards-grid" role="list">{{range .Cards}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}</div></section>{{end}}{{end}}
+{{if not .NoCards}}{{template "boards_nomatch" .}}{{end}}{{end}}
+
+{{define "boards_nomatch"}}<div class="boards-nomatch" role="status">
+  {{if .Filter.Active}}<strong>No cards match</strong><p>Try a different search, or <a href="{{boardsHref .PageURL .View ""}}">clear all filters</a>.</p>
+  {{else}}<strong>No cards yet</strong><p>Switch to the Kanban view to add your first card.</p>{{end}}
+</div>{{end}}
+
+{{define "boards_chips"}}{{if .Filter.Active}}<div class="boards-chips" role="group" aria-label="Active filters">
+  <span class="boards-chips-label">Filtering:</span>
+  {{if .Filter.Q}}<a class="boards-chip chip" href="{{boardsHref .PageURL .View (.Filter.Minus "q" "")}}" title="Remove this filter">&ldquo;{{.Filter.Q}}&rdquo; <span aria-hidden="true">&times;</span><span class="boards-sr">remove text filter</span></a>{{end}}
+  {{range .Labels}}{{if $.Filter.HasLabel .ID}}<a class="boards-chip chip" href="{{boardsHref $.PageURL $.View ($.Filter.Minus "label" .ID)}}" title="Remove this filter"><span class="boards-swatch" style="background:{{boardsColor .Color}}"></span>{{if .Name}}{{deref .Name}}{{else}}(label){{end}} <span aria-hidden="true">&times;</span><span class="boards-sr">remove label filter</span></a>{{end}}{{end}}
+  {{if .Filter.HasMember "me"}}<a class="boards-chip chip" href="{{boardsHref .PageURL .View (.Filter.Minus "member" "me")}}">Me <span aria-hidden="true">&times;</span><span class="boards-sr">remove member filter</span></a>{{end}}
+  {{if .Filter.HasMember "none"}}<a class="boards-chip chip" href="{{boardsHref .PageURL .View (.Filter.Minus "member" "none")}}">Unassigned <span aria-hidden="true">&times;</span><span class="boards-sr">remove member filter</span></a>{{end}}
+  {{range .Members}}{{if .UserID}}{{if $.Filter.HasMember (deref .UserID)}}<a class="boards-chip chip" href="{{boardsHref $.PageURL $.View ($.Filter.Minus "member" (deref .UserID))}}">{{.Name}} <span aria-hidden="true">&times;</span><span class="boards-sr">remove member filter</span></a>{{end}}{{end}}{{end}}
+  {{if .Filter.Due}}<a class="boards-chip chip" href="{{boardsHref .PageURL .View (.Filter.Minus "due" "")}}">{{.Filter.DueLabel}} <span aria-hidden="true">&times;</span><span class="boards-sr">remove due filter</span></a>{{end}}
+  <a class="boards-chip-clear" href="{{boardsHref .PageURL .View ""}}">Clear all</a>
+  <span class="boards-chips-count">{{.NoCards}} card{{if ne .NoCards 1}}s{{end}}</span>
+</div>{{end}}{{end}}
+
+{{define "boards_filterbar"}}<div class="boards-filterbar"><form id="board-filter" class="boards-filter" role="search" hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML" hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
+  <input type="hidden" name="view" value="{{.View}}">
+  <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Filter cards  ( / )" aria-label="Filter cards by text" autocomplete="off" data-filter-input>
+  <details class="boards-dd"><summary>Labels{{if .Filter.Labels}} ({{len .Filter.Labels}}){{end}}</summary><div class="boards-dd-pop">
+    {{range .Labels}}<label><input type="checkbox" name="label" value="{{.ID}}"{{if $.Filter.HasLabel .ID}} checked{{end}}> <span class="boards-label" style="background:{{boardsColor .Color}}"><span class="boards-label-text" style="display:inline">{{deref .Name}}{{if not .Name}}&nbsp;{{end}}</span></span></label>{{else}}<em>No labels</em>{{end}}
+  </div></details>
+  <details class="boards-dd"><summary>Members{{if .Filter.Members}} ({{len .Filter.Members}}){{end}}</summary><div class="boards-dd-pop">
+    {{if not .Public}}<label><input type="checkbox" name="member" value="me"{{if .Filter.HasMember "me"}} checked{{end}}> Me</label>{{end}}
+    <label><input type="checkbox" name="member" value="none"{{if .Filter.HasMember "none"}} checked{{end}}> Unassigned</label>
+    {{range .Members}}{{if .UserID}}<label><input type="checkbox" name="member" value="{{deref .UserID}}"{{if $.Filter.HasMember (deref .UserID)}} checked{{end}}> {{.Name}}</label>{{end}}{{end}}
+  </div></details>
+  <select name="due" aria-label="Due date filter">
+    <option value="">Any due date</option>
+    <option value="overdue"{{if eq .Filter.Due "overdue"}} selected{{end}}>Overdue</option>
+    <option value="today"{{if eq .Filter.Due "today"}} selected{{end}}>Due today</option>
+    <option value="week"{{if eq .Filter.Due "week"}} selected{{end}}>Due this week</option>
+    <option value="done"{{if eq .Filter.Due "done"}} selected{{end}}>Completed</option>
+    <option value="none"{{if eq .Filter.Due "none"}} selected{{end}}>No due date</option>
+  </select>
+  <noscript><button class="boards-btn">Apply</button></noscript>
+</form>
+  {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}
+</div>{{end}}
+
+{{define "boards_saved"}}{{template "boards_saved_in" .Data}}{{end}}
+{{define "boards_saved_in"}}<span id="saved-filters" class="boards-saved">
+  <details class="boards-dd"><summary>Saved filters{{if .Saved}} ({{len .Saved}}){{end}}</summary><div class="boards-dd-pop">
+    {{$b := .BoardID}}{{range .Saved}}<div class="boards-saved-row">
+      <a href="{{boardsHref (printf "/boards/%s" $b) $.View .Query}}">{{.Name}}</a>
+      <button type="button" class="boards-x" aria-label="Delete saved filter {{.Name}}" hx-delete="/ui/filters/{{.ID}}" hx-vals='{"_board":"{{$b}}"}' hx-target="#saved-filters" hx-swap="outerHTML">&times;</button>
+    </div>{{else}}<em>No saved filters yet. Set filters, name them here and save.</em>{{end}}
+    <div class="boards-saved-save">
+      <input type="text" id="saved-name" name="name" placeholder="Name this filter" aria-label="Saved filter name">
+      <button type="button" class="boards-btn" hx-post="/ui/boards/{{$b}}/filters" hx-include="#saved-name" hx-vals='{"_board":"{{$b}}"}' hx-target="#saved-filters" hx-swap="outerHTML" data-boards-save>Save current</button>
+    </div>
+  </div></details>
+</span>{{end}}

@@ -1,0 +1,58 @@
+# Weave runs as a SINGLE replica: realtime events use an in-process hub and
+# SQLite is a single-writer database. Do not scale this service above 1.
+services:
+  weave:
+    build:
+      context: .
+      args:
+        VERSION: ${WEAVE_VERSION:-dev}
+    image: weave:${WEAVE_VERSION:-latest}
+    restart: unless-stopped
+    # hardening: the container needs no privileges and writes only to /data (volume) and /tmp
+    # (multipart upload spill); admin.backup writes under /data.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "${WEAVE_PORT:-8080}:8080"
+    volumes:
+      - weave-data:/data
+    environment:
+      WEAVE_DATA_DIR: /data
+      WEAVE_ADDR: ":8080"
+      WEAVE_BASE_URL: ${WEAVE_BASE_URL:-http://localhost:8080}
+      WEAVE_SECRET_KEY: ${WEAVE_SECRET_KEY:?set WEAVE_SECRET_KEY in .env (openssl rand -hex 32)}
+      WEAVE_OIDC_ISSUER: ${WEAVE_OIDC_ISSUER:?set WEAVE_OIDC_ISSUER (OIDC is the only way to sign in)}
+      WEAVE_OIDC_CLIENT_ID: ${WEAVE_OIDC_CLIENT_ID:?set WEAVE_OIDC_CLIENT_ID}
+      WEAVE_OIDC_CLIENT_SECRET: ${WEAVE_OIDC_CLIENT_SECRET:?set WEAVE_OIDC_CLIENT_SECRET}
+      WEAVE_OIDC_GROUPS_CLAIM: ${WEAVE_OIDC_GROUPS_CLAIM:-}
+      WEAVE_OIDC_ADMIN_GROUP: ${WEAVE_OIDC_ADMIN_GROUP:-}
+      WEAVE_OIDC_OWNER_GROUP: ${WEAVE_OIDC_OWNER_GROUP:-}
+      WEAVE_OIDC_USER_GROUP: ${WEAVE_OIDC_USER_GROUP:-}
+      WEAVE_OIDC_WORKER_GROUP: ${WEAVE_OIDC_WORKER_GROUP:-}
+      WEAVE_OIDC_GUEST_GROUP: ${WEAVE_OIDC_GUEST_GROUP:-}
+      WEAVE_OIDC_TEAM_PREFIX: ${WEAVE_OIDC_TEAM_PREFIX:-}
+      WEAVE_OIDC_REQUIRE_GROUP: ${WEAVE_OIDC_REQUIRE_GROUP:-}
+      WEAVE_TRUST_PROXY: ${WEAVE_TRUST_PROXY:-false}
+      WEAVE_SESSION_HOURS: ${WEAVE_SESSION_HOURS:-168}
+      WEAVE_SESSION_MAX_IDLE_MINUTES: ${WEAVE_SESSION_MAX_IDLE_MINUTES:-}
+      WEAVE_HSTS: ${WEAVE_HSTS:-}
+      WEAVE_HSTS_MAX_AGE: ${WEAVE_HSTS_MAX_AGE:-}
+      WEAVE_SMTP_HOST: ${WEAVE_SMTP_HOST:-}
+      WEAVE_SMTP_PORT: ${WEAVE_SMTP_PORT:-587}
+      WEAVE_SMTP_USER: ${WEAVE_SMTP_USER:-}
+      WEAVE_SMTP_PASSWORD: ${WEAVE_SMTP_PASSWORD:-}
+      WEAVE_SMTP_FROM: ${WEAVE_SMTP_FROM:-}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/weave", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  weave-data:
