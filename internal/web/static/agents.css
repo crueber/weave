@@ -1,0 +1,35 @@
+/* Agents: robot badge, listener indicator, claim lines. Flat and minimal on purpose. */
+.badge-agent{display:inline-flex;align-items:center;gap:.25rem}
+.badge-agent .robot,.robot{width:1em;height:1em;vertical-align:-.125em;fill:currentColor}
+
+/* board list header: who is listening */
+.boards-listeners{position:relative;display:inline-flex;align-items:center;gap:.15rem;color:var(--fg-2,#667);cursor:default;border-radius:var(--radius-sm,6px);padding:.1rem .25rem}
+.boards-listeners:hover,.boards-listeners:focus-visible{color:var(--fg,#111);background:var(--surface-2,rgba(128,128,128,.12));outline:none}
+.boards-listeners .ico{width:1rem;height:1rem}
+.boards-listeners-n{font-size:var(--text-xs,.75rem);font-weight:700}
+.boards-listeners-pop{display:none;position:absolute;z-index:30;top:100%;left:0;margin-top:.25rem;min-width:11rem;max-width:18rem;padding:.5rem .65rem;
+  background:var(--surface,#fff);color:var(--fg,#111);border:1px solid var(--border,#ccc);border-radius:var(--radius-sm,6px);box-shadow:var(--shadow-2,0 2px 8px rgba(0,0,0,.15));
+  flex-direction:column;gap:.2rem;font-size:var(--text-sm,.875rem);font-weight:400;white-space:nowrap}
+.boards-listeners:hover .boards-listeners-pop,.boards-listeners:focus .boards-listeners-pop,.boards-listeners:focus-within .boards-listeners-pop{display:flex}
+.boards-listeners-pop strong{font-size:var(--text-xs,.75rem);text-transform:uppercase;letter-spacing:.04em;color:var(--fg-2,#667)}
+.boards-listeners-pop small{color:var(--fg-2,#667)}
+
+/* tiles and avatars */
+.boards-claim{display:inline-flex;align-items:center;gap:.25rem;color:var(--fg-2,#667)}
+.boards-claim .ico{width:.9rem;height:.9rem}
+.boards-claim small{opacity:.85}
+.boards-avatar.is-agent{display:inline-flex;align-items:center;justify-content:center}
+.boards-avatar.is-agent .ico{width:70%;height:70%}
+
+/* card sheet claim row */
+.cards-claim{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.5rem 0;font-size:var(--text-sm,.875rem);color:var(--fg-2,#667)}
+.cards-claim .robot{width:1.1rem;height:1.1rem}
+.cards-claim strong{color:var(--fg,#111)}
+.cards-claim form{display:inline}
+
+/* admin agents page */
+.agents-key{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.agents-key code{padding:.25rem .5rem;background:var(--surface-2,rgba(128,128,128,.12));border:1px solid var(--border,#ccc);border-radius:var(--radius-sm,6px);word-break:break-all;user-select:all}
+.agents-boards{list-style:none;margin:.25rem 0 .5rem;padding:0;display:flex;flex-direction:column;gap:.25rem}
+.agents-boards li{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.agents-pick{display:flex;flex-wrap:wrap;gap:.25rem 1rem;max-width:none}

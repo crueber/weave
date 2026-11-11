@@ -1,0 +1,22 @@
+{{define "title"}}Board media{{end}}
+{{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+<div class="x-media">
+<h2>Media</h2>
+<nav class="x-row" aria-label="Media filter">
+  <a href="/boards/{{$d.BoardID}}/media"{{if eq $d.Type "all"}} class="x-on"{{end}}>All</a>
+  <a href="/boards/{{$d.BoardID}}/media?type=image"{{if eq $d.Type "image"}} class="x-on"{{end}}>Images</a>
+  <a href="/boards/{{$d.BoardID}}/media?type=video"{{if eq $d.Type "video"}} class="x-on"{{end}}>Videos</a>
+  <a href="/boards/{{$d.BoardID}}/media?type=doc"{{if eq $d.Type "doc"}} class="x-on"{{end}}>Documents &amp; links</a>
+  <a class="x-grow" href="/boards/{{$d.BoardID}}">Back to board</a>
+</nav>
+<ul class="x-grid">
+{{range $a := $d.Items}}<li class="x-file x-tile">
+  {{if $a.ThumbnailURL}}<a href="{{$a.DownloadURL}}" target="_blank" rel="noopener"><img src="{{$a.ThumbnailURL}}" alt="{{$a.Name}}" loading="lazy"></a>
+  {{else if $a.IsVideo}}<video src="{{$a.DownloadURL}}" controls preload="none"></video>
+  {{else}}<span class="x-ext">{{if eq $a.Type "link"}}LINK{{else}}FILE{{end}}</span>{{end}}
+  <div>{{if eq $a.Type "link"}}<a href="{{deref $a.URL}}" target="_blank" rel="noopener noreferrer">{{$a.Name}}</a>{{else}}<a href="{{$a.DownloadURL}}">{{$a.Name}}</a>{{end}}</div>
+  <div class="x-muted">on <a href="/cards/{{$a.CardID}}">{{$a.CardName}}</a> &middot; {{xDate $a.CreatedAt}}</div>
+</li>
+{{else}}<li class="x-muted">Nothing here.</li>{{end}}
+</ul>
+</div>{{end}}

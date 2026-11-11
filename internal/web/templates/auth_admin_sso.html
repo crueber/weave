@@ -1,0 +1,41 @@
+{{define "title"}}Single sign-on - Weave{{end}}
+{{define "page"}}
+<link rel="stylesheet" href="/static/auth_pages.css">
+<div class="auth-page"><h1>Single sign-on &amp; terms</h1>
+<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups">Groups</a> <a href="/admin/agents">AI agents</a> <a href="/admin/sso" aria-current="page">Single sign-on &amp; terms</a></nav>
+<div id="sso-body">{{template "sso-body" .}}</div></div>
+{{end}}
+
+{{define "sso-body"}}{{with .Data}}
+{{if .Flash}}<div class="auth-flash" role="status">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
+<section class="card auth-sec"><h2>OpenID Connect</h2>
+  <p class="muted">Redirect URI to register with your provider: <code>{{.S.RedirectURL}}</code>.{{if .S.FromEnv}} Overridden by environment: {{range .S.FromEnv}}<code>{{.}}</code> {{end}}{{end}}</p>
+  <form class="auth-form auth-grid" hx-post="/ui/admin/sso" hx-target="#sso-body" method="post" action="/ui/admin/sso">
+    <label>Issuer URL <input name="issuer" value="{{.S.Issuer}}" placeholder="https://idp.example.com/realms/main"></label>
+    <label>Client ID <input name="clientId" value="{{.S.ClientID}}"></label>
+    <label>Client secret <input type="password" name="clientSecret" placeholder="{{if .S.HasSecret}}(unchanged){{end}}" autocomplete="off"></label>
+    <label>Scopes <input name="scopes" value="{{.S.Scopes}}"></label>
+    <label>Email claim <input name="emailClaim" value="{{.S.EmailClaim}}"></label>
+    <label>Name claim <input name="nameClaim" value="{{.S.NameClaim}}"></label>
+    <label>Username claim <input name="usernameClaim" value="{{.S.UsernameClaim}}"></label>
+    <fieldset><legend>Groups (roles are owned by your identity provider)</legend>
+    <label>Groups claim <input name="groupsClaim" value="{{.S.GroupsClaim}}" placeholder="groups"></label>
+    <label>Admin group <input name="adminGroup" value="{{.S.AdminGroup}}"></label>
+    <label>Project owner group <input name="ownerGroup" value="{{.S.OwnerGroup}}"></label>
+    <label>User group <input name="userGroup" value="{{.S.UserGroup}}"></label>
+    <label>Worker group <input name="workerGroup" value="{{.S.WorkerGroup}}"></label>
+    <label>Guest group <input name="guestGroup" value="{{.S.GuestGroup}}"></label>
+    <label>Team group prefix <input name="teamPrefix" value="{{.S.TeamPrefix}}"></label>
+    <label class="inline"><input type="checkbox" name="requireGroup" value="true" {{if .S.RequireGroup}}checked{{end}}><input type="hidden" name="requireGroup" value="false"> Deny sign-in unless in a role group</label>
+    </fieldset>
+    <label class="inline"><input type="checkbox" name="autoProvision" value="true" {{if .S.AutoProvision}}checked{{end}}><input type="hidden" name="autoProvision" value="false"> Create accounts on first sign-in</label>
+    <button class="primary" type="submit">Save SSO settings</button>
+  </form>
+</section>
+<section class="card auth-sec"><h2>Terms of service</h2>
+  <p class="muted">When set, every user must accept the current text at sign-in. Changing the text asks everyone again. Leave empty to disable.</p>
+  <form class="auth-form" hx-post="/ui/admin/sso/terms" hx-target="#sso-body" method="post" action="/ui/admin/sso/terms">
+    <textarea name="text" rows="8">{{.Terms.Text}}</textarea><button class="primary" type="submit">Save terms</button></form>
+</section>
+{{end}}{{end}}

@@ -1,0 +1,19 @@
+{{define "page"}}
+<div class="admin-page">
+<h1>{{t "en" "admin.title"}}</h1>
+<nav class="admin-links">
+  <a class="admin-tile" href="/admin/users"><span class="admin-ico" aria-hidden="true">&#128101;</span>{{t "en" "admin.users"}}</a>
+  <a class="admin-tile" href="/admin/groups"><span class="admin-ico" aria-hidden="true">&#129489;&#8205;&#129309;&#8205;&#129489;</span>{{t "en" "admin.groups"}}</a>
+  <a class="admin-tile" href="/admin/agents"><span class="admin-ico" aria-hidden="true">&#129302;</span>{{t "en" "admin.agents"}}</a>
+  <a class="admin-tile" href="/admin/webhooks"><span class="admin-ico" aria-hidden="true">&#128279;</span>{{t "en" "admin.webhooks"}}</a>
+  <a class="admin-tile" href="/admin/config"><span class="admin-ico" aria-hidden="true">&#9881;&#65039;</span>{{t "en" "admin.config"}}</a>
+  <a class="admin-tile" href="/admin/backup" download><span class="admin-ico" aria-hidden="true">&#128190;</span>{{t "en" "admin.backup"}}</a>
+</nav>
+<section class="panel admin-sys">
+  <p>{{t "en" "admin.version"}}: <strong>{{.Data.Version}}</strong></p>
+  <p>{{t "en" "admin.storage"}}: <strong>{{.Data.Storage.TotalBytes}}</strong> bytes (db {{.Data.Storage.DBBytes}}, files {{.Data.Storage.FilesBytes}})</p>
+  <h2>{{t "en" "admin.stats"}}</h2>
+  <table class="admin-stats">{{range $k, $v := .Data.Counts}}<tr><td>{{$k}}</td><td>{{$v}}</td></tr>{{end}}</table>
+</section>
+</div>
+{{end}}

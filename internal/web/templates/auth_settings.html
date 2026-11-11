@@ -1,0 +1,61 @@
+{{define "title"}}Settings - Weave{{end}}
+{{define "page"}}
+<link rel="stylesheet" href="/static/auth_pages.css">
+<script src="/static/auth_presence.js" defer></script>
+<div class="auth-page"><h1>Settings</h1>
+<div id="settings-body">{{template "settings-body" .}}</div></div>
+{{end}}
+
+{{define "settings-body"}}{{with .Data}}{{$u := .User}}
+{{if .Flash}}<div class="auth-flash" role="status">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
+
+<section class="card auth-sec"><h2>Profile</h2>
+  <div class="auth-avatar-row">
+    {{if $u.AvatarURL}}<img class="avatar" src="{{$u.AvatarURL}}" alt="" width="64" height="64">{{else}}<span class="avatar avatar-ph">{{authInitial $u.Name}}</span>{{end}}
+    <form hx-post="/ui/settings/avatar" hx-encoding="multipart/form-data" hx-target="#settings-body" method="post" action="/ui/settings/avatar" enctype="multipart/form-data">
+      <input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required><button type="submit">Upload avatar</button></form>
+    {{if $u.AvatarURL}}<form hx-post="/ui/settings/avatar/delete" hx-target="#settings-body" method="post" action="/ui/settings/avatar/delete"><button type="submit">Remove</button></form>{{end}}
+  </div>
+  <form hx-post="/ui/settings/profile" hx-target="#settings-body" method="post" action="/ui/settings/profile" class="auth-form">
+    <p class="muted"><strong>{{$u.Name}}</strong>{{if $u.Username}} (@{{deref $u.Username}}){{end}} &middot; {{$u.Email}}</p>
+    <label>Phone <input name="phone" value="{{deref $u.Phone}}"></label>
+    <label>Organization <input name="organization" value="{{deref $u.Organization}}"></label>
+    <button class="primary" type="submit">Save profile</button>
+  </form>
+  <p class="muted">Role: <strong>{{$u.Role}}</strong>. Name, email and role are managed by your identity provider (OIDC groups) and refresh when you sign in.</p>
+</section>
+
+<section class="card auth-sec"><h2>Preferences</h2>
+  <form hx-post="/ui/settings/preferences" hx-target="#settings-body" method="post" action="/ui/settings/preferences" class="auth-form">
+    <label>Language <input name="language" value="{{deref $u.Language}}" placeholder="en"></label>
+    <label>Theme <select name="theme">{{range $o := .Themes}}<option value="{{$o}}" {{if eq (deref $u.Theme) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label>Card density <select name="cardDensity">{{range $o := .Densities}}<option value="{{$o}}" {{if eq (deref $u.CardDensity) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label>Colour-blind mode <select name="colourBlindMode">{{range $o := .ColourModes}}<option value="{{$o}}" {{if eq (deref $u.ColourBlindMode) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label>Auto-logout after idle minutes (0 = never) <input type="number" min="0" name="autoLogoutMinutes" value="{{if $u.AutoLogoutMinutes}}{{$u.AutoLogoutMinutes}}{{else}}0{{end}}"></label>
+    <label>Editor mode <select name="defaultEditorMode">{{range $o := .Editors}}<option value="{{$o}}" {{if eq $u.DefaultEditorMode $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label>Home view <select name="defaultHomeView">{{range $o := .HomeViews}}<option value="{{$o}}" {{if eq $u.DefaultHomeView $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label>Project order <select name="defaultProjectsOrder">{{range $o := .Orders}}<option value="{{$o}}" {{if eq $u.DefaultProjectsOrder $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
+    <label class="inline"><input type="checkbox" name="subscribeOwnCards" value="true" {{if $u.SubscribeOwnCards}}checked{{end}}><input type="hidden" name="subscribeOwnCards" value="false"> Subscribe to cards I create</label>
+    <label class="inline"><input type="checkbox" name="subscribeToCardWhenCommenting" value="true" {{if $u.SubscribeToCardWhenCommenting}}checked{{end}}><input type="hidden" name="subscribeToCardWhenCommenting" value="false"> Subscribe to cards when I comment</label>
+    <label class="inline"><input type="checkbox" name="turnOffRecentCardHighlighting" value="true" {{if $u.TurnOffRecentCardHighlighting}}checked{{end}}><input type="hidden" name="turnOffRecentCardHighlighting" value="false"> Turn off recent-card highlighting</label>
+    <label class="inline"><input type="checkbox" name="enableFavoritesByDefault" value="true" {{if $u.EnableFavoritesByDefault}}checked{{end}}><input type="hidden" name="enableFavoritesByDefault" value="false"> Favourite new projects by default</label>
+    <button class="primary" type="submit">Save preferences</button>
+  </form>
+</section>
+
+<section class="card auth-sec"><h2>API key</h2>
+  {{if .NewAPIKey}}<div class="auth-flash">Copy your new key now, it will not be shown again:<br><code class="auth-secret">{{.NewAPIKey}}</code></div>{{end}}
+  <p class="muted">{{if $u.HasAPIKey}}Active key <code>{{$u.APIKeyPrefix}}...</code>. Send it as <code>X-API-Key</code> or <code>Authorization: Bearer</code>.{{if $u.APIKeyExpired}} <span class="badge badge-warn">expired {{deref $u.APIKeyExpiresAt}}</span> It no longer works; create a new one.{{else if $u.APIKeyExpiresAt}} Expires {{deref $u.APIKeyExpiresAt}}.{{end}}{{else}}No API key yet.{{end}}</p>
+  <p class="muted">For the CLI or an agent: <code>weave config set url {{.BaseURL}}</code> then <code>weave config set token &lt;key&gt;</code> (or set <code>WEAVE_URL</code> / <code>WEAVE_TOKEN</code>). The key acts with your role.</p>
+  <form class="auth-inline" hx-post="/ui/settings/apikey" hx-target="#settings-body" method="post" action="/ui/settings/apikey"><label class="inline">Expires <select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label> <button type="submit">{{if $u.HasAPIKey}}Rotate key{{else}}Create key{{end}}</button></form>
+  {{if $u.HasAPIKey}}<form class="auth-inline" hx-post="/ui/settings/apikey/revoke" hx-target="#settings-body" method="post" action="/ui/settings/apikey/revoke"><button type="submit">Revoke</button></form>{{end}}
+</section>
+
+<section class="card auth-sec"><h2>Sessions</h2>
+  <ul class="auth-list">{{range .Sessions}}<li><span>{{if .UserAgent}}{{.UserAgent}}{{else}}Unknown client{{end}} <small class="muted">{{.RemoteAddr}} - since {{.CreatedAt}}</small>{{if .Current}} <strong>(this session)</strong>{{end}}</span>
+    {{if not .Current}}<form hx-post="/ui/settings/sessions/{{.ID}}/revoke" hx-target="#settings-body" method="post" action="/ui/settings/sessions/{{.ID}}/revoke"><button type="submit">Revoke</button></form>{{end}}</li>{{end}}</ul>
+  <form class="auth-inline" hx-post="/ui/settings/sessions/revoke-others" hx-target="#settings-body" method="post" action="/ui/settings/sessions/revoke-others"><button type="submit">Sign out all other sessions</button></form>
+  <form class="auth-inline" method="post" action="/logout"><button type="submit">Sign out</button></form>
+</section>
+{{end}}{{end}}

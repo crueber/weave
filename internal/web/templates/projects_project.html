@@ -1,0 +1,102 @@
+{{define "title"}}{{.Data.P.Name}} - Weave{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/projects_ui.css">
+<section class="projects-page">
+  <header class="projects-hero{{if .Data.P.BackgroundType}} has-bg{{end}}{{if eq .Data.P.BackgroundType "image"}} has-image{{end}}">
+    <div class="projects-hero-band" style="{{projects_hero .Data.P}}" aria-hidden="true"></div>
+    <div class="projects-hero-tools">
+      {{template "projects-star" dict "P" .Data.P "Ctx" "page"}}
+      {{if .Data.P.CanManage}}<button type="button" class="projects-hero-btn" hx-get="/ui/projects/{{.Data.P.ID}}/settings" hx-target="#modal">Project settings</button>{{end}}
+    </div>
+    <div class="projects-hero-inner">
+      <a class="projects-back" href="/">&larr; Projects</a>
+      <h1 title="{{.Data.P.Name}}"><span class="projects-hero-title">{{.Data.P.Name}}</span>{{if .Data.P.IsHidden}} <small>(hidden)</small>{{end}}</h1>
+      {{if .Data.P.Description}}<p class="projects-desc">{{.Data.P.Description}}</p>{{end}}
+    </div>
+  </header>
+  <div class="projects-boards">
+    <h2>Boards</h2>
+    <div class="projects-grid">
+      {{range .Data.Boards}}<a class="projects-board" href="/boards/{{.ID}}"{{if .Style}} style="{{.Style}}"{{end}}><span>{{.Name}}</span></a>{{end}}
+      {{if .Data.CanCreateBoard}}<button class="projects-board projects-board-new" hx-get="/ui/projects/{{.Data.P.ID}}/boards/new" hx-target="#modal">+ Create board</button>{{end}}
+    </div>
+    {{if and (not .Data.Boards) (not .Data.CanCreateBoard)}}<div class="empty-state"><span class="empty-art" aria-hidden="true">&#129529;</span><h3>No boards here yet</h3><p>No boards you can access in this project yet.</p></div>{{end}}
+  </div>
+</section>{{end}}
+
+{{define "projects-board-new"}}<form class="projects-dialog" hx-post="/ui/projects/{{.Data.P.ID}}/boards" hx-target="#toasts" hx-swap="beforeend">
+  <h2>Create board</h2>
+  <input type="hidden" name="projectId" value="{{.Data.P.ID}}">
+  <label>Name <input name="name" required maxlength="128" autofocus></label>
+  <footer><button type="button" data-close-dialog>Cancel</button> <button class="primary">Create</button></footer>
+</form>{{end}}
+
+{{define "projects-settings"}}<div class="projects-dialog projects-settings">
+  <h2>Project settings</h2>
+  <nav class="projects-tabs" role="tablist">
+    {{range $t := .Data.Tabs}}<button role="tab" hx-get="/ui/projects/{{$.Data.P.ID}}/settings/{{index $t 0}}" hx-target="#settings-body" hx-swap="innerHTML">{{index $t 1}}</button>{{end}}
+  </nav>
+  <div id="settings-body">{{template "projects-tab-general" .}}</div>
+  <footer><button data-reload>Done</button></footer>
+</div>{{end}}
+
+{{define "projects-tab-general"}}<form class="projects-form" hx-post="/ui/projects/{{.Data.P.ID}}" hx-target="#settings-body">
+  <input type="hidden" name="tab" value="general">
+  <label>Name <input name="name" value="{{.Data.P.Name}}" required maxlength="128"></label>
+  <label>Description <textarea name="description" rows="3" maxlength="1024">{{.Data.P.Description}}</textarea></label>
+  <button class="primary">Save</button>
+</form>
+<div class="projects-rows">
+  <form hx-post="/ui/projects/{{.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="general">
+    <input type="hidden" name="useProjectLabels" value="{{if .Data.P.UseProjectLabels}}false{{else}}true{{end}}">
+    <span>Project-wide labels: <b>{{if .Data.P.UseProjectLabels}}on{{else}}off{{end}}</b> <small>(one label set shared by all boards)</small></span>
+    <button>{{if .Data.P.UseProjectLabels}}Turn off{{else}}Turn on{{end}}</button></form>
+  <form hx-post="/ui/projects/{{.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="general">
+    <input type="hidden" name="isHidden" value="{{if .Data.P.IsHidden}}false{{else}}true{{end}}">
+    <span>Hidden: <b>{{if .Data.P.IsHidden}}yes{{else}}no{{end}}</b> <small>(hidden projects are not listed on the home page by default)</small></span>
+    <button>{{if .Data.P.IsHidden}}Unhide{{else}}Hide{{end}}</button></form>
+</div>
+<div class="projects-danger"><button class="danger" hx-delete="/ui/projects/{{.Data.P.ID}}" hx-confirm="Delete project '{{.Data.P.Name}}' with all its boards and cards? This cannot be undone.">Delete project</button></div>{{end}}
+
+{{define "projects-tab-background"}}<div class="projects-bgpick">
+  <form class="projects-rows" hx-post="/ui/projects/{{.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="background">
+    <input type="hidden" name="backgroundType" value="">
+    <span>Current: <b>{{if .Data.P.BackgroundType}}{{.Data.P.BackgroundType}}{{else}}none{{end}}</b></span><button>Remove background</button></form>
+  <h3>Colour</h3>
+  <form class="projects-rows" hx-post="/ui/projects/{{.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="background">
+    <input type="hidden" name="backgroundType" value="color">
+    <input type="color" name="backgroundColor" value="{{if .Data.P.BackgroundColor}}{{.Data.P.BackgroundColor}}{{else}}#1d6fa5{{end}}"><button>Use colour</button></form>
+  <h3>Presets</h3>
+  <div class="projects-swatches">{{range .Data.Gradients}}<form hx-post="/ui/projects/{{$.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="background">
+    <input type="hidden" name="backgroundType" value="gradient"><input type="hidden" name="backgroundGradient" value="{{.Name}}">
+    <button class="projects-swatch{{if eq .Name $.Data.P.BackgroundGradient}} on{{end}}" style="{{.CSS}}" title="{{.Name}}" aria-label="{{.Name}}"></button></form>{{end}}</div>
+  <h3>Images</h3>
+  <div class="projects-swatches">{{range .Data.Images}}<div class="projects-imgwrap">
+    <form hx-post="/ui/projects/{{$.Data.P.ID}}" hx-target="#settings-body"><input type="hidden" name="tab" value="background">
+      <input type="hidden" name="backgroundType" value="image"><input type="hidden" name="backgroundImageId" value="{{.ID}}">
+      <button class="projects-swatch{{if eq .ID $.Data.P.BackgroundImageID}} on{{end}}" style="background:center/cover url(/projects/{{$.Data.P.ID}}/background-images/{{.ID}}/thumbnail)" aria-label="Use image"></button></form>
+    <button class="projects-x" title="Delete image" hx-delete="/ui/projects/{{$.Data.P.ID}}/background-images/{{.ID}}" hx-target="#settings-body" hx-confirm="Delete this image?">&times;</button></div>{{end}}</div>
+  <form class="projects-rows" hx-post="/ui/projects/{{.Data.P.ID}}/background-images" hx-target="#settings-body" hx-encoding="multipart/form-data">
+    <input type="hidden" name="apply" value="true"><input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required><button>Upload image</button></form>
+</div>{{end}}
+
+{{define "projects-tab-managers"}}<ul class="projects-list">{{range .Data.Managers}}<li><span>{{.Name}} <small>{{.Email}}</small>{{if .IsOwner}} <em>owner</em>{{end}}</span>
+  <button hx-delete="/ui/projects/{{$.Data.P.ID}}/managers/{{.ID}}" hx-target="#settings-body" hx-confirm="Remove {{.Name}} as manager?">Remove</button></li>{{end}}</ul>
+<form class="projects-rows" hx-post="/ui/projects/{{.Data.P.ID}}/managers" hx-target="#settings-body">
+  <select name="userId" required><option value="">Add manager&hellip;</option>{{range .Data.Candidates}}<option value="{{.ID}}">{{.Name}} ({{.Email}})</option>{{end}}</select><button class="primary">Add</button></form>
+<p><small>Only admin and project owner users can be managers.</small></p>{{end}}
+
+{{define "projects-tab-fields"}}{{range .Data.Groups}}<section class="projects-group">
+  <form class="projects-rows" hx-post="/ui/fieldgroups/{{.ID}}?pid={{$.Data.P.ID}}" hx-target="#settings-body"><input name="name" value="{{.Name}}" required maxlength="128" aria-label="Group name"><button>Rename</button>
+    <button type="button" class="danger" hx-delete="/ui/fieldgroups/{{.ID}}?pid={{$.Data.P.ID}}" hx-target="#settings-body" hx-confirm="Delete group '{{.Name}}' and its fields?">Delete group</button></form>
+  <ul class="projects-list">{{range .Fields}}<li><span>{{.Name}} <small>{{.Type}}{{if .Options}}: {{range $i, $o := .Options}}{{if $i}}, {{end}}{{$o}}{{end}}{{end}}{{if .ShowOnFrontOfCard}} &middot; on card front{{end}}</small></span>
+    <button hx-delete="/ui/basefields/{{.ID}}?pid={{$.Data.P.ID}}" hx-target="#settings-body" hx-confirm="Delete field '{{.Name}}'?">Delete</button></li>{{end}}</ul>
+  <form class="projects-rows" hx-post="/ui/fieldgroups/{{.ID}}/fields?pid={{$.Data.P.ID}}" hx-target="#settings-body">
+    <input name="name" placeholder="New field name" required maxlength="128">
+    <select name="type">{{range $.Data.FieldTypes}}<option>{{.}}</option>{{end}}</select>
+    <input name="options" placeholder="Options (select), comma separated">
+    <label class="projects-check"><input type="checkbox" name="showOnFrontOfCard" value="true"> on card front</label><button>Add field</button></form>
+</section>{{else}}<p class="projects-empty">No base custom field groups yet. Groups defined here can be added to any card in the project.</p>{{end}}
+<form class="projects-rows" hx-post="/ui/projects/{{.Data.P.ID}}/fieldgroups" hx-target="#settings-body">
+  <input name="name" placeholder="New group name" required maxlength="128"><button class="primary">Add group</button></form>{{end}}
+
+{{define "projects-star-block"}}{{template "projects-star" .Data}}{{end}}

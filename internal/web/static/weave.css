@@ -1,0 +1,101 @@
+/* ==========================================================================
+   Weave design system  (see docs/DESIGN-SYSTEM.md)
+   Theme: <html data-theme="light|dark">; absent => follows prefers-color-scheme.
+   Token names are a public contract; other stylesheets rely on them.
+   ========================================================================== */
+:root{
+  color-scheme:light;
+  /* surfaces */
+  --bg:#f5f2ec; --surface:#ffffff; --surface-2:#faf8f4; --surface-3:#efebe3;
+  --border:#e3ddd1; --border-strong:#8c8474;
+  --fg:#1c1917; --fg-2:#44403c; --muted:#6b645b;
+  --overlay:rgba(28,25,23,.55);
+  /* intent */
+  --accent:#3e4fd6; --accent-hover:#3140b8; --accent-soft:#e8ebff; --accent-fg:#ffffff;
+  --danger:#c42b1c; --danger-soft:#fde8e5;
+  --success:#1a7a45; --success-soft:#dff5e8;
+  --warning:#8a5a00; --warning-soft:#fff1cc;
+  --focus-ring:#3e4fd6;
+  /* board */
+  --list-bg:#ebe6db; --list-bg-hover:#e4ded1;
+  --tile-bg:#ffffff; --tile-border:#e0d9cb;
+  --tile-shadow:0 1px 0 rgba(28,25,23,.08),0 1px 2px rgba(28,25,23,.06);
+  --tile-shadow-hover:0 2px 0 rgba(28,25,23,.06),0 6px 16px rgba(28,25,23,.14);
+  --drop-indicator:#3e4fd6;
+  /* label palette (white text passes AA) */
+  --label-fg:#ffffff;
+  --label-red:#c42b1c; --label-orange:#b04a05; --label-yellow:#8f6500; --label-green:#1a7a45; --label-teal:#0e7569;
+  --label-blue:#1a62c7; --label-indigo:#4a47d6; --label-purple:#7a3fc9; --label-pink:#bf2160; --label-gray:#5c6470;
+  /* shape */
+  --radius-sm:6px; --radius:10px; --radius-lg:16px; --radius-pill:999px;
+  --shadow-1:0 1px 2px rgba(28,25,23,.06),0 1px 1px rgba(28,25,23,.04);
+  --shadow-2:0 2px 4px rgba(28,25,23,.06),0 8px 20px rgba(28,25,23,.08);
+  --shadow-3:0 4px 8px rgba(28,25,23,.08),0 24px 56px rgba(28,25,23,.20);
+  /* type */
+  --font-sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+  --font-display:ui-rounded,"SF Pro Rounded","Nunito","Avenir Next",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --text-xs:.75rem; --text-sm:.8125rem; --text-md:.9375rem; --text-lg:1.125rem; --text-xl:1.5rem; --text-2xl:2.25rem;
+  --space-1:.25rem; --space-2:.5rem; --space-3:.75rem; --space-4:1rem; --space-5:1.5rem; --space-6:2rem; --space-7:3rem; --space-8:4.5rem;
+  /* motion */
+  --ease:cubic-bezier(.2,.7,.2,1); --dur-fast:.12s; --dur:.22s;
+  /* extras */
+  --topbar-h:56px;
+  --card:var(--surface); /* legacy alias */
+}
+:root[data-theme="dark"]{ color-scheme:dark;
+  --bg:#14120f; --surface:#1f1c18; --surface-2:#262320; --surface-3:#2f2b26;
+  --border:#38332d; --border-strong:#7f7566;
+  --fg:#f4efe7; --fg-2:#d3cbbf; --muted:#a39a8c;
+  --overlay:rgba(5,4,3,.68);
+  --accent:#9aa8ff; --accent-hover:#b5c0ff; --accent-soft:#2a2f5c; --accent-fg:#0d1033;
+  --danger:#ff8f82; --danger-soft:#4a1f1b;
+  --success:#6fd49b; --success-soft:#173a28;
+  --warning:#f2cc66; --warning-soft:#40330f;
+  --focus-ring:#b5c0ff;
+  --list-bg:#1a1814; --list-bg-hover:#201d19;
+  --tile-bg:#2a2722; --tile-border:#3a352e;
+  --tile-shadow:0 1px 0 rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.35);
+  --tile-shadow-hover:0 2px 0 rgba(0,0,0,.4),0 8px 22px rgba(0,0,0,.55);
+  --drop-indicator:#9aa8ff;
+  --label-fg:#14110e;
+  --label-red:#ff9a8f; --label-orange:#ffb871; --label-yellow:#f2d066; --label-green:#78d8a2; --label-teal:#62d6c8;
+  --label-blue:#82b9ff; --label-indigo:#a9adff; --label-purple:#cca6ff; --label-pink:#ffa3c8; --label-gray:#b3bcc8;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  --shadow-2:0 2px 4px rgba(0,0,0,.35),0 8px 20px rgba(0,0,0,.4);
+  --shadow-3:0 4px 8px rgba(0,0,0,.4),0 24px 56px rgba(0,0,0,.6);
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){ color-scheme:dark;
+  --bg:#14120f; --surface:#1f1c18; --surface-2:#262320; --surface-3:#2f2b26;
+  --border:#38332d; --border-strong:#7f7566;
+  --fg:#f4efe7; --fg-2:#d3cbbf; --muted:#a39a8c;
+  --overlay:rgba(5,4,3,.68);
+  --accent:#9aa8ff; --accent-hover:#b5c0ff; --accent-soft:#2a2f5c; --accent-fg:#0d1033;
+  --danger:#ff8f82; --danger-soft:#4a1f1b;
+  --success:#6fd49b; --success-soft:#173a28;
+  --warning:#f2cc66; --warning-soft:#40330f;
+  --focus-ring:#b5c0ff;
+  --list-bg:#1a1814; --list-bg-hover:#201d19;
+  --tile-bg:#2a2722; --tile-border:#3a352e;
+  --tile-shadow:0 1px 0 rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.35);
+  --tile-shadow-hover:0 2px 0 rgba(0,0,0,.4),0 8px 22px rgba(0,0,0,.55);
+  --drop-indicator:#9aa8ff;
+  --label-fg:#14110e;
+  --label-red:#ff9a8f; --label-orange:#ffb871; --label-yellow:#f2d066; --label-green:#78d8a2; --label-teal:#62d6c8;
+  --label-blue:#82b9ff; --label-indigo:#a9adff; --label-purple:#cca6ff; --label-pink:#ffa3c8; --label-gray:#b3bcc8;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  --shadow-2:0 2px 4px rgba(0,0,0,.35),0 8px 20px rgba(0,0,0,.4);
+  --shadow-3:0 4px 8px rgba(0,0,0,.4),0 24px 56px rgba(0,0,0,.6);
+}}
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:var(--text-md)/1.5 var(--font-sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-underline-offset:2px}a:hover{color:var(--accent-hover)}
+h1,h2,h3,h4{font-family:var(--font-display);line-height:1.2;letter-spacing:-.01em}
+main{padding:var(--space-5) var(--space-4)}
+::selection{background:var(--accent-soft)}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.muted{color:var(--muted)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}

@@ -1,0 +1,43 @@
+{{define "title"}}Boards - Weave{{end}}
+{{define "page"}}{{template "boards_list_in" .Data}}{{end}}
+
+{{define "boards_list_in"}}<link rel="stylesheet" href="/static/boards_board.css">
+<section class="boards-projboards" id="project-boards">
+  <div class="boards-tiles">
+    {{range .Boards}}<a class="boards-boardtile" href="/boards/{{.ID}}">{{.Name}}{{if .IsTemplate}} <span class="boards-badge">template</span>{{end}}{{if .IsPublic}} <span class="boards-badge">public</span>{{end}}</a>{{else}}<p><em>No boards yet.</em></p>{{end}}
+    {{if .CanCreate}}<button class="boards-boardtile boards-new" hx-get="/ui/projects/{{.ProjectID}}/boards/new" hx-target="#modal" hx-swap="innerHTML">+ New board</button>{{end}}
+  </div>
+</section>{{end}}
+
+{{define "boards_new"}}{{with .Data}}<div class="boards-newdlg">
+  <h2>New board</h2>
+  <form class="boards-form" hx-post="/ui/projects/{{.ProjectID}}/boards">
+    <label>Name <input name="name" required maxlength="128" autofocus></label>
+    <label>Default view <select name="defaultView"><option value="kanban">kanban</option><option value="list">list</option><option value="grid">grid</option><option value="calendar">calendar</option><option value="map">map</option></select></label>
+    <button class="primary">Create board</button>
+  </form>
+  {{if .Templates}}<h3>From a template</h3>
+  <form class="boards-form" hx-post="/ui/projects/{{.ProjectID}}/boards/from-template">
+    <label>Template <select name="templateId" required>{{range .Templates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <label>Name <input name="name" required maxlength="128"></label>
+    <button>Create from template</button>
+  </form>{{end}}
+  <h3>Import</h3>
+  <form class="boards-form" hx-post="/ui/projects/{{.ProjectID}}/boards/import" hx-encoding="multipart/form-data">
+    <label>Format <select name="format"><option value="planka">Planka / Weave JSON</option><option value="trello">Trello JSON</option><option value="csv">CSV (list, name, description, due, labels)</option></select></label>
+    <label>Board name (optional) <input name="name" maxlength="128"></label>
+    <label>File <input type="file" name="file" required accept=".json,.csv,application/json,text/csv"></label>
+    <button>Import board</button>
+  </form>
+</div>{{end}}{{end}}
+
+{{define "boards_templates"}}{{with .Data}}<ul class="boards-templates">{{range .Templates}}<li><a href="/boards/{{.ID}}">{{.Name}}</a></li>{{else}}<li><em>No templates published.</em></li>{{end}}</ul>{{end}}{{end}}
+
+{{define "boards_projlabels"}}{{with .Data}}<section id="project-labels" class="boards-sec"><h3>Project-wide labels</h3>
+  {{range .Groups}}<div class="boards-badge">{{.Name}}{{if .SingleSelect}} (single select){{end}}</div> {{end}}
+  {{range .Labels}}<span class="boards-label" style="background:{{boardsColor .Color}}">{{deref .Name}}</span> {{else}}<em>No project labels</em>{{end}}
+  {{if .CanEdit}}<form class="boards-inline" hx-post="/ui/projects/{{.ProjectID}}/labels" hx-target="#project-labels" hx-swap="outerHTML">
+    <input name="name" placeholder="Label name"><select name="color">{{range boardsColors}}<option value="{{.}}">{{.}}</option>{{end}}</select><button class="primary">Add label</button></form>
+  <form class="boards-inline" hx-post="/ui/projects/{{.ProjectID}}/label-groups" hx-target="#project-labels" hx-swap="outerHTML">
+    <input name="name" placeholder="Group name" required><label class="chk"><input type="checkbox" name="singleSelect" value="true"><input type="hidden" name="singleSelect" value="false"> single select</label><button>Add group</button></form>{{end}}
+</section>{{end}}{{end}}

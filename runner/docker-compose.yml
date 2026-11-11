@@ -1,0 +1,24 @@
+# Forgejo Actions runner for building Weave. Run on a host with Docker.
+#   1. Forgejo: Site/Repo/User settings -> Actions -> Runners -> "Create new runner" -> copy the registration token
+#   2. echo "RUNNER_TOKEN=<token>" > runner/.env
+#   3. docker compose -f runner/docker-compose.yml --env-file runner/.env up -d
+# Jobs run in containers and get the host Docker socket, so `docker build` works in the package job.
+services:
+  runner:
+    image: code.forgejo.org/forgejo/runner:6@sha256:e8dd2880f2fc81984d2308b93f1bc064dfb41187942300676536c09a3b30043d # runner:6 (scripts/update-pins.sh)
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?registration token required}
+      FORGEJO_URL: ${FORGEJO_URL:-https://github.com}
+      RUNNER_NAME: ${RUNNER_NAME:-weave-runner}
+    volumes:
+      - runner-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config.yml:/config.yml:ro
+    command: >
+      sh -c "cd /data &&
+      ( [ -f .runner ] || forgejo-runner register --no-interactive --instance $$FORGEJO_URL --token $$RUNNER_TOKEN --name $$RUNNER_NAME --labels docker:docker://node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5 ) &&
+      forgejo-runner daemon --config /config.yml"
+volumes:
+  runner-data:

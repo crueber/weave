@@ -1,0 +1,19 @@
+{{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/cards_modal.css">
+<div class="cards-map">
+  <div class="cards-cal-head"><a href="/boards/{{$d.BoardID}}">&larr; Board</a><h2>Map</h2><a href="/boards/{{$d.BoardID}}/calendar">Calendar</a></div>
+  {{if $d.Points}}
+  <figure>
+    <svg viewBox="0 0 {{$d.W}} {{$d.H}}" class="cards-map-svg" role="img" aria-label="Plot of {{len $d.Points}} cards by coordinates">
+      <rect width="{{$d.W}}" height="{{$d.H}}" class="cards-map-bg"/>
+      {{range $d.Grid}}<line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" class="cards-map-grid"/>{{end}}
+      {{range $d.Points}}<a href="/cards/{{.ID}}" hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML"><circle cx="{{.X}}" cy="{{.Y}}" r="7" class="cards-map-pt"><title>{{.Name}} ({{.Lat}}, {{.Lng}})</title></circle>
+        <text x="{{.X}}" y="{{.LY}}" class="cards-map-lbl" text-anchor="middle">{{.Name}}</text></a>{{end}}
+    </svg>
+    <figcaption class="cards-muted">Equirectangular plot of card coordinates ({{$d.Bounds}}). North is up.</figcaption>
+  </figure>
+  <table class="cards-map-list"><thead><tr><th>Card</th><th>Place</th><th>Latitude</th><th>Longitude</th><th></th></tr></thead><tbody>
+    {{range $d.Points}}<tr><td><a href="/cards/{{.ID}}" hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML">{{.Name}}</a></td><td>{{.LocationName}}</td><td>{{.Lat}}</td><td>{{.Lng}}</td>
+      <td><a href="https://www.openstreetmap.org/?mlat={{.Lat}}&mlon={{.Lng}}#map=14/{{.Lat}}/{{.Lng}}" rel="noopener noreferrer" target="_blank">OpenStreetMap &#8599;</a></td></tr>{{end}}
+  </tbody></table>
+  {{else}}<p class="cards-muted">No cards on this board have a location yet. Open a card and use <em>Location</em> to add coordinates.</p>{{end}}
+</div>{{end}}

@@ -1,0 +1,16 @@
+{{define "title"}}Webhook deliveries - Weave{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<div class="notify-head"><h1>Deliveries: {{.Data.W.Name}}</h1><div class="notify-actions"><a href="/admin/webhooks">Back to webhooks</a></div></div>
+<p class="notify-meta">{{.Data.W.URL}}</p>
+{{if not .Data.Items}}<p class="notify-empty">No deliveries yet.</p>{{end}}
+<table class="notify-table"><thead><tr><th>When</th><th>Event</th><th>State</th><th>HTTP</th><th>Attempts</th><th>Time</th><th></th></tr></thead><tbody>
+{{range .Data.Items}}<tr>
+  <td>{{notifyTime .CreatedAt}}</td><td>{{.Event}}</td>
+  <td><span class="notify-state {{.State}}">{{.State}}</span>{{if .NextAttemptAt}}<div class="notify-meta">next {{notifyTime .NextAttemptAt}}</div>{{end}}</td>
+  <td>{{if .Status}}{{.Status}}{{else}}-{{end}}{{if .Error}}<div class="notify-meta">{{.Error}}</div>{{end}}</td>
+  <td>{{.Attempts}}</td><td>{{.DurationMs}} ms</td>
+  <td><button class="notify-btn" hx-post="/ui/admin/webhook-deliveries/{{.ID}}/retry">Redeliver</button></td>
+</tr>{{if .ResponseBody}}<tr><td colspan="7"><pre class="notify-pre">{{.ResponseBody}}</pre></td></tr>{{end}}{{end}}
+</tbody></table>
+</section>{{end}}
