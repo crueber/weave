@@ -1,0 +1,26 @@
+{{define "title"}}Dashboard - Weave{{end}}
+{{define "notify_cardlist"}}{{if not .}}<p class="notify-empty">Nothing here.</p>{{end}}<ul class="notify-items">{{range .}}
+<li class="notify-item"><div class="notify-body"><div class="notify-summary"><a href="/cards/{{.ID}}">{{.Name}}</a></div>
+<div class="notify-meta">{{.Project}} / {{.BoardName}} / {{.List}}{{if .DueDate}} &middot; due {{notifyTime .DueDate}}{{end}}</div></div></li>{{end}}</ul>{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<div class="notify-head"><h1>Dashboard</h1>
+<div class="notify-actions"><a href="/notifications">Inbox{{if .Data.D.Unread}} ({{.Data.D.Unread}}){{end}}</a></div></div>
+{{if .Data.Saved}}<p class="notify-flash">Dashboard saved.</p>{{end}}
+<div class="notify-grid">
+{{range .Data.D.Panels}}{{if .Enabled}}<div class="notify-card"><h2>{{.Title}}</h2>
+  {{if eq .ID "myCards"}}{{template "notify_cardlist" $.Data.D.MyCards}}{{end}}
+  {{if eq .ID "dueSoon"}}{{template "notify_cardlist" $.Data.D.DueSoon}}{{end}}
+  {{if eq .ID "overdue"}}{{template "notify_cardlist" $.Data.D.Overdue}}{{end}}
+  {{if eq .ID "recentActivity"}}{{if not $.Data.D.Activity}}<p class="notify-empty">No recent activity.</p>{{end}}<ul class="notify-items">{{range $.Data.D.Activity}}
+    <li class="notify-item"><div class="notify-body"><div class="notify-summary">{{if .CardID}}<a href="/cards/{{.CardID}}">{{.Summary}}</a>{{else}}{{.Summary}}{{end}}</div>
+    <div class="notify-meta">{{.BoardName}} &middot; {{notifyTime .CreatedAt}}</div></div></li>{{end}}</ul>{{end}}
+</div>{{end}}{{end}}
+</div>
+<details class="notify-card"><summary>Customize panels</summary>
+<form method="post" action="/ui/dashboard" class="notify-form">
+  {{range .Data.D.Panels}}<label class="notify-check"><input type="checkbox" name="panels" value="{{.ID}}"{{if .Enabled}} checked{{end}}> {{.Title}}</label>{{end}}
+  <label>Rows per panel <input type="number" name="limit" min="1" max="50" value="{{.Data.D.Limit}}"></label>
+  <button class="notify-btn primary">Save</button>
+</form></details>
+</section>{{end}}

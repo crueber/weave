@@ -1,0 +1,17 @@
+{{define "title"}}{{.Data.Board.Name}} (public board) - Weave{{end}}
+{{define "page"}}{{with .Data}}<link rel="stylesheet" href="/static/boards_board.css">
+<link rel="stylesheet" href="/static/boards_colors.css">
+<div class="boards-shell boards-public" id="board-shell"{{boardsBoardAttr .Board}}>
+  <header class="boards-head">
+    <h1>{{.Board.Name}}</h1>
+    <nav class="boards-views" aria-label="Board views">
+      <a href="{{boardsHref .PageURL "kanban" .Query}}"{{if eq .View "kanban"}} class="active"{{end}}>Kanban</a>
+      <a href="{{boardsHref .PageURL "list" .Query}}"{{if eq .View "list"}} class="active"{{end}}>List</a>
+      <a href="{{boardsHref .PageURL "grid" .Query}}"{{if eq .View "grid"}} class="active"{{end}}>Grid</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="boards-badge">Read-only public view</span>
+  </header>
+  {{template "boards_filterbar" .}}
+  {{template "boards_body_in" .}}
+</div>{{end}}{{end}}

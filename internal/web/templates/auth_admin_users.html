@@ -1,0 +1,39 @@
+{{define "title"}}Users - Weave{{end}}
+{{define "page"}}
+<link rel="stylesheet" href="/static/auth_pages.css">
+<div class="auth-page"><h1>Users</h1>
+<nav class="auth-tabs"><a href="/admin/users" aria-current="page">Users</a> <a href="/admin/groups">Groups</a> <a href="/admin/agents">AI agents</a> <a href="/admin/sso">Single sign-on &amp; terms</a></nav>
+<div id="users-body">{{template "users-body" .}}</div></div>
+{{end}}
+
+{{define "users-body"}}{{with .Data}}
+{{if .Flash}}<div class="auth-flash" role="status">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
+
+<p class="muted">Accounts are created when people sign in through SSO. Roles and team groups follow your identity provider's groups and refresh on every sign-in; this page only lets you deactivate or delete accounts.</p>
+
+<form class="auth-inline" hx-get="/admin/users" hx-target="#users-body" hx-push-url="true" method="get" action="/admin/users">
+  <input type="search" name="q" value="{{.Q}}" placeholder="Search users">
+  <label class="inline"><input type="checkbox" name="includeDeactivated" value="true" {{if .ShowDeactivated}}checked{{end}}> Show deactivated</label>
+  <button type="submit">Search</button></form>
+
+{{range .Users}}
+<details class="card auth-user {{if .IsDeactivated}}is-off{{end}}">
+  <summary>
+    {{if .AvatarURL}}<img class="avatar" src="{{.AvatarURL}}" alt="" width="28" height="28">{{else}}<span class="avatar avatar-ph">{{authInitial .Name}}</span>{{end}}
+    <strong>{{.Name}}</strong> <span class="muted">{{.Email}}{{if .Username}} / @{{deref .Username}}{{end}}</span>
+    <span class="badge" title="managed by OIDC groups">{{.Role}}</span>
+    {{if .IsAgent}}{{template "auth_agent_badge"}}{{end}}{{if .IsDeactivated}}<span class="badge badge-warn">deactivated</span>{{end}}{{if .IsSSO}}<span class="badge">SSO</span>{{end}}
+    <span class="presence presence-{{.Presence}}" title="{{.Presence}}"></span>
+  </summary>
+  <p class="muted">Role <strong>{{.Role}}</strong> (managed by OIDC groups){{if .Phone}} &middot; {{deref .Phone}}{{end}}{{if .Organization}} &middot; {{deref .Organization}}{{end}}</p>
+  <div class="auth-actions">
+    {{if .IsDeactivated}}<form hx-post="/ui/admin/users/{{.ID}}/activate" hx-target="#users-body" method="post" action="/ui/admin/users/{{.ID}}/activate"><button type="submit">Activate</button></form>
+    {{else}}<form hx-post="/ui/admin/users/{{.ID}}/deactivate" hx-target="#users-body" hx-confirm="Deactivate this user and end their sessions?" method="post" action="/ui/admin/users/{{.ID}}/deactivate"><button type="submit">Deactivate</button></form>{{end}}
+    {{if not .IsAgent}}<form hx-post="/ui/admin/users/{{.ID}}/sessions/revoke-all" hx-target="#users-body" hx-confirm="Sign this user out of all sessions?" method="post" action="/ui/admin/users/{{.ID}}/sessions/revoke-all"><button type="submit">Sign out everywhere</button></form>
+    {{if .IsSSO}}<form hx-post="/ui/admin/users/{{.ID}}/relink" hx-target="#users-body" hx-confirm="Unlink this account from its SSO identity? Their sessions end, and the next SSO login with this e-mail address binds a new identity." method="post" action="/ui/admin/users/{{.ID}}/relink"><button type="submit">Relink SSO identity</button></form>{{end}}{{end}}
+    <form hx-post="/ui/admin/users/{{.ID}}/delete" hx-target="#users-body" hx-confirm="Permanently delete this user?" method="post" action="/ui/admin/users/{{.ID}}/delete"><button type="submit" class="danger">Delete</button></form>
+  </div>
+</details>
+{{else}}<p class="muted">No users match.</p>{{end}}
+{{end}}{{end}}

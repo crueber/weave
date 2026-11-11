@@ -1,0 +1,16 @@
+.git
+.claude
+data/
+*.db
+*.db-*
+/weave
+.env
+docs/
+scripts/
+*.md
+**/.env*
+!.env.example
+runner/
+.forgejo/
+**/*.pem
+**/*.key

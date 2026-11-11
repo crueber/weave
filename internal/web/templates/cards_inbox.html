@@ -1,0 +1,15 @@
+{{define "page"}}<link rel="stylesheet" href="/static/cards_modal.css">{{template "cards_inbox" .}}{{end}}
+
+{{define "cards_inbox"}}{{$d := .Data}}<section id="cards-inbox" class="cards-inbox" hx-target="#cards-inbox" hx-swap="outerHTML">
+  <h3>Inbox</h3>
+  {{if not $d.Enabled}}<p class="cards-muted">The inbox is off for this board.</p>
+    {{if $d.CanManage}}<button hx-post="/ui/boards/{{$d.BoardID}}/inbox/settings" hx-vals='{"enabled":"true"}'>Enable inbox</button>{{end}}
+  {{else}}
+  <form hx-post="/ui/boards/{{$d.BoardID}}/inbox" class="cards-row"><input name="name" placeholder="Capture an idea&hellip;" required aria-label="New draft"><button class="primary">Add</button></form>
+  <ul class="cards-inbox-list">{{range $d.Items}}<li>
+    <a href="/cards/{{.ID}}" hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML">{{.Name}}</a>
+    {{if $d.Lists}}<form hx-post="/ui/cards/{{.ID}}/publish" class="cards-row"><select name="listId" aria-label="Publish to list">{{range $d.Lists}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><button>Publish</button></form>{{end}}
+  </li>{{else}}<li class="cards-muted">Inbox is empty.</li>{{end}}</ul>
+  {{if $d.CanManage}}<button class="cards-linkbtn" hx-post="/ui/boards/{{$d.BoardID}}/inbox/settings" hx-vals='{"enabled":"false"}'>Turn inbox off</button>{{end}}
+  {{end}}
+</section>{{end}}

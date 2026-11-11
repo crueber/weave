@@ -1,0 +1,7 @@
+data/
+*.db*
+/weave
+.claude/
+.env
+/weave-cli
+/dist/

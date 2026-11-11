@@ -1,0 +1,106 @@
+{{define "title"}}{{.Data.Board.Name}} - Weave{{end}}
+{{define "page"}}{{template "boards_page_in" .Data}}{{end}}
+
+{{define "boards_page_in"}}
+<link rel="stylesheet" href="/static/boards_board.css">
+<link rel="stylesheet" href="/static/boards_colors.css">
+<link rel="stylesheet" href="/static/cards_modal.css">
+<link rel="stylesheet" href="/static/agents.css">
+{{template "boards_sprite"}}
+<div class="boards-shell" id="board-shell"{{boardsBoardAttr .Board}}>
+  <header class="boards-head">
+    <h1>{{.Board.Name}}</h1>
+    <nav class="boards-views" aria-label="Board views">
+      <a href="{{boardsHref .PageURL "kanban" .Query}}"{{if eq .View "kanban"}} class="active" aria-current="page"{{end}}>Kanban</a>
+      <a href="{{boardsHref .PageURL "list" .Query}}"{{if eq .View "list"}} class="active" aria-current="page"{{end}}>List</a>
+      <a href="{{boardsHref .PageURL "grid" .Query}}"{{if eq .View "grid"}} class="active" aria-current="page"{{end}}>Grid</a>
+      <a href="/boards/{{.Board.ID}}/calendar">Calendar</a>
+      <a href="/boards/{{.Board.ID}}/map">Map</a>
+    </nav>
+    <span class="spacer"></span>
+    <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+    <a class="boards-btn" href="/boards/{{.Board.ID}}/settings">Settings</a>
+  </header>
+  {{template "boards_filterbar" .}}
+  {{template "boards_body_in" .}}
+  <div id="board-live" data-board="{{.LiveBoardID}}" hidden></div>
+</div>
+<div id="boards-pop" class="boards-pop" hidden></div>
+<div id="boards-announce" class="boards-sr" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="boards-toasts" class="boards-toasts" aria-live="polite"></div>
+{{template "boards_help"}}
+<script src="/static/cards_ui.js" defer></script>
+<script src="/static/boards_board.js" defer></script>
+<script src="/static/boards_compose.js" defer></script>
+<script src="/static/boards_dnd.js" defer></script>
+<script src="/static/boards_popover.js" defer></script>
+<script src="/static/boards_keys.js" defer></script>
+<script src="/static/boards_colors.js" defer></script>{{end}}
+
+{{define "boards_help"}}<dialog id="boards-help" class="boards-help" aria-labelledby="boards-help-h">
+  <form method="dialog" class="boards-help-close"><button class="boards-btn" aria-label="Close shortcuts">Close</button></form>
+  <h2 id="boards-help-h">Keyboard shortcuts</h2>
+  <div class="boards-help-grid">
+    <section><h3>Cards</h3><dl>
+      <dt><kbd>c</kbd></dt><dd>Add a card to the focused list</dd>
+      <dt><kbd>C</kbd></dt><dd>Add a card to the top of the list</dd>
+      <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous card</dd>
+      <dt><kbd>h</kbd> <kbd>l</kbd></dt><dd>Previous / next list</dd>
+      <dt><kbd>Enter</kbd></dt><dd>Open the focused card</dd>
+      <dt><kbd>e</kbd></dt><dd>Quick edit the focused card</dd>
+      <dt><kbd>Space</kbd></dt><dd>Grab a card, then <kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> to move, <kbd>Space</kbd> to drop, <kbd>Esc</kbd> to cancel</dd>
+    </dl></section>
+    <section><h3>Board</h3><dl>
+      <dt><kbd>n</kbd></dt><dd>Add another list</dd>
+      <dt><kbd>/</kbd></dt><dd>Filter cards</dd>
+      <dt><kbd>?</kbd></dt><dd>Show this help</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close dialog, popover or composer</dd>
+    </dl>
+    <h3>Card detail</h3><dl>
+      <dt><kbd>j</kbd> <kbd>k</kbd> / <kbd>&larr;</kbd> <kbd>&rarr;</kbd></dt><dd>Next / previous card in the list</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close</dd>
+    </dl>
+    <h3>Composers</h3><dl>
+      <dt><kbd>Enter</kbd></dt><dd>Add and keep typing</dd>
+      <dt>Paste lines</dt><dd>One card (or list) per line</dd>
+    </dl></section>
+  </div>
+</dialog>{{end}}
+
+{{define "boards_sprite"}}<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-pencil" viewBox="0 0 16 16"><path fill="currentColor" d="M11.7 1.3a1.5 1.5 0 0 1 2.1 2.1l-8.6 8.6-3 .9.9-3 8.6-8.6zM3.4 10.6l-.4 1.4 1.4-.4 7.3-7.3-1-1-7.3 7.3z"/></symbol>
+<symbol id="i-comment" viewBox="0 0 16 16"><path fill="currentColor" d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6l-3 3v-3H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v6h1v1.6L5.6 10H13V4H3z"/></symbol>
+<symbol id="i-clip" viewBox="0 0 16 16"><path fill="currentColor" d="M10.5 2a3.5 3.5 0 0 1 2.5 6l-5 5a2.2 2.2 0 0 1-3.1-3.1l4.6-4.6.9.9-4.6 4.6a.9.9 0 0 0 1.3 1.3l5-5A2.2 2.2 0 0 0 10.5 3.3 2.2 2.2 0 0 0 9 3.9L4.8 8.1l-.9-.9L8.1 3A3.4 3.4 0 0 1 10.5 2z"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3h12v10H2V3zm1.5 1.5v7h9v-7h-9zM7 10 4.8 7.8l.9-.9L7 8.2l3.3-3.3.9.9L7 10z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM7.3 4h1.4v4l2.6 1.6-.7 1.2L7.3 8.8V4z"/></symbol>
+<symbol id="i-desc" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3h12v1.5H2V3zm0 4h12v1.5H2V7zm0 4h8v1.5H2V11z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 2h1.6v5.2H14v1.6H8.8V14H7.2V8.8H2V7.2h5.2V2z"/></symbol>
+<symbol id="i-more" viewBox="0 0 16 16"><path fill="currentColor" d="M3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></symbol>
+<symbol id="i-robot" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 1h1.6v1.6H11A2.5 2.5 0 0 1 13.5 5v5a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 10V5A2.5 2.5 0 0 1 5 2.6h2.2V1zM5 4.1a.9.9 0 0 0-.9.9v5c0 .5.4.9.9.9h6c.5 0 .9-.4.9-.9V5a.9.9 0 0 0-.9-.9H5zM6 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM1 6.5h1v3H1zm13 0h1v3h-1zM6 14h4v1H6z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path fill="currentColor" d="M10.5 3.5 9.4 2.4 3.8 8l5.6 5.6 1.1-1.1L6 8z"/></symbol>
+</defs></svg>{{end}}
+
+{{define "boards_list_options"}}{{range .Data}}{{if or (eq .Type "active") (eq .Type "closed")}}<option value="{{.ID}}">{{deref .Name}}</option>{{end}}{{end}}{{end}}
+{{define "boards_body"}}{{template "boards_body_in" .Data}}{{end}}
+
+{{/* fragments returned by the quick endpoints */}}
+{{define "boards_tiles"}}{{$p := .Data.P}}{{range .Data.Tiles}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}{{end}}
+{{define "boards_cols"}}{{$p := .Data.P}}{{range .Data.Cols}}{{template "boards_col" dict "C" . "P" $p}}{{end}}{{end}}
+{{define "boards_tile_frag"}}{{$p := .Data.P}}{{range .Data.Tiles}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}{{end}}
+{{define "boards_tile_oob"}}{{$p := .Data.P}}{{range .Data.Tiles}}{{template "boards_tile" dict "T" . "P" $p "OOB" true}}{{end}}{{end}}
+
+{{define "boards_quick"}}{{template "boards_quick_in" .Data}}{{end}}
+{{define "boards_quick_oob"}}{{template "boards_quick_in" .Data}}{{template "boards_tile" dict "T" .Data.T "P" .Data.P "OOB" true}}{{end}}
+{{define "boards_quick_in"}}{{$t := .T}}<div class="boards-quick" role="dialog" aria-label="Quick edit card" data-quick="{{$t.ID}}">
+  <form hx-post="/ui/cards/{{$t.ID}}/quick" hx-swap="none" class="boards-quick-title">
+    <label class="boards-sr" for="quick-name-{{$t.ID}}">Card title</label>
+    <textarea id="quick-name-{{$t.ID}}" name="name" rows="3" maxlength="1024" required data-quick-name>{{$t.Name}}</textarea>
+    <div class="boards-quick-actions"><button class="btn btn-primary boards-btn-primary">Save</button><a class="btn btn-ghost boards-btn" href="/cards/{{$t.ID}}" data-open-card="{{$t.ID}}">Open card</a></div>
+  </form>
+  {{if .Labels}}<div class="boards-quick-labels" role="group" aria-label="Labels">
+    {{range .Labels}}<button type="button" class="boards-qlabel{{if .On}} is-on{{end}}" style="--c:{{boardsColor .Color}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"
+      hx-post="/ui/cards/{{$t.ID}}/quick/label" hx-vals='{"labelId":"{{.ID}}","on":"{{if .On}}0{{else}}1{{end}}"}' hx-target="closest .boards-quick" hx-swap="outerHTML"><span class="boards-qlabel-dot"></span>{{if .Name}}{{deref .Name}}{{else}}<em>(no name)</em>{{end}}{{if .On}}<span class="boards-qlabel-tick" aria-hidden="true">&#10003;</span>{{end}}</button>{{end}}
+  </div>{{end}}
+  <div class="boards-quick-foot"><button type="button" class="boards-linkbtn boards-danger-link" hx-post="/ui/cards/{{$t.ID}}/quick/archive" hx-swap="none" data-after="archive">Archive card</button></div>
+</div>{{end}}
+

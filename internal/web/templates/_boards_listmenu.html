@@ -1,0 +1,40 @@
+{{/* Body of the list "..." menu (a floating popover, positioned by boards_popover.js; a bottom sheet on phones).
+   Args: C (Column), P (PageData), Name. Top level: quick actions + colour; expanders (one open at a time) for the forms;
+   Archive / Delete pinned in a footer that stays visible while the middle scrolls. */}}
+{{define "boards_list_menu"}}{{$c := .C}}{{$p := .P}}{{$name := .Name}}<div class="boards-menu-pop" data-sheet="1" role="menu" aria-label="Actions for {{$name}}">
+  <div class="boards-menu-scroll">
+    <div class="boards-menu-items">
+      <button type="button" class="boards-menuitem" role="menuitem" data-rename-btn>Rename list</button>
+      {{if $c.AddCardURL}}<button type="button" class="boards-menuitem" role="menuitem" data-add-top-btn>Add card to top</button>{{end}}
+      <button type="button" class="boards-menuitem" role="menuitem" data-collapse-btn>Collapse list</button>
+    </div>
+    <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
+      <span class="boards-menu-h" id="lc-{{$c.List.ID}}">Colour</span>
+      {{template "boards_color_picker" dict "Name" "color" "Current" $c.List.Color "Label" "List colour"}}
+    </form>
+    <details class="boards-sub"><summary class="boards-menuitem" role="menuitem" aria-haspopup="true">Sort cards</summary>
+      <form hx-post="/ui/lists/{{$c.List.ID}}/sort" hx-swap="none" class="boards-sub-body">
+        <div class="boards-inline"><select name="field" aria-label="Sort by"><option value="name">by name</option><option value="dueDate">by due date</option><option value="createdAt">by created</option></select>
+        <select name="order" aria-label="Order"><option value="asc">ascending</option><option value="desc">descending</option></select></div>
+        <button class="boards-btn">Sort</button>
+      </form>
+    </details>
+    <details class="boards-sub"><summary class="boards-menuitem" role="menuitem" aria-haspopup="true">Move all cards</summary>
+      <form hx-post="/ui/lists/{{$c.List.ID}}/move-cards" hx-swap="none" class="boards-sub-body" hx-confirm="Move all cards of this list?">
+        <select name="listId" required aria-label="Target list" hx-get="/ui/boards/{{$p.Board.ID}}/lists" hx-trigger="focus once, mouseenter once" hx-swap="innerHTML" data-exclude-list="{{$c.List.ID}}">{{range $p.Columns}}{{if ne .List.ID $c.List.ID}}<option value="{{.List.ID}}">{{deref .List.Name}}</option>{{end}}{{end}}</select>
+        <button class="boards-btn">Move</button>
+      </form>
+    </details>
+    <details class="boards-sub"><summary class="boards-menuitem" role="menuitem" aria-haspopup="true">List settings</summary>
+      <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-swap="none" class="boards-sub-body">
+        <label>Name <input name="name" value="{{$name}}" required></label>
+        <label>Type <select name="type"><option value="active"{{if eq $c.List.Type "active"}} selected{{end}}>Active</option><option value="closed"{{if eq $c.List.Type "closed"}} selected{{end}}>Closed</option></select></label>
+        <button class="boards-btn">Save</button>
+      </form>
+    </details>
+  </div>
+  <div class="boards-menu-foot">
+    <button type="button" class="boards-menuitem" role="menuitem" hx-post="/ui/lists/{{$c.List.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive.">Archive list</button>
+    <button type="button" class="boards-menuitem danger" role="menuitem" hx-delete="/ui/lists/{{$c.List.ID}}" hx-swap="none" hx-confirm="Delete this list? Its cards go to the trash.">Delete list</button>
+  </div>
+</div>{{end}}

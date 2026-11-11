@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="197" height="22" role="img" aria-label="database: SQLite, built in">
+  <title>database: SQLite, built in</title>
+  <clipPath id="r"><rect width="197" height="22" rx="4"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="72" height="22" fill="#4b4a45"/>
+    <rect x="72" width="125" height="22" fill="#3e4fd6"/>
+  </g>
+  <g fill="#fff" font-family="Verdana,'DejaVu Sans',sans-serif" font-size="11" text-anchor="middle">
+    <text x="36.0" y="15">database</text>
+    <text x="134.5" y="15" font-weight="700">SQLite, built in</text>
+  </g>
+</svg>

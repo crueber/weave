@@ -1,0 +1,11 @@
+{{define "page"}}{{$c := .Data}}<link rel="stylesheet" href="/static/cards_modal.css">
+<article class="cards-share">
+  <p class="cards-muted">Shared card &middot; {{$c.BoardName}} / {{$c.ListName}} &middot; read-only</p>
+  <h1>{{$c.Name}}</h1>
+  <p><span class="cards-badge cards-type-{{$c.Type}}">{{$c.Type}}</span>
+    {{if $c.DueDate}}<span class="cards-due {{if $c.IsDueCompleted}}cards-due-done{{end}}">Due {{cards_when $c.DueDate}}</span>{{end}}
+    {{range $c.Labels}}<span class="cards-label cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}</p>
+  {{if $c.Members}}<p>Members: {{range $i, $m := $c.Members}}{{if $i}}, {{end}}{{$m}}{{end}}</p>{{end}}
+  {{if $c.Lat}}<p>Location: {{$c.LocationName}} ({{cards_f $c.Lat}}, {{cards_f $c.Lng}})</p>{{end}}
+  <div class="cards-md">{{cards_md_s $c.Description}}</div>
+</article>{{end}}

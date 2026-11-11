@@ -1,0 +1,9 @@
+{{define "page"}}<link rel="stylesheet" href="/static/cards_modal.css">{{template "cards_templates" .}}{{end}}
+
+{{define "cards_templates"}}{{$d := .Data}}<section id="cards-templates" class="cards-inbox">
+  <h3>Card templates</h3>
+  {{if not $d.Items}}<p class="cards-muted">No templates yet. Open a card and choose <em>Save as template</em>.</p>{{end}}
+  <ul class="cards-inbox-list">{{range $d.Items}}<li><strong>{{.Name}}</strong> <span class="cards-badge">{{.Type}}</span>
+    {{if $d.ListID}}<button hx-post="/ui/cards/{{.ID}}/from-template" hx-vals='{"listId":"{{$d.ListID}}"}' hx-target="#modal" hx-swap="innerHTML">Create card</button>{{end}}
+    <button class="cards-linkbtn cards-danger" hx-post="/ui/cards/{{.ID}}/delete" hx-confirm="Delete this template?" hx-swap="none">Delete</button></li>{{end}}</ul>
+</section>{{end}}

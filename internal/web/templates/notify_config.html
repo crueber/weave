@@ -1,0 +1,33 @@
+{{define "title"}}Configuration - Weave{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
+<section class="notify-page">
+<div class="notify-head"><h1>Configuration</h1><div class="notify-actions"><a href="/admin/webhooks">Webhooks</a></div></div>
+{{if .Data.Saved}}<p class="notify-flash">Configuration saved.</p>{{end}}
+<div class="notify-card"><h2>Logo</h2>
+  {{if .Data.V.HasLogo}}<p><img src="/branding/logo" alt="Logo" class="notify-logo"></p>
+  <button class="notify-btn danger" hx-post="/ui/admin/config/logo/delete">Remove logo</button>{{else}}<p class="notify-help">No logo uploaded.</p>{{end}}
+  <form hx-post="/ui/admin/config/logo" hx-encoding="multipart/form-data" class="notify-form">
+    <label>Upload logo <input type="file" name="logo" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" required></label>
+    <button class="notify-btn">Upload</button></form></div>
+<form hx-post="/ui/admin/config">
+{{range .Data.Groups}}<div class="notify-card" id="cfg-{{.ID}}"><h2>{{.Title}}</h2><div class="notify-form">
+  {{range .Fields}}{{$locked := notifyHas $.Data.V.EnvLocked .Key}}{{$val := index $.Data.V.Values .Key}}
+  <label class="notify-field">{{.Label}}
+  {{if eq .Type "bool"}}<input type="checkbox" name="{{.Key}}" value="true"{{if eq $val "true"}} checked{{end}}{{if $locked}} disabled{{end}}>{{if not $locked}}<input type="hidden" name="{{.Key}}" value="false">{{end}}
+  {{else if eq .Type "select"}}<select name="{{.Key}}"{{if $locked}} disabled{{end}}>{{range .Options}}<option{{if eq . $val}} selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq .Type "textarea"}}<textarea name="{{.Key}}" rows="4"{{if $locked}} disabled{{end}}>{{$val}}</textarea>
+  {{else if eq .Type "password"}}<input type="password" name="{{.Key}}" value="" autocomplete="new-password" placeholder="{{if notifyHas $.Data.V.SecretsSet .Key}}(stored){{end}}"{{if $locked}} disabled{{end}}>
+  {{else}}<input type="text" name="{{.Key}}" value="{{$val}}"{{if $locked}} disabled{{end}}>{{end}}
+  {{if $locked}}<span class="notify-help">set by environment ({{.Key}})</span>{{else if .Help}}<span class="notify-help">{{.Help}}</span>{{end}}
+  </label>{{end}}
+</div></div>{{end}}
+<button class="notify-btn primary">Save configuration</button>
+</form>
+<div class="notify-card"><h2>Send test e-mail</h2>
+  <form hx-post="/ui/admin/config/smtp-test" hx-swap="none" class="notify-form">
+    <label>To <input type="email" name="to" required></label><button class="notify-btn">Send test</button>
+    {{if not .Data.SMTPOn}}<span class="notify-help">SMTP host is not configured yet; save it first.</span>{{end}}</form></div>
+<div class="notify-card"><h2>Search index</h2>
+  <p class="notify-help">The index is maintained automatically. Rebuild it after bulk imports or restores.</p>
+  <button class="notify-btn" hx-post="/ui/admin/search/reindex" hx-swap="none">Rebuild search index</button></div>
+</section>{{end}}

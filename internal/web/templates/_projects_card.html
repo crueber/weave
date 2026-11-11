@@ -1,0 +1,11 @@
+{{define "projects-star"}}{{if .P.IsFavorite}}<button class="projects-star on" title="Remove from favorites" aria-pressed="true"
+  hx-delete="/ui/projects/{{.P.ID}}/favorite?ctx={{.Ctx}}" hx-include="#projects-filter" hx-target="{{if eq .Ctx "home"}}#project-list{{else}}this{{end}}" hx-swap="{{if eq .Ctx "home"}}innerHTML{{else}}outerHTML{{end}}">&#9733;</button>{{else}}<button class="projects-star" title="Add to favorites" aria-pressed="false"
+  hx-post="/ui/projects/{{.P.ID}}/favorite?ctx={{.Ctx}}" hx-include="#projects-filter" hx-target="{{if eq .Ctx "home"}}#project-list{{else}}this{{end}}" hx-swap="{{if eq .Ctx "home"}}innerHTML{{else}}outerHTML{{end}}">&#9734;</button>{{end}}{{end}}
+
+{{define "projects-card"}}<article class="projects-card{{if .P.IsHidden}} is-hidden{{end}}" data-id="{{.P.ID}}">
+  <a class="projects-card-link" href="/projects/{{.P.ID}}">
+    <span class="projects-card-cover" style="{{projects_cover .P}}" aria-hidden="true"></span>
+    <span class="projects-card-body"><span class="projects-card-name">{{.P.Name}}</span>
+    <span class="projects-card-meta">{{.P.BoardCount}} board{{if ne .P.BoardCount 1}}s{{end}}{{if .P.IsHidden}} &middot; hidden{{end}}</span></span></a>
+  {{template "projects-star" dict "P" .P "Ctx" "home"}}
+</article>{{end}}

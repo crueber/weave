@@ -1,0 +1,30 @@
+{{define "title"}}Groups - Weave{{end}}
+{{define "page"}}
+<link rel="stylesheet" href="/static/auth_pages.css">
+<div class="auth-page"><h1>User groups</h1>
+<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups" aria-current="page">Groups</a> <a href="/admin/agents">AI agents</a> <a href="/admin/sso">Single sign-on &amp; terms</a></nav>
+<div id="groups-body">{{template "groups-body" .}}</div></div>
+{{end}}
+
+{{define "groups-body"}}{{with .Data}}
+{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
+{{if .IsAdmin}}
+<section class="card auth-sec"><h2>New group</h2>
+  <form class="auth-inline" hx-post="/ui/admin/groups" hx-target="#groups-body" method="post" action="/ui/admin/groups">
+    <input name="name" placeholder="Group name" required><button class="primary" type="submit">Create</button></form></section>
+{{end}}
+{{range $g := .Groups}}
+<section class="card auth-sec"><h2>{{$g.Name}} <small class="muted">({{len $g.Members}})</small></h2>
+  <ul class="auth-list">{{range $g.Members}}<li><span>{{.Name}} {{if .Username}}<small class="muted">@{{deref .Username}}</small>{{end}}</span>
+    {{if $.Data.IsAdmin}}<form hx-post="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove"><button type="submit">Remove</button></form>{{end}}</li>
+  {{else}}<li class="muted">No members.</li>{{end}}</ul>
+  {{if $.Data.IsAdmin}}
+  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}/members" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}/members">
+    <select name="userId" required><option value="">Add member...</option>{{range $.Data.Users}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><button type="submit">Add</button></form>
+  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}">
+    <input name="name" value="{{$g.Name}}" required><button type="submit">Rename</button></form>
+  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}/delete" hx-target="#groups-body" hx-confirm="Delete this group? Its board memberships are removed." method="post" action="/ui/admin/groups/{{$g.ID}}/delete"><button class="danger" type="submit">Delete group</button></form>
+  {{end}}
+</section>
+{{else}}<p class="muted">No groups yet.</p>{{end}}
+{{end}}{{end}}

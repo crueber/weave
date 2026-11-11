@@ -1,0 +1,16 @@
+{{/* Swatch picker used by Board Settings and the list menu. Args: Name (form field), Current (any stored colour), Label, Off (disabled).
+   One radio group named .Name carries the value (presets, "none" and an optional custom swatch); the native colour input and
+   the hex field only feed the custom radio (see boards_colors.js) so exactly one value is submitted. */}}
+{{define "boards_color_picker"}}{{$cur := boardsHexOf .Current}}{{$name := .Name}}{{$off := .Off}}{{$isPreset := false}}{{range boardsPresets}}{{if eq .Hex $cur}}{{$isPreset = true}}{{end}}{{end}}{{$custom := and $cur (not $isPreset)}}
+<div class="bcp" data-colorpick role="group" aria-label="{{.Label}}">
+  <div class="bcp-swatches" role="radiogroup" aria-label="{{.Label}} presets">
+    <label class="bcp-sw bcp-none" title="No colour"><input type="radio" name="{{$name}}" value=""{{if not $cur}} checked{{end}}{{if $off}} disabled{{end}}><i></i><span class="boards-sr">No colour</span></label>
+    {{range boardsPresets}}<label class="bcp-sw" title="{{.Label}}"><input type="radio" name="{{$name}}" value="{{.Hex}}"{{if eq .Hex $cur}} checked{{end}}{{if $off}} disabled{{end}}><i style="--sw:{{.Hex}}"></i><span class="boards-sr">{{.Label}}</span></label>{{end}}
+    <label class="bcp-sw bcp-customsw" title="Custom colour"{{if not $custom}} hidden{{end}}><input type="radio" name="{{$name}}" value="{{if $custom}}{{$cur}}{{end}}" data-bcp-radio{{if $custom}} checked{{end}}{{if $off}} disabled{{end}}><i{{if $custom}} style="--sw:{{$cur}}"{{end}}></i><span class="boards-sr">Custom colour</span></label>
+  </div>
+  {{if not $off}}<div class="bcp-custom">
+    <input type="color" class="bcp-native" data-bcp-color value="{{if $cur}}{{$cur}}{{else}}#3e63dd{{end}}" aria-label="Pick a custom colour">
+    <input type="text" class="bcp-hex" data-bcp-hex value="{{if $custom}}{{$cur}}{{end}}" placeholder="#rrggbb" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Custom colour as #rrggbb">
+    <button type="button" class="bcp-apply" data-bcp-apply>Use</button>
+  </div>{{end}}
+</div>{{end}}

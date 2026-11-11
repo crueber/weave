@@ -1,0 +1,5 @@
+{{define "cards_claim"}}{{with .Data}}{{if .Card.ClaimedBy}}<div class="cards-claim" id="card-claim">
+  <link rel="stylesheet" href="/static/agents.css">
+  {{template "auth_robot"}}<span>Claimed by <strong>{{deref .Card.ClaimedByName}}</strong> until {{.Until}}{{if .Card.ClaimNote}} <em>&ldquo;{{deref .Card.ClaimNote}}&rdquo;</em>{{end}}</span>
+  {{if .CanEdit}}<form hx-post="/ui/cards/{{.Card.ID}}/release" hx-target="#card-claim" hx-swap="outerHTML" method="post" action="/ui/cards/{{.Card.ID}}/release"><button type="submit" class="cards-linkbtn">Release</button></form>{{end}}
+</div>{{else}}<div id="card-claim" hidden></div>{{end}}{{end}}{{end}}

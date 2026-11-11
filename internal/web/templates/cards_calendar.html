@@ -1,0 +1,24 @@
+{{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script>
+<div id="cards-cal" class="cards-cal" data-board="{{$d.BoardID}}">
+  <div class="cards-cal-head">
+    <a href="/boards/{{$d.BoardID}}">&larr; Board</a>
+    <a href="/boards/{{$d.BoardID}}/calendar?month={{$d.Prev}}" aria-label="Previous month">&lsaquo;</a>
+    <h2>{{$d.Title}}</h2>
+    <a href="/boards/{{$d.BoardID}}/calendar?month={{$d.Next}}" aria-label="Next month">&rsaquo;</a>
+    <a href="/boards/{{$d.BoardID}}/calendar">Today</a>
+    <a href="/boards/{{$d.BoardID}}/map">Map</a>
+  </div>
+  <div class="cards-cal-body">
+    <div class="cards-cal-grid" role="grid">
+      {{range $d.Weekdays}}<div class="cards-cal-dow" role="columnheader">{{.}}</div>{{end}}
+      {{range $d.Days}}<div class="cards-cal-cell {{if not .InMonth}}cards-cal-out{{end}} {{if .Today}}cards-cal-today{{end}}" data-date="{{.Date}}" role="gridcell">
+        <span class="cards-cal-num">{{.Num}}</span>
+        {{range .Cards}}<a class="cards-cal-chip {{if .IsDueCompleted}}cards-due-done{{end}}" draggable="true" data-card="{{.ID}}" href="/cards/{{.ID}}"
+          hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML" hx-trigger="click" title="{{.Name}} — {{cards_when .DueDate}}">{{range .Colors}}<i class="cards-dot cards-color-{{.}}"></i>{{end}}{{.Name}}</a>{{end}}
+      </div>{{end}}
+    </div>
+    <aside class="cards-cal-unsched"><h3>No due date</h3><p class="cards-muted">Drag a card onto a day to schedule it.</p>
+      {{range $d.Unscheduled}}<a class="cards-cal-chip" draggable="true" data-card="{{.ID}}" href="/cards/{{.ID}}" hx-get="/ui/cards/{{.ID}}" hx-target="#modal" hx-swap="innerHTML">{{.Name}}</a>{{else}}<p class="cards-muted">Nothing unscheduled.</p>{{end}}
+    </aside>
+  </div>
+</div>{{end}}
