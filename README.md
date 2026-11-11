@@ -14,9 +14,7 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/crueber/weave/raw/main/docs/demo.webm" width="860" controls>
-    <a href="docs/demo.webm"><img src="docs/screenshots/demo-poster.png" alt="Weave demo: add cards, drag between lists, open a card, switch themes (click to play the video)" width="860"></a>
-  </video>
+  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo: add cards, drag between lists, open a card, switch themes (click for the full-quality video)" width="860"></a>
 </p>
 
 ## Why Weave
