@@ -2,7 +2,8 @@
 
 Weave is a self-hosted kanban board. Humans use the browser; **agents and scripts use the `weave` CLI with an API key**.
 Use this whenever a task involves Weave boards, lists (columns), cards, comments, checklists or attachments, watching
-columns for work, or the user mentions weave, `WEAVE_URL`, `WEAVE_TOKEN`, `weave listen`, `weave next` or `weave agent run`.
+columns for work (a column's name and description are the brief), or the user mentions weave, `WEAVE_URL`, `WEAVE_TOKEN`,
+`weave listen`, `weave next` or `weave agent run`.
 This is the short version; the full skill is one command away: `weave skill print` (and `weave skill print --file
 references/commands.md|agent-workflows.md|events.md|ops.md`). `weave ops` and `weave <tag> <verb> --help` show what the
 server supports.
@@ -18,6 +19,8 @@ Env alternative: `WEAVE_URL`, `WEAVE_TOKEN`, `--profile NAME`.
 4. Claim before you work, release when you stop. A claim is a lease; renew it while working.
 5. Report back on the card: comment what you did, attach artifacts, then move the card.
 6. Preview risky calls with `--dry-run`. Deletes need `--yes` in scripts; never delete or clear on a guess.
+7. The column is the brief: a list's `name` and `description` say what a card there asks for (`weave board tree`
+   shows both). Infer the request from them; if they do not say, ask on the card instead of guessing.
 
 **Commands**
 ```sh

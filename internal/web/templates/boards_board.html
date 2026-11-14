@@ -9,7 +9,10 @@
 {{template "boards_sprite"}}
 <div class="boards-shell" id="board-shell"{{boardsBoardAttr .Board}}>
   <header class="boards-head">
-    <h1>{{.Board.Name}}</h1>
+    <div class="boards-title">
+      {{if .ProjectName}}<nav class="boards-crumbs" aria-label="Breadcrumb"><a href="/">Projects</a> <span aria-hidden="true">/</span> <a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a></nav>{{end}}
+      <h1>{{.Board.Name}}</h1>
+    </div>
     <nav class="boards-views" aria-label="Board views">
       <a href="{{boardsHref .PageURL "kanban" .Query}}"{{if eq .View "kanban"}} class="active" aria-current="page"{{end}}>Kanban</a>
       <a href="{{boardsHref .PageURL "list" .Query}}"{{if eq .View "list"}} class="active" aria-current="page"{{end}}>List</a>
@@ -81,6 +84,22 @@
 </defs></svg>{{end}}
 
 {{define "boards_list_options"}}{{range .Data}}{{if or (eq .Type "active") (eq .Type "closed")}}<option value="{{.ID}}">{{deref .Name}}</option>{{end}}{{end}}{{end}}
+
+{{/* "Agent prompt" dialog: the copy-paste brief for one column (opened from the column menu). */}}
+{{define "boards_agent_prompt"}}{{$d := .Data}}
+<article class="boards-ap" aria-labelledby="boards-ap-h">
+  <header class="boards-ap-head">
+    <div><h2 id="boards-ap-h">Agent prompt</h2><p class="boards-ap-sub">{{deref $d.List.Name}} &middot; {{$d.Board.Name}}</p></div>
+    <button type="button" class="boards-x" data-close-dialog aria-label="Close">&times;</button>
+  </header>
+  <p class="boards-ap-hint">Give this to an AI agent. Edit the text before copying to paste the API key or add more columns (one <code>--list</code> per column).</p>
+  <label class="boards-sr" for="boards-ap-text">Agent prompt text</label>
+  <textarea id="boards-ap-text" class="boards-ap-text" rows="18" spellcheck="false">{{$d.Prompt}}</textarea>
+  <div class="boards-ap-actions">
+    <button type="button" class="btn btn-primary boards-btn-primary" data-copy="#boards-ap-text">Copy to clipboard</button>
+    <button type="button" class="btn btn-ghost boards-btn" data-close-dialog>Close</button>
+  </div>
+</article>{{end}}
 {{define "boards_body"}}{{template "boards_body_in" .Data}}{{end}}
 
 {{/* fragments returned by the quick endpoints */}}

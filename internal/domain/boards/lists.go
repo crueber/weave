@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
@@ -13,21 +14,25 @@ import (
 // List is a board column. Types: active, closed (both shown on the kanban),
 // archive and trash (system lists, position null).
 type List struct {
-	ID        string   `json:"id"`
-	BoardID   string   `json:"boardId"`
-	Type      string   `json:"type"`
-	Position  *float64 `json:"position,omitempty"`
-	Name      *string  `json:"name,omitempty"`
-	Color     *string  `json:"color,omitempty"`
-	CreatedAt string   `json:"createdAt"`
-	UpdatedAt *string  `json:"updatedAt,omitempty"`
+	ID          string   `json:"id"`
+	BoardID     string   `json:"boardId"`
+	Type        string   `json:"type"`
+	Position    *float64 `json:"position,omitempty"`
+	Name        *string  `json:"name,omitempty"`
+	Color       *string  `json:"color,omitempty"`
+	Description *string  `json:"description,omitempty" desc:"brief for this column: what a card here asks for (agents read it)"`
+	CreatedAt   string   `json:"createdAt"`
+	UpdatedAt   *string  `json:"updatedAt,omitempty"`
 }
 
-const listCols = `id,board_id,type,position,name,color,created_at,updated_at`
+// maxListDescLen caps a column description (characters; it ends up in agent prompts).
+const maxListDescLen = 2000
+
+const listCols = `id,board_id,type,position,name,color,description,created_at,updated_at`
 
 func scanList(r interface{ Scan(...any) error }) (List, error) {
 	var l List
-	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.CreatedAt, &l.UpdatedAt)
+	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.CreatedAt, &l.UpdatedAt)
 	return l, err
 }
 
@@ -75,18 +80,20 @@ type ListListIn struct {
 	BoardID string `path:"boardId"`
 }
 type ListCreateIn struct {
-	BoardID  string   `path:"boardId"`
-	Name     string   `json:"name" required:"true"`
-	Type     string   `json:"type" desc:"active (default) | closed"`
-	Color    string   `json:"color" desc:"column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"`
-	Position *float64 `json:"position"`
+	BoardID     string   `path:"boardId"`
+	Name        string   `json:"name" required:"true"`
+	Type        string   `json:"type" desc:"active (default) | closed"`
+	Color       string   `json:"color" desc:"column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"`
+	Description string   `json:"description" desc:"brief for this column: what a card that lands here asks for; agents read it"`
+	Position    *float64 `json:"position"`
 }
 type ListUpdateIn struct {
-	ID       string   `path:"id"`
-	Name     *string  `json:"name"`
-	Color    *string  `json:"color" desc:"column colour: #rrggbb or a preset name; empty string clears the colour"`
-	Type     *string  `json:"type" desc:"switch between active and closed"`
-	Position *float64 `json:"position"`
+	ID          string   `path:"id"`
+	Name        *string  `json:"name"`
+	Color       *string  `json:"color" desc:"column colour: #rrggbb or a preset name; empty string clears the colour"`
+	Type        *string  `json:"type" desc:"switch between active and closed"`
+	Description *string  `json:"description" desc:"brief for this column: what a card that lands here asks for; empty string clears it"`
+	Position    *float64 `json:"position"`
 }
 type ListMoveIn struct {
 	ID       string   `path:"id"`
@@ -136,6 +143,9 @@ func registerListOps() {
 		if err := ops.CheckLen("name", in.Name, ops.MaxNameLen); err != nil {
 			return List{}, err
 		}
+		if err := ops.CheckLen("description", in.Description, maxListDescLen); err != nil {
+			return List{}, err
+		}
 		color, err := NormalizeColor(in.Color)
 		if err != nil {
 			return List{}, err
@@ -145,14 +155,14 @@ func registerListOps() {
 			pos = *in.Position
 		}
 		id := db.NewID()
-		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,created_at) VALUES(?,?,?,?,?,?,?)`,
-			id, in.BoardID, typ, pos, in.Name, nullStr(color), db.Now()); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+			id, in.BoardID, typ, pos, in.Name, nullStr(color), nullStr(in.Description), db.Now()); err != nil {
 			return List{}, err
 		}
 		emit(e, "listCreate", "list.created", in.BoardID, map[string]any{"id": id})
 		return GetList(e.Ctx, e.DB, id)
 	})
-	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, change its type or position", Method: "PATCH", Path: "/lists/{id}",
+	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, set its description (brief for agents), change its type or position", Method: "PATCH", Path: "/lists/{id}",
 		UI: ui("PATCH", "/lists/{id}")}, func(e *ops.Env, in ListUpdateIn) (List, error) {
 		l, err := requireList(e, in.ID, authz.Edit)
 		if err != nil {
@@ -187,10 +197,20 @@ func registerListOps() {
 			}
 			l.Type = *in.Type
 		}
+		if in.Description != nil {
+			if err := ops.CheckLen("description", *in.Description, maxListDescLen); err != nil {
+				return l, err
+			}
+			if strings.TrimSpace(*in.Description) == "" {
+				l.Description = nil
+			} else {
+				l.Description = in.Description
+			}
+		}
 		if in.Position != nil {
 			l.Position = in.Position
 		}
-		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, db.Now(), l.ID); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, db.Now(), l.ID); err != nil {
 			return l, err
 		}
 		emit(e, "listUpdate", "list.updated", l.BoardID, map[string]any{"id": l.ID})

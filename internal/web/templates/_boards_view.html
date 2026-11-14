@@ -28,6 +28,7 @@
       {{template "boards_list_menu" dict "C" $c "P" $p "Name" $name}}
     </details>{{end}}
   </header>
+  {{with $c.List.Description}}<p class="boards-col-desc" title="{{deref .}}">{{deref .}}</p>{{end}}
   <div class="boards-cards" role="list" aria-label="Cards in {{$name}}" data-list="{{$c.List.ID}}"{{if $p.CanEdit}} data-drop="card"{{end}}>
     {{range $c.Cards}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}
     <p class="boards-empty-list" role="note">{{if and $c.Total (not $c.Cards)}}No cards match the filter.{{else if $c.AddCardURL}}This list is empty &mdash; add the first card.{{else}}No cards.{{end}}</p>

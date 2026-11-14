@@ -7,6 +7,7 @@
       <button type="button" class="boards-menuitem" role="menuitem" data-rename-btn>Rename list</button>
       {{if $c.AddCardURL}}<button type="button" class="boards-menuitem" role="menuitem" data-add-top-btn>Add card to top</button>{{end}}
       <button type="button" class="boards-menuitem" role="menuitem" data-collapse-btn>Collapse list</button>
+      <button type="button" class="boards-menuitem" role="menuitem" hx-get="/ui/boards/{{$p.Board.ID}}/lists/{{$c.List.ID}}/agent-prompt" hx-target="#modal" hx-swap="innerHTML" data-menu-close-before>Agent prompt&hellip;</button>
     </div>
     <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
       <span class="boards-menu-h" id="lc-{{$c.List.ID}}">Colour</span>
@@ -28,6 +29,7 @@
     <details class="boards-sub"><summary class="boards-menuitem" role="menuitem" aria-haspopup="true">List settings</summary>
       <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-swap="none" class="boards-sub-body">
         <label>Name <input name="name" value="{{$name}}" required></label>
+        <label>Description <textarea name="description" rows="3" maxlength="2000" placeholder="What a card in this column asks for. It goes into the agent prompt.">{{deref $c.List.Description}}</textarea></label>
         <label>Type <select name="type"><option value="active"{{if eq $c.List.Type "active"}} selected{{end}}>Active</option><option value="closed"{{if eq $c.List.Type "closed"}} selected{{end}}>Closed</option></select></label>
         <button class="boards-btn">Save</button>
       </form>

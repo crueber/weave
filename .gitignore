@@ -2,6 +2,7 @@ data/
 *.db*
 /weave
 .claude/
+.opencode/
 .env
 /weave-cli
 /dist/

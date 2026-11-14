@@ -21,8 +21,8 @@ import (
 // ---- intermediate representation shared by all importers ----
 
 type impList struct {
-	Key, Name, Type, Color string
-	Pos                    float64
+	Key, Name, Type, Color, Desc string
+	Pos                          float64
 }
 type impGroup struct {
 	Key, Name    string
@@ -73,11 +73,12 @@ type exportDoc struct {
 	Cards   []exportCard   `json:"cards"`
 }
 type exportList struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Type     string  `json:"type"`
-	Color    string  `json:"color,omitempty"`
-	Position float64 `json:"position"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`
+	Color       string  `json:"color,omitempty"`
+	Description string  `json:"description,omitempty"`
+	Position    float64 `json:"position"`
 }
 type exportGroup struct {
 	ID           string `json:"id"`
@@ -273,7 +274,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 		if first == "" {
 			first = id
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,created_at) VALUES(?,?,?,?,?,?,?)`, id, boardID, typ, pos, l.Name, nullStr(l.Color), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, boardID, typ, pos, l.Name, nullStr(l.Color), nullStr(l.Desc), now); err != nil {
 			return err
 		}
 	}
@@ -393,7 +394,7 @@ func parseWeave(data []byte) (impBoard, error) {
 	}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
-		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Pos: l.Position})
+		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position})
 	}
 	for _, g := range d.Groups {
 		ib.Groups = append(ib.Groups, impGroup{Key: g.ID, Name: g.Name, SingleSelect: g.SingleSelect})
@@ -650,13 +651,13 @@ func buildExport(ctx context.Context, d *db.DB, b Board) (*exportDoc, error) {
 	if b.Color != nil {
 		doc.Board["color"] = *b.Color
 	}
-	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,'') FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
+	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,'') FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var l exportList
-		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color)
+		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description)
 		doc.Lists = append(doc.Lists, l)
 	}
 	rows.Close()

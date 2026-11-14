@@ -1528,6 +1528,7 @@ Create a list (column) on a board
 | `--name` | body | string | yes |  |
 | `--type` | body | string |  | active (default) \| closed |
 | `--color` | body | string |  | column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none |
+| `--description` | body | string |  | brief for this column: what a card that lands here asks for; agents read it |
 | `--position` | body | number |  |  |
 
 ### `weave list delete`
@@ -1592,7 +1593,7 @@ Sort a list's cards by name, due date or creation time
 
 ### `weave list update`
 
-Rename / recolour a list, change its type or position  
+Rename / recolour a list, set its description (brief for agents), change its type or position  
 `PATCH /lists/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -1601,6 +1602,7 @@ Rename / recolour a list, change its type or position
 | `--name` | body | string |  |  |
 | `--color` | body | string |  | column colour: #rrggbb or a preset name; empty string clears the colour |
 | `--type` | body | string |  | switch between active and closed |
+| `--description` | body | string |  | brief for this column: what a card that lands here asks for; empty string clears it |
 | `--position` | body | number |  |  |
 
 ## notification

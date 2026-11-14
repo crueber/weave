@@ -301,6 +301,27 @@ func registerUI() {
 		}
 		return c.RenderBlock("boards_board.html", "boards_list_options", ls)
 	})
+	// "Agent prompt": the copy-paste brief for one column, shown in the shared modal.
+	web.Route("GET /ui/boards/{boardId}/lists/{listId}/agent-prompt", func(c *web.Ctx) error {
+		boardID, listID := c.R.PathValue("boardId"), c.R.PathValue("listId")
+		if err := authz.RequireBoard(c.Env, boardID, authz.Edit); err != nil {
+			return err
+		}
+		b, err := GetBoard(c.R.Context(), c.Env.DB, boardID)
+		if err != nil {
+			return err
+		}
+		l, err := GetList(c.R.Context(), c.Env.DB, listID)
+		if err != nil || l.BoardID != boardID {
+			return ops.NotFound("list")
+		}
+		lists, err := listsOf(c.Env, boardID, true)
+		if err != nil {
+			return err
+		}
+		return c.RenderBlock("boards_board.html", "boards_agent_prompt", AgentPromptData{
+			Board: b, List: l, Prompt: AgentPrompt(agentBaseURL(c.Env), agentInstallBase(c.Env), b, l, lists)})
+	})
 	toMembers := func(c *web.Ctx, out any) error { return renderSection(c, out.(Member).BoardID, "boards_set_members") }
 	mutPre("board.member.add", normalizeRole, toMembers)
 	mutPre("board.member.update", normalizeRole, toMembers)
@@ -368,6 +389,13 @@ func renderProjectLabels(c *web.Ctx, projectID string) error {
 		rows.Close()
 	}
 	return c.RenderBlock("boards_list.html", "boards_projlabels", map[string]any{"ProjectID": projectID, "Labels": ls, "Groups": gs, "CanEdit": authz.ProjectLevel(c.Env, projectID) >= authz.Manage})
+}
+
+// AgentPromptData feeds the "Agent prompt" dialog opened from a column's menu.
+type AgentPromptData struct {
+	Board  Board
+	List   List
+	Prompt string
 }
 
 // SavedData feeds the saved-filter dropdown fragment.

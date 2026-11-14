@@ -1,6 +1,6 @@
 ---
 name: weave
-description: Drive the Weave kanban server from the command line with the `weave` CLI. Use this skill whenever the task involves Weave boards, lists (columns), cards, comments, checklists or attachments; whenever you must listen or watch for card changes in one or more columns; pick up, claim, work on and report back on cards as an AI agent; wire an agent or script to a column such as Ready, Review or Needs info; or the user mentions weave, WEAVE_URL, WEAVE_TOKEN, a Weave API key, `weave listen`, `weave next` or `weave agent run`. Covers authentication, name resolution (use board and list names instead of ids), the claim/lease protocol, listening patterns, exit codes and safe defaults.
+description: Drive the Weave kanban server from the command line with the `weave` CLI. Use this skill whenever the task involves Weave boards, lists (columns), cards, comments, checklists or attachments; whenever you must listen or watch for card changes in one or more columns; pick up, claim, work on and report back on cards as an AI agent; wire an agent or script to a column such as Ready, Review or Needs info (a column's name and description are the brief for what to do with a card there); or the user mentions weave, WEAVE_URL, WEAVE_TOKEN, a Weave API key, `weave listen`, `weave next` or `weave agent run`. Covers authentication, name resolution (use board and list names instead of ids), the claim/lease protocol, listening patterns, exit codes and safe defaults.
 ---
 
 # Weave CLI
@@ -37,6 +37,9 @@ it from the Weave release page (install.sh / install.ps1) or `go install` the sl
 6. **Preview risky calls**: `--dry-run` prints the request instead of sending it. Deletes ask for
    confirmation on a terminal; scripts must pass `--yes` deliberately. Never delete or clear on a guess.
 7. Prefer ops over scraping: `weave <tag> <verb> --help` shows fields and an example for any op.
+8. **The column is the brief**: a list's `name` and `description` say what a card that lands there asks
+   for (`weave board tree` shows both; an operator can paste a column's *Agent prompt* to point you at
+   one). Read them, infer the request, and do that. If they do not say, ask on the card instead of guessing.
 
 ## 3. Everyday commands
 
@@ -74,6 +77,11 @@ your own actions, and exits 0 on SIGINT/SIGTERM. Useful flags: `--once` (first e
 `WEAVE_CARD_ID`, `WEAVE_LIST_ID`, `WEAVE_BOARD_ID`), `--include-existing` (first emit `card.existing`
 for the backlog already in those columns), `--claim --claim-move-to 'In progress'` (claim each card
 atomically before handling it).
+
+Each column also carries a **description** — the brief for that column. When a request names a column,
+read its `name` and `description` (`weave board tree --board B`, or `weave list list --board B`) and work
+out from them what to do with a card there, including which column to move it to next. Repeat `--list`
+to monitor more columns as one queue.
 
 The all-in-one agent loop (listen, claim, run your command, report, move, release):
 ```sh

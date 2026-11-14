@@ -3980,6 +3980,13 @@
     "desc": "column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"
    },
    {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "brief for this column: what a card that lands here asks for; agents read it"
+   },
+   {
     "name": "position",
     "in": "body",
     "type": "number",
@@ -4134,7 +4141,7 @@
  {
   "name": "list.update",
   "tag": "list",
-  "summary": "Rename / recolour a list, change its type or position",
+  "summary": "Rename / recolour a list, set its description (brief for agents), change its type or position",
   "method": "PATCH",
   "path": "/lists/{id}",
   "auth": "user",
@@ -4165,6 +4172,13 @@
     "type": "string",
     "required": false,
     "desc": "switch between active and closed"
+   },
+   {
+    "name": "description",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "brief for this column: what a card that lands here asks for; empty string clears it"
    },
    {
     "name": "position",

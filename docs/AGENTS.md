@@ -23,6 +23,15 @@ the same guidance ships to agents as an Agent Skill / instructions block for eve
    detected and installed; `--scope project` writes into the current repo so the whole team gets it. See `docs/CLI.md`.
 6. **Wire it to columns**: `weave listen` (just events) or `weave agent run` (the whole loop).
 
+**The column is the brief.** A column can carry a description (column menu → *List settings* → Description;
+it also shows under the column header). The agent skill tells an agent to read a column's **name and
+description** and infer from them what to do with a card that lands there, so "Ready — implement the card,
+comment what changed, then move it to Review" is a complete instruction. To hand a column to an agent, open
+its menu and choose **Agent prompt…**: it copies a ready-to-paste brief with the server URL, the API-key
+login, an install line when the CLI or skill is missing, the column and its description, and one `--list`
+line per other column. The text is editable — paste the agent's key and add the columns it should watch,
+then copy. Weave never puts a secret in that text.
+
 Rotate a key with `weave agent rotateKey AGENT_ID`; delete an agent with `weave agent delete AGENT_ID`.
 
 ## 2. The work protocol
@@ -216,4 +225,6 @@ The CLI speaks to these server features; they are part of the op registry (`weav
 `ready`; `: ping` heartbeats), `card.claim` / `card.release` / `card.renew`, `card.next`
 (`POST /lists/{listId}/next` with JSON `{claim, ttlSeconds, moveTo, note}`), `board.tree`, `card.list` filters
 (`listId`, `labelId`, `memberId`, `claimed`, `q`, `limit`, `cursor`), `list.listeners`, `board.listeners`, `whoami`
-and `agent.*`. The CLI reads its schema from `GET /api/v1/_ops`. See `docs/CLI.md`.
+and `agent.*`. Lists carry `description` (the column brief) in `list.list`, `board.tree` and the mutated
+ops, so an agent can read the request from the column rather than a separate message. The CLI reads its schema from
+`GET /api/v1/_ops`. See `docs/CLI.md`.

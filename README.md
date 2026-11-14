@@ -14,7 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo: add cards, drag between lists, open a card, switch themes (click for the full-quality video)" width="860"></a>
+  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo (36 seconds), shown in the dark theme: add cards, drag between lists, open a card, switch to the light theme" width="860"></a><br>
+  <a href="docs/demo.webm"><b>&#9654; Watch the 36-second demo</b></a> &middot; dark and light themes
 </p>
 
 ## Why Weave
@@ -191,6 +192,20 @@ Weave has no local accounts, passwords or two-factor of its own: your identity p
 | `weave-guests` | `guest` |
 | `weave-team-<name>` | not a role: becomes a Weave **user group** `<name>` (usable in board memberships); membership is synced on every sign-in and removed when the IdP group is |
 
+### Recommended for home labs: Passage
+
+If you do not already run an identity provider, use **[Passage](https://github.com/crueber/passage)**.
+It is a small self-hosted OAuth 2.0 / OIDC provider built for home labs: one Go binary, a single
+SQLite file, no external database, and no enterprise policy engine to configure. It issues the
+`groups` claim and `email_verified: true` that Weave requires, so it works as Weave's IdP without
+extra claims mapping.
+
+To connect the two: add Weave as an application in Passage with OAuth enabled and redirect URI
+`<WEAVE_BASE_URL>/auth/oidc/callback`, set `WEAVE_OIDC_ISSUER` to the Passage base URL, and copy
+the generated `client_id` / `client_secret` into `WEAVE_OIDC_CLIENT_ID` / `WEAVE_OIDC_CLIENT_SECRET`.
+Then assign the `weave-*` groups above to users as groups on that Passage application; Weave
+applies them on every sign-in.
+
 How it behaves:
 - The **highest** role wins when someone is in several role groups (admin > projectOwner > boardUser > worker > guest).
 - Roles are applied on **every sign-in**, promotions and demotions alike, so changes in the IdP take effect at the user's next login (existing sessions keep the old role until then; shorten `WEAVE_SESSION_HOURS` if that matters). The **last admin is never demoted**.
@@ -243,6 +258,7 @@ Environment variables (secrets in env override values stored in the admin UI):
 |---|---|---|
 | `WEAVE_ADDR` | `:8080` | listen address |
 | `WEAVE_BASE_URL` | `http://localhost:8080` | public URL (links, OIDC redirect, cookies) |
+| `WEAVE_AGENT_INSTALL_URL` | `https://github.com/crueber/weave/releases/latest/download` | download base for `install.sh`/`install.ps1`, quoted in the **Agent prompt** a column copies for an AI agent. Point it at your own release page (it must serve `install.sh`) if agents cannot reach GitHub |
 | `WEAVE_DATA_DIR` | `./data` (`/data` in Docker) | database + uploaded files |
 | `WEAVE_SECRET_KEY` | **required** | signs OIDC state (`openssl rand -hex 32`; keep it stable). It does not encrypt the database: webhook secrets, notification-service URLs and SMTP/OIDC secrets saved in the admin UI are stored in `weave.db` in plaintext, so protect the data volume and backups (or set the secrets via environment variables) |
 | `WEAVE_TRUST_PROXY` | `false` | trust `X-Forwarded-*` |

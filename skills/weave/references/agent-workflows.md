@@ -5,6 +5,17 @@ several servers. Every agent should have **its own agent account** (`weave agent
 admin) with access only to the boards it needs (`weave agent access ID --boardId B`). Humans then see
 "triage-bot" on comments, moves and claims, and the Listeners panel shows which agents are online.
 
+## The column is the brief
+
+Operators point agents at a column, often by pasting that column's **Agent prompt** (board menu → list
+"..." → *Agent prompt*). The prompt names the server, the board and the columns to watch, and the
+board's columns carry a **description**: what a card that lands there asks for. Read both before you
+start and infer the request from them — a column called `Ready` with the description "implement the
+card, comment what changed, move it to Review" is the whole instruction. `weave board tree --board B`
+prints every list with its `name` and `description`. If the name and description do not say what to do,
+ask on the card (a comment) instead of guessing, and move it to a `Needs info` column if the board has
+one. To watch several columns as one queue, repeat `--list`.
+
 ## How an agent works a card (the protocol)
 
 1. **Hear about it**: `weave listen` (push) or `weave next` (pull).
