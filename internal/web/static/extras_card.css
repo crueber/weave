@@ -75,7 +75,7 @@ a.x-chip:hover{background:var(--surface-3)}
 .x-chead strong{font-size:var(--text-md)}
 .x-cmenu{margin-left:auto}
 .x-cmenu .x-popbody{width:17rem}
-.x-text{margin-top:.2rem;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.x-text{margin-top:.2rem;overflow-wrap:anywhere;line-height:1.55}
 .x-more-btn{margin-top:var(--space-2)}
 .x-activity li{display:flex;gap:var(--space-2);align-items:flex-start;padding:.45rem 0;color:var(--fg-2);font-size:var(--text-sm);border-bottom:1px solid var(--border)}
 .x-activity li:last-child{border-bottom:0}

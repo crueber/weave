@@ -9,7 +9,7 @@
 #   WEAVE_VERSION            release tag to install (default: latest release)
 #   WEAVE_INSTALL_DIR        install directory (default: /usr/local/bin as root, else ~/.local/bin)
 #   WEAVE_RELEASE_BASE       directory URL that holds the archives and SHA256SUMS.txt (testing / mirrors)
-#   WEAVE_SERVER             Forgejo server (default https://github.com)
+#   WEAVE_SERVER             release host (default https://github.com; github.com works too)
 #   WEAVE_REPO               owner/repo (default crueber/weave)
 #   WEAVE_INSTALL_SKILL      1 = also run `weave skill install` (every detected coding agent), 0 = never (default: ask on a terminal)
 #   WEAVE_REQUIRE_SIGNATURE  1 = refuse to install unless SHA256SUMS.txt.sig verifies (needs OpenSSL >= 3)
@@ -113,7 +113,14 @@ openssl_ed25519() {
 if [ -z "$BASE" ]; then
   if [ -z "$VERSION" ]; then
     say "looking up the latest release..."
-    VERSION=$(fetch_stdout "$SERVER/api/v1/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name":"\([^"]*\)".*/\1/p' | head -n 1)
+    # Gitea/Forgejo serve their API from the server itself; github.com does not (its /api/v1 answers
+    # 410 Gone) and keeps the endpoint on api.github.com, one path level shorter. Downloads stay on
+    # $SERVER. The tag_name regex tolerates the spaces GitHub puts around the colon.
+    case "${SERVER%/}" in
+      https://github.com|https://www.github.com) API="https://api.github.com/repos/$REPO/releases/latest" ;;
+      *) API="${SERVER%/}/api/v1/repos/$REPO/releases/latest" ;;
+    esac
+    VERSION=$(fetch_stdout "$API" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
     [ -n "$VERSION" ] || die "cannot determine the latest release; pass --version vX.Y.Z"
   fi
   BASE="$SERVER/$REPO/releases/download/$VERSION"

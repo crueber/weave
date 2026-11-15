@@ -86,9 +86,37 @@ func TestUIFragments(t *testing.T) {
 	c.ok("POST", "/ui/tasks/"+tasks[1].ID+"/delete", nil)
 	c.ok("POST", "/ui/task-lists/"+tl+"/delete", nil, "No task lists yet")
 
-	// comments
+	// comments render markdown, while the edit form keeps the raw source so editing round-trips
 	c.ok("GET", "/ui/cards/c1/comments", nil, "Comments", "No comments yet")
-	c.ok("POST", "/ui/cards/c1/comments", url.Values{"text": {"<b>hi</b>"}}, "&lt;b&gt;hi&lt;/b&gt;", "(1)")
+	body = c.ok("POST", "/ui/cards/c1/comments", url.Values{"text": {"**bold** and [link](https://a.io)\n\n- one\n\n`code`\n\n> quoted"}}, "(1)")
+	rendered := commentBody(t, body)
+	for _, want := range []string{"<strong>bold</strong>", `href="https://a.io"`, "<li>one</li>", "<code>code</code>", "<blockquote>quoted</blockquote>"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("comment markdown: missing %q in %s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "**bold**") {
+		t.Fatalf("comment markdown not rendered: %s", rendered)
+	}
+	if !strings.Contains(body, ">**bold** and [link](https://a.io)") {
+		t.Fatalf("edit form lost the raw markdown:\n%s", body)
+	}
+
+	// hostile bodies stay literal text (escaped, and the link scheme is not honoured)
+	body = c.ok("POST", "/ui/cards/c1/comments", url.Values{"text": {"<b>hi</b> <script>alert(1)</script> [x](javascript:alert(1))"}}, "(2)")
+	rendered = commentBody(t, body)
+	if !strings.Contains(rendered, "&lt;b&gt;hi&lt;/b&gt;") || !strings.Contains(rendered, "&lt;script&gt;") {
+		t.Fatalf("hostile comment not escaped: %s", rendered)
+	}
+	if strings.Contains(rendered, "<script") || strings.Contains(rendered, `<a href="javascript`) {
+		t.Fatalf("hostile comment became markup: %s", rendered)
+	}
+	hostile := call[cardextras.CommentsOut](t, c.base, "comment.list", cardextras.CommentsIn{CardID: "c1"}).Items[0]
+	if hostile.Text != "<b>hi</b> <script>alert(1)</script> [x](javascript:alert(1))" {
+		t.Fatalf("comment text stored rendered? %q", hostile.Text)
+	}
+	c.ok("POST", "/ui/comments/"+hostile.ID+"/delete", nil, "(1)")
+
 	cm := call[cardextras.CommentsOut](t, c.base, "comment.list", cardextras.CommentsIn{CardID: "c1"}).Items[0]
 	c.ok("POST", "/ui/comments/"+cm.ID, url.Values{"text": {"changed"}}, "changed", "(edited)")
 	c.user = viewer
@@ -171,6 +199,16 @@ func TestUIFragments(t *testing.T) {
 	if w := c.do("GET", "/ui/boards/b1/activity", nil); w.Code != 404 {
 		t.Fatalf("outsider board activity: %d", w.Code)
 	}
+}
+
+// commentBody returns the rendered body of the first comment in a comments fragment.
+func commentBody(t *testing.T, frag string) string {
+	t.Helper()
+	s := between(frag, `class="x-text cards-md">`, "</div>", 0)
+	if s == "" {
+		t.Fatalf("no rendered comment body in\n%s", frag)
+	}
+	return s
 }
 
 // between returns the nth (0-based) substring between start and end.

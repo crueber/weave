@@ -21,6 +21,10 @@ Env alternative: `WEAVE_URL`, `WEAVE_TOKEN`, `--profile NAME`.
 6. Preview risky calls with `--dry-run`. Deletes need `--yes` in scripts; never delete or clear on a guess.
 7. The column is the brief: a list's `name` and `description` say what a card there asks for (`weave board tree`
    shows both). Infer the request from them; if they do not say, ask on the card instead of guessing.
+8. Watch columns with `weave listen --claim`, never poll them with `weave next`. Asked to watch, work or drain a
+   column (or given a column name)? That is `weave listen`. `weave next` is for cron and one-shot scripts only, and
+   `--wait` polling is never a substitute for a listener. If listen seems to miss your own moves, add
+   `--ignore-self=false`; do not fall back to `weave next`.
 
 **Commands**
 ```sh
@@ -28,10 +32,11 @@ weave board tree --board "Launch plan"          weave inbox
 weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label bug --assign me
 weave card show CARD --full                      weave card move CARD --to-list Review
 weave card comment CARD "what I did"             weave card attach CARD ./report.pdf
-weave next --board Product --list Ready --claim --move-to 'In progress' --ttl 15m   # exit 10 = queue empty
+weave listen --board Product --list Ready --claim --ttl 30m --ignore-self=false   # the way to work a column
 weave listen --board Product --list Ready --type card.created,card.moved             # NDJSON events
 weave agent run --board Product --listen Ready --claim-move-to 'In progress' --done-list Review -- ./handle-card.sh
 weave card claim CARD --ttl 15m | renew | release | done --note "result" --to-list Review
+weave next --board Product --list Ready --claim --move-to 'In progress'   # cron/one-shot only, exit 10 = empty
 ```
 Claim etiquette: exit 7 means someone else holds the card, so skip it. Handlers must be idempotent (events are delivered
 at least once); re-check state with `weave card show` before acting.

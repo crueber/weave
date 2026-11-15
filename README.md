@@ -118,12 +118,14 @@ and `v*` tags the `package` job builds the image and pushes `github.com/crueber/
 linux/macOS/Windows on amd64 and arm64: the slim CLI archives (`weave_<tag>_<os>_<arch>.tar.gz|zip` with the binary, shell
 completions and the agent skill), raw `weave-<os>-<arch>[.exe]` binaries, the full linux server binaries (`weave-server-linux-<arch>`),
 `install.sh`, `install.ps1` and `SHA256SUMS.txt`. `scripts/release-local.sh` builds the same matrix into `dist/`
-(`VERIFY=1` also tests the linux binary and `install.sh`).
+(`VERIFY=1` also tests the linux binary and `install.sh`). The GitHub mirror's `.github/workflows/cli-release.yml`
+runs that same packager, so mirror releases carry the same assets and `releases/latest/download/install.sh` resolves there.
 
 Repository secrets required: `REGISTRY_USER` and `REGISTRY_TOKEN` (a Forgejo access token with
 package and repository write scope). Optional but recommended: `RELEASE_SIGNING_KEY` (base64 ed25519 seed) makes the `release`
-job sign `SHA256SUMS.txt` (`SHA256SUMS.txt.sig`); without it the release is published unsigned with a warning. Base images are pinned
-by digest; see `docs/MAINTENANCE.md` for key generation and `scripts/update-pins.sh`.
+job sign `SHA256SUMS.txt` (`SHA256SUMS.txt.sig`); without it the release is published unsigned with a warning. The GitHub
+mirror needs only that optional secret (its workflow uses the built-in `GITHUB_TOKEN` and no registry secrets). Base images
+are pinned by digest; see `docs/MAINTENANCE.md` for key generation and `scripts/update-pins.sh`.
 
 **Runner:** `runner/docker-compose.yml` runs a Forgejo runner on any Docker host. Get a
 registration token from Forgejo (Actions -> Runners -> Create new runner), put it in
@@ -322,8 +324,10 @@ OpenSSL >= 3, otherwise it warns and continues unless `WEAVE_REQUIRE_SIGNATURE=1
 root) and offers to install the agent skill. Manual install: download `weave_<tag>_<os>_<arch>.tar.gz|zip` from the release page, extract,
 put `weave` on your PATH (the archive also holds shell completions and the skill). Or `make cli` from source.
 Check a downloaded release by hand: `weave verify-release SHA256SUMS.txt SHA256SUMS.txt.sig` (key built into the binary) and
-`sha256sum -c SHA256SUMS.txt`. `install.ps1` verifies with OpenSSL when present, else with the freshly downloaded `weave.exe verify-release`
-before installing it (that second path proves consistency, not provenance; install OpenSSL for an independent check).
+`sha256sum -c SHA256SUMS.txt`. Signing is opt-in: a release built without `RELEASE_SIGNING_KEY` has no `.sig`, the installers
+say so and continue, and `sha256sum -c` is the integrity check that applies. `install.ps1` verifies with OpenSSL when present,
+else with the freshly downloaded `weave.exe verify-release` before installing it (that second path proves consistency, not
+provenance; install OpenSSL for an independent check).
 Webhook receivers: see `docs/WEBHOOKS.md` (`X-Weave-Signature-V2` with replay protection). Maintainers: `docs/MAINTENANCE.md` (pinned images, release signing key).
 
 **2. Log in** with an API key (Settings -> API key in the browser):

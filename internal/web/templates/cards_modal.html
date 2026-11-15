@@ -60,7 +60,7 @@
       </section>
       {{if $o.CanComment}}<div class="cm-dock">
         <form id="cm-comment-form" class="cm-composer" hx-post="/ui/cards/{{$c.ID}}/comments" hx-target="#x-comments" hx-swap="outerHTML" aria-label="Write a comment">
-          <textarea name="text" rows="1" class="cm-composer-input" placeholder="Write a comment..." aria-label="Write a comment" data-comment-input maxlength="16384"></textarea>
+          <textarea name="text" rows="1" class="cm-composer-input" placeholder="Write a comment... (markdown supported)" aria-label="Write a comment" data-comment-input maxlength="16384"></textarea>
           <div class="cm-composer-bar">
             <label class="cm-enter"><input type="checkbox" data-enter-send> Enter sends</label>
             <span class="cm-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> sends</span>

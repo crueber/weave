@@ -82,7 +82,7 @@
         {{if $c.CanEdit}}<form hx-post="/ui/comments/{{$c.ID}}"><textarea name="text" rows="3" class="x-full" aria-label="Edit comment" required>{{$c.Text}}</textarea><button class="primary">Save</button></form>{{end}}
         {{if $c.CanDelete}}<button class="x-danger" hx-post="/ui/comments/{{$c.ID}}/delete" hx-confirm="Delete this comment?">Delete</button>{{end}}
       </div></details>{{end}}</header>
-    <div class="x-text">{{$c.Text}}</div>
+    <div class="x-text cards-md">{{cards_md_s $c.Text}}</div>
   </div>
 </article>
 {{else}}<p class="x-muted x-empty">No comments yet.</p>{{end}}

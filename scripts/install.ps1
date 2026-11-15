@@ -50,7 +50,16 @@ switch ($env:PROCESSOR_ARCHITECTURE) {
 if (-not $BaseUrl) {
   if (-not $Version) {
     Write-Host 'looking up the latest release...'
-    $rel = Invoke-RestMethod "$Server/api/v1/repos/$Repo/releases/latest"
+    # Gitea/Forgejo serve their API from the server itself; github.com does not (its /api/v1
+    # answers 410 Gone) and keeps the endpoint on api.github.com, one path level shorter.
+    # Downloads stay on $Server.
+    $serverBase = $Server.TrimEnd('/')
+    if ($serverBase -eq 'https://github.com' -or $serverBase -eq 'https://www.github.com') {
+      $api = "https://api.github.com/repos/$Repo/releases/latest"
+    } else {
+      $api = "$serverBase/api/v1/repos/$Repo/releases/latest"
+    }
+    $rel = Invoke-RestMethod -Uri $api -UserAgent 'weave-install'
     $Version = $rel.tag_name
     if (-not $Version) { throw 'cannot determine the latest release; pass -Version vX.Y.Z' }
   }

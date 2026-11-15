@@ -18,7 +18,9 @@ one. To watch several columns as one queue, repeat `--list`.
 
 ## How an agent works a card (the protocol)
 
-1. **Hear about it**: `weave listen` (push) or `weave next` (pull).
+1. **Hear about it**: `weave listen` (push — the default, and the only right way to work a column) or `weave next`
+   (pull, only for cron or a script that cannot hold a connection). Never poll a column with `weave next` when the
+   job is to watch it.
 2. **Accept**: `weave card claim CARD --ttl 15m` (exit 7 = someone else has it, skip).
 3. **Signal**: move to an in-progress column (`--claim-move-to 'In progress'` does claim + move).
 4. **Do the work**; `weave card renew CARD` if it takes longer than the TTL.
@@ -26,7 +28,10 @@ one. To watch several columns as one queue, repeat `--list`.
 6. **Hand off**: `weave card done CARD --note "summary" --to-list Review` (comment + move + release).
 7. **Give up cleanly**: `weave card release CARD --note "blocked: need API key"` and move to `Needs info`.
 
-## Pull loop (bash)
+## Pull loop (cron or one-shot scripts only — never for working a column)
+
+If the job is to watch or drain a column, use the push loop below or `weave agent run`; polling with this loop
+misses cards that arrive while you are busy and is not a substitute for a listener.
 
 ```sh
 #!/usr/bin/env bash
@@ -107,7 +112,9 @@ Each line is a card (a bare line is a title). Output is one created card per lin
 
 - **Idempotency**: events are at-least-once. Before acting, re-read the card and check it is still in your column and unclaimed or yours.
 - **Restarts**: `weave listen` keeps a cursor file per profile/board/lists (or `--cursor-file`); a restarted agent resumes without gaps or repeats. `--include-existing` catches the backlog on first start only.
-- **Ignore self**: your own moves and comments do not wake you (`--ignore-self`, default).
+- **Ignore self**: your own moves and comments do not wake you (`--ignore-self`, default). When your workers move cards
+  between the columns you watch, pass `--ignore-self=false` so those moves are delivered — that flag, not `weave next`
+  polling, is the fix.
 - **Rate limiting**: `--concurrency N` bounds parallel handlers; `card.next --ttl` leases bound how long work is held.
 - **Lease expiry**: a crashed agent's claims expire by themselves; others may then take the card.
 - **Observability**: `weave list listeners` / `weave board listeners` show who is online; `weave inbox` shows what you hold.

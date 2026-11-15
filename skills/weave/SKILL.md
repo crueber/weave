@@ -40,6 +40,11 @@ it from the Weave release page (install.sh / install.ps1) or `go install` the sl
 8. **The column is the brief**: a list's `name` and `description` say what a card that lands there asks
    for (`weave board tree` shows both; an operator can paste a column's *Agent prompt* to point you at
    one). Read them, infer the request, and do that. If they do not say, ask on the card instead of guessing.
+9. **Watch columns with `weave listen`, never poll them with `weave next`.** If the request is to watch,
+   work, drain or "handle" a column, or it names one, your tool is `weave listen --claim` (§5).
+   `weave next` is only for cron and one-shot scripts (§4). Do not substitute `--wait` polling for a
+   listener, and do not reach for `weave next` because listen "ignored your own moves" — pass
+   `--ignore-self=false` instead.
 
 ## 3. Everyday commands
 
@@ -55,7 +60,14 @@ weave task add CARD "write tests" "update docs"; weave task check --card CARD --
 weave list stats --board B                             # counts per list: claimed, overdue
 ```
 
-## 4. Pull work (poll model)
+## 4. Pull work (cron and one-shot scripts only)
+
+> **Never use `weave next` to work a column.** When a request asks you to watch, work, drain or
+> "hang around" a column — or names one (`Todo`, `Ready`, `In Progress`, `Review`, ...) — the tool is
+> `weave listen --claim` in §5. `weave next --wait` polling is not an acceptable substitute: it drops
+> cards that land while you are busy with another one, and it is the wrong answer to "listen skipped my
+> own move" (that is `--ignore-self=false`, §5). `weave next` exists only for a one-shot pull from cron
+> or a script that cannot hold a connection open.
 
 ```sh
 card=$(weave next --board Product --list Ready --claim --move-to 'In progress' --ttl 15m) || {
@@ -63,7 +75,7 @@ card=$(weave next --board Product --list Ready --claim --move-to 'In progress' -
 id=$(echo "$card" | jq -r .item.id)
 ```
 `weave next` exits **10** when the list has nothing unclaimed, so `while weave next ...; do ...; done`
-is a valid worker loop. `--wait 60s` blocks (polling) until work appears.
+is a valid cron-style worker loop. `--wait 60s` blocks (polling) until work appears.
 
 ## 5. Listen for work (push model)
 
@@ -71,12 +83,17 @@ is a valid worker loop. `--wait 60s` blocks (polling) until work appears.
 weave listen --board Product --list Ready --list 'Needs info' --type card.created,card.moved
 ```
 One connection watches many columns; stdout is one JSON event envelope per line (NDJSON). It reconnects
-with backoff, resumes from a saved cursor (no missed or repeated events across restarts), skips
-your own actions, and exits 0 on SIGINT/SIGTERM. Useful flags: `--once` (first event then exit),
-`--timeout 5m` (exit 10 if nothing happens), `--exec 'cmd'` (event JSON on stdin; env `WEAVE_EVENT_TYPE`,
-`WEAVE_CARD_ID`, `WEAVE_LIST_ID`, `WEAVE_BOARD_ID`), `--include-existing` (first emit `card.existing`
-for the backlog already in those columns), `--claim --claim-move-to 'In progress'` (claim each card
-atomically before handling it).
+with backoff, resumes from a saved cursor (no missed or repeated events across restarts), and exits 0 on
+SIGINT/SIGTERM. By default it skips events caused by your own identity; add **`--ignore-self=false`** to
+receive them, which is what you want whenever your own workers move cards between the columns you watch
+(Todo -> In Progress -> Review) — that flag, never `weave next` polling, is the fix. Useful flags:
+`--once` (first event then exit), `--timeout 5m` (exit 10 if nothing happens), `--exec 'cmd'` (event JSON
+on stdin; env `WEAVE_EVENT_TYPE`, `WEAVE_CARD_ID`, `WEAVE_LIST_ID`, `WEAVE_BOARD_ID`), `--include-existing`
+(first emit `card.existing` for the backlog already in those columns), `--claim --ttl 30m` (claim each
+card atomically before handling it), `--claim-move-to 'In progress'` (claim and move in one step).
+
+This is **the** way to work a column: to drain a lane, listen on it with `--claim --once --timeout 5m` in
+a loop and dispatch what you are given. Do not swap in a `weave next` polling loop (§4).
 
 Each column also carries a **description** — the brief for that column. When a request names a column,
 read its `name` and `description` (`weave board tree --board B`, or `weave list list --board B`) and work

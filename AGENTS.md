@@ -183,6 +183,9 @@ exist in Chromium, and CSP/popover behaviour must be judged in Chromium.
   is published **unsigned** with a warning). Images are pinned by digest: `scripts/update-pins.sh [--check]`, `docs/MAINTENANCE.md`.
 - Release: confirm `main` CI is green, `git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`, wait for `release:success`, check the asset list (17 assets)
   and the `.sig`. A signature is added only at release time; to sign an existing release cut a new patch tag.
+- **GitHub is published from Forgejo only**: the maintainer runs `.forgejo/workflows/publish-github.yml` (Actions -> publish to github, secret
+  `PUBLISH_GITHUB_TOKEN`; choose the patch/minor/major bump, or none plus an exact tag) when the mirror should move. Never run `scripts/publish-to-github.sh --apply` or push to
+  GitHub from an agent session: an agent's job ends at the Forgejo push.
 - Forgejo CLI is `tea` (aliased `tea-cli`; `repos create` wants a TTY). The Actions API has run status (`/api/v1/repos/crueber/weave/actions/tasks`) but
   **no job logs**; ask the maintainer for the failing step's log (screenshots work) or reproduce locally.
 - Runner: `runner/docker-compose.yml` + `config.yml` (label `docker`). The repo config still mounts the host Docker socket into jobs; the buildah build no

@@ -1,6 +1,8 @@
 name: cli release
-# Builds the `weave` CLI for six platforms and attaches them, plus checksums, to the GitHub release
-# for the pushed tag.
+# Builds the whole release matrix with cmd/weave-release and attaches it to the GitHub release for the
+# pushed tag: the same assets the Forgejo release job publishes (CLI archives, raw CLI and server
+# binaries, install.sh, install.ps1, SHA256SUMS.txt), plus SHA256SUMS.txt.sig only when the optional
+# RELEASE_SIGNING_KEY secret is set. One packager for both hosts: no hand-rolled build steps to drift.
 on:
   push:
     tags: ['v*']
@@ -9,53 +11,43 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {goos: linux,   goarch: amd64}
-          - {goos: linux,   goarch: arm64}
-          - {goos: darwin,  goarch: amd64}
-          - {goos: darwin,  goarch: arm64}
-          - {goos: windows, goarch: amd64}
-          - {goos: windows, goarch: arm64}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27'
           cache: true
-      - name: build
+      - name: Build and package
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          # base64 ed25519 seed (generate: go run ./cmd/weave-release -genkey -keyfile PATH). When it
+          # is absent the release is published UNSIGNED and the packager prints a warning.
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
-          out="weave_${{ github.ref_name }}_${GOOS}_${GOARCH}${ext}"
-          mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags "-s -w -X github.com/crueber/weave/internal/domain/admin.Version=${{ github.ref_name }}" \
-            -o "dist/$out" ./cmd/weave
-      - uses: actions/upload-artifact@v4
-        with:
-          name: weave-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-          if-no-files-found: error
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: checksums
-        run: cd dist && sha256sum * > checksums.txt
-      - uses: softprops/action-gh-release@v2
+          go run ./cmd/weave-skillgen -check
+          go run ./cmd/weave-release -out dist -version "${{ github.ref_name }}"
+          if [ -f dist/SHA256SUMS.txt.sig ]; then
+            # fail the release now if the signature does not verify with the key embedded in the CLI
+            go run ./cmd/weave-cli verify-release dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sig
+          else
+            echo "WARNING: release is UNSIGNED (secret RELEASE_SIGNING_KEY is not set)"
+          fi
+          ls -la dist
+      - name: Reset any previous release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Re-publishing a version force-pushes the tag, which runs this job again for the SAME tag.
+          # A release object outlives its tag, so drop it: otherwise assets from the previous run (the
+          # old flat checksum file and raw binaries) would linger next to the new set.
+          gh release delete "${{ github.ref_name }}" --yes --cleanup-tag=false || true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          name: Weave ${{ github.ref_name }}
+          body: |
+            CLI: `curl -fsSL https://github.com/crueber/weave/releases/download/${{ github.ref_name }}/install.sh | sh` (Windows: `install.ps1`).
+
+            Archives `weave_*_<os>_<arch>` contain the CLI, shell completions and the agent skill; `weave-server-linux-*` are the full server binaries; verify with `SHA256SUMS.txt` (`sha256sum -c`) and, when the release carries `SHA256SUMS.txt.sig`, the ed25519 signature with `weave verify-release`.
