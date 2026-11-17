@@ -7,3 +7,16 @@
 
 {{define "bs_status"}}<span class="bs-status" role="status" aria-live="polite">{{if .Done}}<span class="bs-saved">&#10003; Saved</span>{{end}}</span>{{end}}
 
+
+{{/* Searchable people (and optional groups) picker; behaviour in static/boards_settings.js. Args: ID (prefix), Label, ListLabel,
+   Placeholder, Users, Groups (nil for people only: no groupId field). Put it inside a form with a [data-add] submit button. */}}
+{{define "bs_combo"}}<div class="bs-combo" data-combo>
+      <label class="sr-only" for="{{.ID}}-in">{{.Label}}</label>
+      <input id="{{.ID}}-in" type="text" role="combobox" aria-expanded="false" aria-controls="{{.ID}}-list" aria-autocomplete="list" autocomplete="off" placeholder="{{.Placeholder}}">
+      <input type="hidden" name="userId" value="">{{if .Groups}}<input type="hidden" name="groupId" value="">{{end}}
+      <ul id="{{.ID}}-list" role="listbox" aria-label="{{.ListLabel}}" hidden>
+        {{range .Users}}<li role="option" data-user="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm avatar-ph" aria-hidden="true">{{authInitial .Name}}</span><span class="bs-opt-t"><b>{{.Name}}</b><small>{{.Email}}</small></span></li>{{end}}
+        {{range .Groups}}<li role="option" data-group="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm bs-group-av" aria-hidden="true">&#9679;&#9679;</span><span class="bs-opt-t"><b>{{.Name}}</b><small>Group</small></span></li>{{end}}
+        <li class="bs-empty" role="presentation" hidden>No matches</li>
+      </ul>
+    </div>{{end}}

@@ -1,0 +1,115 @@
+{
+ "id": "builtin:okrs",
+ "version": 1,
+ "category": "planning",
+ "name": "OKRs",
+ "summary": "Objectives and measurable key results, tracked per quarter.",
+ "audience": "Teams and leaders setting goals",
+ "tags": [
+  "okr",
+  "goals",
+  "objectives",
+  "quarterly",
+  "key results"
+ ],
+ "defaultView": "kanban",
+ "order": 8,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "OKRs",
+   "defaultView": "kanban",
+   "color": "orange",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Objectives",
+    "type": "active",
+    "position": 65536,
+    "description": "Ambitious, qualitative goals for the quarter, three to five at most. Each card is one objective."
+   },
+   {
+    "id": "l2",
+    "name": "Key results",
+    "type": "active",
+    "position": 131072,
+    "description": "Measurable outcomes that prove an objective was met: a number, a baseline and a target."
+   },
+   {
+    "id": "l3",
+    "name": "In progress",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "Key results being actively worked on. Update the number weekly and say how confident you are."
+   },
+   {
+    "id": "l4",
+    "name": "Achieved",
+    "type": "closed",
+    "position": 262144,
+    "color": "green",
+    "description": "Reached (or closed with a lesson). Score honestly: 0.7 is a good result."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Q1",
+    "color": "teal"
+   },
+   {
+    "id": "b2",
+    "name": "Q2",
+    "color": "sky"
+   },
+   {
+    "id": "b3",
+    "name": "Q3",
+    "color": "indigo"
+   },
+   {
+    "id": "b4",
+    "name": "Q4",
+    "color": "violet"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l1",
+    "name": "Make onboarding effortless",
+    "type": "project",
+    "position": 65536,
+    "description": "**Objective**\nNew customers succeed on their own.",
+    "labelIds": [
+     "b1"
+    ],
+    "taskLists": [
+     {
+      "name": "Key results",
+      "tasks": [
+       {
+        "name": "Raise week-one activation from 40% to 60%",
+        "isCompleted": false
+       },
+       {
+        "name": "Cut median time to first value from 2 days to 1 hour",
+        "isCompleted": false
+       },
+       {
+        "name": "Reduce setup support tickets by 30%",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

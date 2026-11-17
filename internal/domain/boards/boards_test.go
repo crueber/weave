@@ -177,8 +177,8 @@ func TestTemplates(t *testing.T) {
 	}
 	mustFail(t, e, "board.instantiate", boards.InstantiateIn{ProjectID: "p2", TemplateID: b.ID, Name: "X"}, "validation")
 	call[boards.Board](t, e, "board.template.publish", boards.TemplatePublishIn{ID: b.ID, IsTemplate: true})
-	ts := call[[]boards.Board](t, e, "board.template.list", boards.TemplateListIn{})
-	if len(ts) != 1 {
+	ts := call[[]boards.TemplateInfo](t, e, "board.template.list", boards.TemplateListIn{Category: "published"})
+	if len(ts) != 1 || ts[0].ID != b.ID || ts[0].Source != "published" || ts[0].Project != "Proj" {
 		t.Fatalf("templates: %+v", ts)
 	}
 	nb := call[boards.Board](t, e, "board.instantiate", boards.InstantiateIn{ProjectID: "p2", TemplateID: b.ID, Name: "From tpl"})
@@ -573,8 +573,37 @@ func TestBoardPages(t *testing.T) {
 	if code, body = get(t, m, "/ui/projects/p1/boards", true); code != 200 || !strings.Contains(body, "Kanban &lt;b&gt;") || !strings.Contains(body, "New board") {
 		t.Errorf("project boards fragment: %d", code)
 	}
-	if code, body = get(t, m, "/ui/projects/p1/boards/new", true); code != 200 || !strings.Contains(body, "multipart/form-data") {
-		t.Errorf("new board dialog: %d", code)
+	if code, body = get(t, m, "/ui/projects/p1/boards/new", true); code != 200 || !strings.Contains(body, `id="tg-form"`) || !strings.Contains(body, "Blank board") || !strings.Contains(body, "Kanban basics") {
+		t.Errorf("new board gallery: %d", code)
+	}
+	if code, body = get(t, m, "/ui/board-templates?projectId=p1&q=hiring&category=", true); code != 200 || !strings.Contains(body, "Hiring pipeline") || strings.Contains(body, "Sprint (Scrum)") || strings.Contains(body, "Blank board") {
+		t.Errorf("gallery search: %d", code)
+	}
+	if code, body = get(t, m, "/ui/board-templates?projectId=p1&q=zzzzqq", true); code != 200 || !strings.Contains(body, "No templates match") {
+		t.Errorf("gallery empty search: %d", code)
+	}
+	if code, body = get(t, m, "/ui/board-templates/builtin:sprint?projectId=p1", true); code != 200 || !strings.Contains(body, "Include sample cards") || !strings.Contains(body, `value="builtin:sprint"`) || !strings.Contains(body, "In progress") {
+		t.Errorf("template preview: %d", code)
+	}
+	// the board name is always asked for: the field starts empty and is required, never pre-filled with the template's name
+	if !strings.Contains(body, `<input name="name" required`) || strings.Contains(body, `name="name" value=`) {
+		t.Errorf("template preview must ask for a board name, not prefill it")
+	}
+	if code, _ = get(t, m, "/ui/board-templates/builtin:nope?projectId=p1", true); code != 404 {
+		t.Errorf("unknown template preview: %d", code)
+	}
+	// a user who cannot manage the project gets nothing from the gallery routes
+	om := mux(testutil.As(e, nobody))
+	for _, path := range []string{"/ui/projects/p1/boards/new", "/ui/board-templates?projectId=p1", "/ui/board-templates/builtin:sprint?projectId=p1", "/ui/projects/p1/boards/new/blank", "/ui/projects/p1/boards/new/import"} {
+		if code, _ = get(t, om, path, true); code != 404 {
+			t.Errorf("outsider %s: %d, want 404", path, code)
+		}
+	}
+	if code, body = get(t, m, "/ui/projects/p1/boards/new/import", true); code != 200 || !strings.Contains(body, "multipart/form-data") {
+		t.Errorf("import pane: %d", code)
+	}
+	if code, body = get(t, m, "/ui/projects/p1/boards/new/blank", true); code != 200 || !strings.Contains(body, "Create board") {
+		t.Errorf("blank pane: %d", code)
 	}
 	if code, _ = get(t, m, "/ui/boards/"+b.ID+"/export?format=csv", false); code != 200 {
 		t.Errorf("export route: %d", code)

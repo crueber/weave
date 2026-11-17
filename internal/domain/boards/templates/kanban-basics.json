@@ -1,0 +1,115 @@
+{
+ "id": "builtin:kanban-basics",
+ "version": 1,
+ "category": "basics",
+ "name": "Kanban basics",
+ "summary": "Four columns and a work-in-progress limit: the simplest board that works.",
+ "audience": "Anyone starting with kanban",
+ "tags": [
+  "kanban",
+  "starter",
+  "simple",
+  "todo"
+ ],
+ "defaultView": "kanban",
+ "order": 1,
+ "includesSampleCards": true,
+ "sampleCardsDefault": true,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Kanban board",
+   "defaultView": "kanban",
+   "color": "blue",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Backlog",
+    "type": "active",
+    "position": 65536,
+    "description": "Everything you might do someday. Capture ideas here without committing to them; pull the next one into To do when you are ready to start."
+   },
+   {
+    "id": "l2",
+    "name": "To do",
+    "type": "active",
+    "position": 131072,
+    "description": "Committed work, in the order you will do it. Keep it short enough to finish; top card first."
+   },
+   {
+    "id": "l3",
+    "name": "Doing",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "Work in progress, limited to 3 cards. Finish something before you pull the next card. Agents: claim a card from To do, work it here, and move it on when it is done.",
+    "wipLimit": 3
+   },
+   {
+    "id": "l4",
+    "name": "Done",
+    "type": "active",
+    "position": 262144,
+    "color": "green",
+    "description": "Finished work. Leave cards here for a while as a record, then archive them."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Low",
+    "color": "green"
+   },
+   {
+    "id": "b2",
+    "name": "Medium",
+    "color": "amber"
+   },
+   {
+    "id": "b3",
+    "name": "High",
+    "color": "orange"
+   },
+   {
+    "id": "b4",
+    "name": "Blocked",
+    "color": "crimson"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l2",
+    "name": "Move me to Doing",
+    "type": "project",
+    "position": 65536,
+    "description": "Drag this card to **Doing**, or open it and use the list menu. The *Doing* column is limited to 3 cards, so finish work before starting more.",
+    "labelIds": [
+     "b2"
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l1",
+    "name": "Click a card to open details",
+    "type": "project",
+    "position": 131072,
+    "description": "Cards open on a click: add a description, labels, tasks, a due date and comments there. Drag a card between columns to show progress."
+   },
+   {
+    "id": "c3",
+    "listId": "l1",
+    "name": "Add your own",
+    "type": "project",
+    "position": 196608,
+    "description": "Type a title at the bottom of any column and press Enter to add a card; keep typing to add more. Delete these samples whenever you like.",
+    "labelIds": [
+     "b1"
+    ]
+   }
+  ]
+ }
+}

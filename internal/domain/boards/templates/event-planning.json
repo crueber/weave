@@ -1,0 +1,171 @@
+{
+ "id": "builtin:event-planning",
+ "version": 1,
+ "category": "planning",
+ "name": "Event planning",
+ "summary": "From first ideas to a run sheet for the day, with vendors and costs.",
+ "audience": "Anyone organising a conference, party or offsite",
+ "tags": [
+  "event",
+  "planning",
+  "venue",
+  "catering",
+  "wedding",
+  "party"
+ ],
+ "defaultView": "kanban",
+ "order": 10,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Event planning",
+   "defaultView": "kanban",
+   "color": "amber",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Ideas",
+    "type": "active",
+    "position": 65536,
+    "description": "Venues, speakers, themes and anything else worth considering."
+   },
+   {
+    "id": "l2",
+    "name": "Booked",
+    "type": "active",
+    "position": 131072,
+    "color": "green",
+    "description": "Confirmed and paid or deposit placed. Keep the confirmation on the card."
+   },
+   {
+    "id": "l3",
+    "name": "To book",
+    "type": "active",
+    "position": 196608,
+    "description": "Decided but not yet booked. Note the deadline and who is handling it."
+   },
+   {
+    "id": "l4",
+    "name": "Day-of",
+    "type": "active",
+    "position": 262144,
+    "description": "Tasks for the event day itself, in run-sheet order."
+   },
+   {
+    "id": "l5",
+    "name": "Wrap-up",
+    "type": "active",
+    "position": 327680,
+    "description": "Thank-yous, final payments, feedback and what to do differently next time."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Venue",
+    "color": "indigo"
+   },
+   {
+    "id": "b2",
+    "name": "Catering",
+    "color": "orange"
+   },
+   {
+    "id": "b3",
+    "name": "Guests",
+    "color": "pink"
+   }
+  ],
+  "customFields": [
+   {
+    "id": "f1",
+    "name": "Vendor",
+    "repeatable": false,
+    "fields": [
+     {
+      "id": "f1_1",
+      "name": "Cost",
+      "type": "number",
+      "showOnFrontOfCard": true
+     },
+     {
+      "id": "f1_2",
+      "name": "Deposit paid",
+      "type": "checkbox"
+     }
+    ]
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l3",
+    "name": "Catering for 60 guests",
+    "type": "project",
+    "position": 65536,
+    "description": "Get three quotes, confirm dietary needs and agree delivery time.",
+    "labelIds": [
+     "b2"
+    ],
+    "customFieldValues": [
+     {
+      "groupId": "f1",
+      "fieldId": "f1_1",
+      "content": "2400"
+     },
+     {
+      "groupId": "f1",
+      "fieldId": "f1_2",
+      "content": "false"
+     }
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l4",
+    "name": "Run sheet",
+    "type": "project",
+    "position": 131072,
+    "labelIds": [
+     "b3"
+    ],
+    "taskLists": [
+     {
+      "name": "Run sheet",
+      "tasks": [
+       {
+        "name": "Doors open and registration",
+        "isCompleted": false
+       },
+       {
+        "name": "Welcome and housekeeping",
+        "isCompleted": false
+       },
+       {
+        "name": "Main programme",
+        "isCompleted": false
+       },
+       {
+        "name": "Lunch",
+        "isCompleted": false
+       },
+       {
+        "name": "Closing and thank-yous",
+        "isCompleted": false
+       },
+       {
+        "name": "Pack down",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

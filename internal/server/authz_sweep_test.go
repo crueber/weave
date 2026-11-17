@@ -177,7 +177,7 @@ func newWorld(t *testing.T) *world {
 	I["draft"] = id(e.mk(A, "POST", "/boards/"+I["board"]+"/drafts", map[string]any{"name": "DraftCANARY"}))
 	I["cardtpl"] = id(e.mk(A, "POST", "/cards/"+I["card2"]+"/template", map[string]any{"name": "TplCANARY"}))
 	I["tplboard"] = id(e.mk(A, "POST", "/projects/"+I["project"]+"/boards", map[string]any{"name": "TemplateBoardCANARY"}))
-	e.mk(A, "POST", "/boards/"+I["tplboard"]+"/template", map[string]any{"isTemplate": true})
+	e.mk(A, "POST", "/boards/"+I["tplboard"]+"/template", map[string]any{"isTemplate": true, "visibility": "private"})
 	I["ns"] = id(e.mk(A, "POST", "/notification-services", map[string]any{"url": "generic://example.com/hook?token=CANARY", "boardId": I["board"]}))
 	I["webhook"] = "wh-fake"
 	I["group"] = id(e.mk(e.admin, "POST", "/user-groups", map[string]any{"name": "GroupCANARY"}))
@@ -300,7 +300,7 @@ var bodyDefaults = map[string]any{
 	"hours": 1, "to": "x@x.io", "signature": "x", "type": "text", "role": "editor", "isPublic": true, "enabled": true,
 	"description": "pwn", "isClosed": true, "closed": true, "trash": false, "completed": true, "query": "x", "month": "2026-01",
 	"recurrence": "", "dueDate": "2030-01-01", "isDeactivated": true, "lat": 1.5, "lng": 2.5, "unset": false, "isTemplate": true,
-	"data": "{}", "canComment": true,
+	"data": "{}", "canComment": true, "scope": "general",
 }
 
 type result struct {
@@ -403,10 +403,12 @@ var publicOps = map[string]string{
 var selfOps = map[string]string{
 	"auth.me": "self", "auth.whoami": "self", "dashboard.get": "self", "dashboard.update": "self", "notification.list": "self",
 	"notification.read_all": "self", "notification.unread_count": "self", "presence.list": "directory presence", "presence.set": "self",
-	"project.list": "only visible projects", "board.list": "only visible boards", "board.template.list": "templates visible to the caller",
-	"search.query": "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
+	"project.list": "only visible projects", "board.list": "only visible boards", "board.template.list": "built-in templates plus published ones visible to the caller (authz.TemplateVisible); the seeded template is private",
+	"board.template.get": "built-in templates are open to every signed-in user; a published one answers not_found unless visible to the caller",
+	"search.query":       "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
 	"user.get": "directory entry", "user.list": "directory of active users", "group.get": "directory", "group.list": "directory",
 	"notification_service.list": "own services", "apikey.get": "own key status", "whoami": "self",
+	"agent.prompt": "scopes general/runner are static instance text with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
 }
 
 // directoryOps are allowed to show the seeded CANARY names because Weave exposes a user and group

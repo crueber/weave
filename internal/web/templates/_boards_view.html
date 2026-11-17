@@ -120,10 +120,14 @@
 </form>
   {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}
 </div>
-{{- if not .ReadOnly}}
+{{- if or (not .ReadOnly) (not .Public)}}
 <div class="boards-actions">
-  <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
-  <a class="boards-btn boards-settings-btn" href="/boards/{{.Board.ID}}/settings" aria-label="Board settings" title="Board settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="boards-btn-label">Settings</span></a>
+  {{- if not .ReadOnly}}
+  <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="ico" aria-hidden="true"><use href="#i-keyboard"/></svg></button>{{end}}
+  {{- if not .Public}}
+  <button type="button" class="boards-btn boards-settings-btn boards-agent-btn" hx-get="/ui/agent-prompt?scope=board&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML" aria-label="Connect an agent" title="Connect an agent"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg><span class="boards-btn-label">Connect an agent</span></button>{{end}}
+  {{- if not .ReadOnly}}
+  <a class="boards-btn boards-settings-btn" href="/boards/{{.Board.ID}}/settings" aria-label="Board settings" title="Board settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="boards-btn-label">Settings</span></a>{{end}}
 </div>{{end}}
 </div>{{end}}
 

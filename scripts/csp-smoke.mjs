@@ -153,13 +153,44 @@ await run('home: new project dialog + cancel', async () => {
   if (await p.locator('dialog[open]').count()) throw new Error('Cancel did not close the dialog (data-close-dialog)');
   await p.fill('#projects-filter input[name=search]', 'CSP'); await settle(p);
 });
-await run('project: new board dialog + settings + Done', async () => {
+await run('project: template gallery (search, preview, create from a built-in, blank and import panes)', async () => {
+  await go(`/projects/${proj.id}`);
+  await p.locator(`[hx-get="/ui/projects/${proj.id}/boards/new"]`).first().click(); await settle(p);
+  await p.waitForSelector('dialog[open] .tg-grid');
+  const tiles = await p.locator('dialog[open] .tg-tile').count();
+  if (tiles < 15) throw new Error(`expected blank + 14 built-in tiles, saw ${tiles}`);
+  await p.locator('#tg-q').pressSequentially('hiring'); await settle(p);
+  if (await p.locator('dialog[open] .tg-tile').count() !== 1) throw new Error('search did not narrow the grid to one tile');
+  await p.fill('#tg-q', ''); await settle(p);
+  await p.locator('dialog[open] input[name=category][value=software]').check({ force: true }); await settle(p);
+  if (await p.locator('dialog[open] .tg-tile').count() !== 3) throw new Error('software category should list 3 templates');
+  await p.locator('dialog[open] .tg-tile', { hasText: 'Sprint (Scrum)' }).click(); await settle(p);
+  await p.waitForSelector('dialog[open] .tg-create');
+  const cols = await p.locator('dialog[open] .tg-col').count();
+  if (cols !== 5) throw new Error(`sprint preview should show 5 columns, saw ${cols}`);
+  await p.locator('dialog[open] .tg-back').click(); await settle(p);
+  await p.locator('dialog[open] .tg-cat-import').click(); await settle(p);
+  await p.waitForSelector('dialog[open] input[type=file]');
+  await p.locator('dialog[open] .tg-back').click(); await settle(p);
+  await p.locator('dialog[open] input[name=category][value=""]').check({ force: true }); await settle(p);
+  await p.locator('dialog[open] .tg-tile-blank').click(); await settle(p);
+  await p.waitForSelector('dialog[open] form[hx-post$="/boards"]');
+  await p.locator('dialog[open] .tg-back').click(); await settle(p);
+  await p.locator('dialog[open] .tg-tile', { hasText: 'Kanban basics' }).click(); await settle(p);
+  await p.fill('dialog[open] input[name=name]', 'Smoke from template');
+  await Promise.all([p.waitForURL(/\/boards\//, { timeout: 8000 }), p.locator('dialog[open] .tg-go').click()]);
+  await settle(p);
+  if (await p.locator('.boards-col').count() < 4) throw new Error('board created from the template is missing its columns');
+  if (await p.locator('dialog[open]').count()) throw new Error('a card or dialog opened after creating the board');
   await go(`/projects/${proj.id}`);
   await p.locator(`[hx-get="/ui/projects/${proj.id}/boards/new"]`).first().click(); await settle(p);
   await esc(p); await settle(p);
-  await p.locator(`[hx-get="/ui/projects/${proj.id}/settings"]`).first().click(); await settle(p);
-  await clickEach('dialog[open] [role=tab]');
-  await Promise.all([p.waitForEvent('load', { timeout: 5000 }), p.locator('dialog[open] [data-reload]').click()]);
+  await p.locator(`a[href="/projects/${proj.id}/settings"]`).first().click(); await settle(p);
+  await p.waitForSelector('.projects-settings .bs-nav');
+  await clickEach('.projects-settings .bs-nav a[data-section]'); await settle(p);
+  for (const sec of ['general', 'background', 'managers', 'fields']) { await go(`/projects/${proj.id}/settings?section=${sec}`); await clickEach(`#set-${sec} [data-add], #set-${sec} .ps-swatch`, { max: 3 }); await settle(p); }
+  await p.locator('.bs-nav a[data-section=danger]').click();
+  await p.fill('#ps-del-in', 'x'); if (!(await p.locator('#set-danger [data-del]').isDisabled())) throw new Error('project delete enabled without the typed name');
 });
 
 // ---- board ---------------------------------------------------------------------------------
@@ -244,6 +275,24 @@ await run('board: view icons in the top bar, 1-5 keys, switcher stays on calenda
   if (h.crumbs !== 'Smoke board' || h.h1 !== 1) throw new Error('board name must be the single h1 in the breadcrumb: ' + JSON.stringify(h));
 });
 
+await run('template gallery @390px: full-height sheet, category chips, preview, no sideways scroll', async () => {
+  const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, extraHTTPHeaders: { Authorization: 'Bearer ' + TOKEN, 'X-Requested-With': 'weave' } });
+  const m = await newPage(mctx);
+  try {
+    await m.goto(BASE + `/projects/${proj.id}`); await settle(m);
+    await m.locator(`[hx-get="/ui/projects/${proj.id}/boards/new"]`).first().click(); await settle(m);
+    await m.waitForSelector('dialog[open] .tg-grid');
+    const dim = async () => m.evaluate(() => ({ sw: document.documentElement.scrollWidth, w: innerWidth, h: document.querySelector('dialog#modal').getBoundingClientRect().height, ih: innerHeight }));
+    let d = await dim();
+    if (d.sw > d.w) throw new Error(`gallery scrolls sideways: ${d.sw} > ${d.w}`);
+    if (Math.abs(d.h - d.ih) > 2) throw new Error(`gallery is not full height: ${d.h} vs ${d.ih}`);
+    await m.locator('dialog[open] .tg-tile', { hasText: 'Hiring pipeline' }).click(); await settle(m);
+    await m.waitForSelector('dialog[open] .tg-create');
+    d = await dim();
+    if (d.sw > d.w) throw new Error(`preview scrolls sideways: ${d.sw} > ${d.w}`);
+  } finally { await mctx.close(); }
+});
+
 // ---- phone: one-row top bar, view picker in the filter row, theme switch in the account menu -------------
 await run('board @390px: one-row top bar, view picker, account menu theme, no sideways scroll', async () => {
   const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + TOKEN, 'X-Requested-With': 'weave' } });
@@ -289,6 +338,40 @@ await run('column sheet: open from header, WIP popover, description editor, sort
   await esc(p); await settle(p);
   if (/\/lists\//.test(p.url())) throw new Error('closing the sheet did not restore the board URL');
   await go(`/lists/${lists[0].id}`); await p.locator('#list-sheet').waitFor(); await esc(p);
+});
+
+// ---- connect an agent ------------------------------------------------------------------------
+await run('connect an agent: open from the board, tabs, toggles refetch, edit + reset, copy, column sheet and project entry points', async () => {
+  await go(`/boards/${board.id}`);
+  await p.locator('.boards-agent-btn').click(); await p.locator('#ap').waitFor(); await settle(p);
+  const tabs = await p.locator('.ap-tab').allTextContents();
+  if (tabs.join('|') !== 'About Weave|Project|Board|Runner') throw new Error('tabs: ' + tabs.join('|'));
+  const board0 = await p.locator('#ap-text').inputValue();
+  if (!/PLAN board/.test(board0) || /wk_[A-Za-z0-9]{8,}/.test(board0)) throw new Error('board prompt missing PLAN or contains a key');
+  await p.locator('.ap-tab', { hasText: 'Runner' }).click(); await p.locator('#ap[data-scope=runner]').waitFor(); await settle(p);
+  if (!/weave-handle\.sh/.test(await p.locator('#ap-text').inputValue())) throw new Error('runner prompt lacks the wrapper script');
+  await p.locator('input[name=noinstall]').check(); await p.waitForFunction(() => document.querySelector('#ap input[name=noinstall]:checked') && !/install\.sh \| sh/.test(document.querySelector('#ap-text').value)); 
+  await p.locator('#ap-text').fill('edited'); await p.locator('.ap-reset').click();
+  if ((await p.locator('#ap-text').inputValue()) === 'edited') throw new Error('Reset did not restore the prompt');
+  await p.locator('.ap-copy').click(); await p.waitForFunction(() => /Copied/.test(document.querySelector('.ap-copy').textContent), null, { timeout: 4000 });
+  await p.locator('.ap-tab', { hasText: 'About' }).click(); await p.locator('#ap[data-scope=general]').waitFor();
+  await esc(p); await settle(p);
+  await go(`/lists/${lists[0].id}`); await p.locator('#list-sheet').waitFor();
+  await p.locator('#list-sheet button:has-text("Get the prompt")').click(); await p.locator('#ap[data-scope=list]').waitFor(); await esc(p); await settle(p);
+  await go(`/projects/${proj.id}`);
+  await p.locator('button:has-text("Connect an agent")').first().click(); await p.locator('#ap[data-scope=project]').waitFor(); await esc(p); await settle(p);
+  await go(`/boards/${board.id}/settings?section=agents`);
+  await p.locator('#set-agents button:has-text("Runner prompt")').click(); await p.locator('#ap[data-scope=runner]').waitFor(); await esc(p); await settle(p);
+});
+await run('connect an agent @390px: full-height sheet, scrolling tabs, copy pinned, no sideways scroll', async () => {
+  const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + TOKEN, 'X-Requested-With': 'weave' } });
+  const m = await newPage(mctx);
+  try {
+    await m.goto(BASE + `/boards/${board.id}`); await settle(m);
+    await m.locator('.boards-agent-btn').click(); await m.locator('#ap').waitFor(); await settle(m);
+    const g = await m.evaluate(() => { const d = document.querySelector('dialog#modal').getBoundingClientRect(); const c = document.querySelector('.ap-copy').getBoundingClientRect(); return { dw: Math.round(d.width), dh: Math.round(d.height), cb: Math.round(c.bottom), iw: innerWidth, ih: innerHeight, sw: document.documentElement.scrollWidth }; });
+    if (g.dw !== g.iw || g.dh < g.ih - 2 || g.cb > g.ih || g.sw > g.iw) throw new Error('phone layout: ' + JSON.stringify(g));
+  } finally { await mctx.close(); }
 });
 
 // ---- card sheet ----------------------------------------------------------------------------

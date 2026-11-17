@@ -1,0 +1,142 @@
+{
+ "id": "builtin:bug-tracker",
+ "version": 1,
+ "category": "software",
+ "name": "Bug tracker",
+ "summary": "From new report to verified fix, with severity and area labels.",
+ "audience": "Teams triaging and fixing bugs",
+ "tags": [
+  "bugs",
+  "issues",
+  "triage",
+  "qa",
+  "defects"
+ ],
+ "defaultView": "kanban",
+ "order": 3,
+ "includesSampleCards": true,
+ "sampleCardsDefault": true,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Bug tracker",
+   "defaultView": "kanban",
+   "color": "crimson",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "New",
+    "type": "active",
+    "position": 65536,
+    "description": "Untriaged reports. Triage within a day: reproduce it, set a severity and an area, then move it on or close it as a duplicate."
+   },
+   {
+    "id": "l2",
+    "name": "Triaged",
+    "type": "active",
+    "position": 131072,
+    "description": "Confirmed and prioritised, most severe first. Critical bugs jump the queue."
+   },
+   {
+    "id": "l3",
+    "name": "Fixing",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "Someone is fixing it now, at most 3 at a time. Agents: take the top Triaged card, reproduce it, fix it and leave a note of the cause.",
+    "wipLimit": 3
+   },
+   {
+    "id": "l4",
+    "name": "Verify",
+    "type": "active",
+    "position": 262144,
+    "color": "violet",
+    "description": "A fix is ready; the reporter or QA confirms it on a real build."
+   },
+   {
+    "id": "l5",
+    "name": "Closed",
+    "type": "closed",
+    "position": 327680,
+    "color": "green",
+    "description": "Fixed and verified, or closed as not reproducible, duplicate or won't fix. Say why in a comment."
+   }
+  ],
+  "labelGroups": [
+   {
+    "id": "g1",
+    "name": "Severity",
+    "singleSelect": true
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Critical",
+    "color": "crimson",
+    "groupId": "g1"
+   },
+   {
+    "id": "b2",
+    "name": "Major",
+    "color": "orange",
+    "groupId": "g1"
+   },
+   {
+    "id": "b3",
+    "name": "Minor",
+    "color": "amber",
+    "groupId": "g1"
+   },
+   {
+    "id": "b4",
+    "name": "UI",
+    "color": "sky"
+   },
+   {
+    "id": "b5",
+    "name": "API",
+    "color": "indigo"
+   },
+   {
+    "id": "b6",
+    "name": "Data",
+    "color": "teal"
+   },
+   {
+    "id": "b7",
+    "name": "Performance",
+    "color": "violet"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l1",
+    "name": "Saving a draft sometimes loses the last paragraph",
+    "type": "project",
+    "position": 65536,
+    "description": "**Repro steps**\n1. Open a draft and type for a few seconds\n2. Switch tabs and come back\n3. Click Save\n\n**Expected**\nAll the text is saved.\n\n**Actual**\nThe last paragraph is missing.\n\n**Environment**\nBrowser, version, account.",
+    "labelIds": [
+     "b4"
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l2",
+    "name": "Checkout fails for large orders",
+    "type": "project",
+    "position": 131072,
+    "description": "**Repro steps**\n1. \n\n**Expected**\n\n**Actual**\n\n**Notes**\nSeverity *Critical* means customers cannot pay or data is lost.",
+    "labelIds": [
+     "b1",
+     "b5"
+    ]
+   }
+  ]
+ }
+}

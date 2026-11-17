@@ -140,12 +140,12 @@ func TestListSheetRoutes(t *testing.T) {
 	call[boards.Member](t, e, "board.member.add", boards.MemberAddIn{BoardID: b.ID, UserID: viewer.UserID, Role: "viewer"})
 	m := mux(e)
 
-	// fragment for an editor: forms, inline agent prompt, no card list, escaped description
+	// fragment for an editor: forms, "Connect an agent" button, no card list, escaped description
 	code, body := get(t, m, "/ui/lists/"+l.ID, true)
 	if code != 200 {
 		t.Fatalf("fragment: %d %s", code, body)
 	}
-	for _, want := range []string{`id="list-sheet"`, `class="ls cm"`, `data-ls-form="name"`, `data-ls-form="desc"`, `data-ls-form="type"`, `data-ls-form="wip"`, `data-ls-form="sort"`, `data-ls-form="move"`, `id="ls-ap-text"`, `data-ls-delete`, `data-ls-archive`,
+	for _, want := range []string{`id="list-sheet"`, `class="ls cm"`, `data-ls-form="name"`, `data-ls-form="desc"`, `data-ls-form="type"`, `data-ls-form="wip"`, `data-ls-form="sort"`, `data-ls-form="move"`, `hx-get="/ui/agent-prompt?scope=list&amp;id=` + l.ID + `"`, `data-ls-delete`, `data-ls-archive`,
 		`value="` + other.ID + `"`, "WIP 2/1, over the limit", `class="cards-badge ls-wipchip cards-badge-warn is-over"`, `data-ls-nav="` + other.ID + `"`, `hx-get="/ui/lists/` + l.ID + `/activity"`, `data-ls-desc-edit`, `cm-desc-view is-editable`, `&lt;b&gt;carefully&lt;/b&gt;`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sheet lacks %q", want)
@@ -183,7 +183,7 @@ func TestListSheetRoutes(t *testing.T) {
 
 	// read-only member: sheet renders without controls
 	_, body = get(t, mux(testutil.As(e, viewer)), "/ui/lists/"+l.ID, true)
-	if !strings.Contains(body, `id="list-sheet"`) || strings.Contains(body, "data-ls-form=") || strings.Contains(body, "ls-ap-text") || strings.Contains(body, "data-ls-delete") || strings.Contains(body, "data-ls-desc-edit") || strings.Contains(body, "cm-menu") {
+	if !strings.Contains(body, `id="list-sheet"`) || strings.Contains(body, "data-ls-form=") || !strings.Contains(body, "/ui/agent-prompt?scope=list") || strings.Contains(body, "data-ls-delete") || strings.Contains(body, "data-ls-desc-edit") || strings.Contains(body, "cm-menu") {
 		t.Errorf("read-only sheet shows controls: %s", body)
 	}
 	// outsiders and system lists are not_found

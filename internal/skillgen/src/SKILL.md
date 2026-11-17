@@ -45,6 +45,10 @@ it from the Weave release page (install.sh / install.ps1) or `go install` the sl
    `weave next` is only for cron and one-shot scripts (§4). Do not substitute `--wait` polling for a
    listener, and do not reach for `weave next` because listen "ignored your own moves" — pass
    `--ignore-self=false` instead.
+10. **Given a Weave project/board prompt, run its questionnaire and confirm a PLAN before listening.** Prompts
+    come from `weave agent prompt` or the browser's *Connect an agent* (`references/prompts.md` shows them all). Ask
+    what to attach to (grouped questions with defaults), echo the PLAN block, and wait for an explicit "go" before
+    any `weave listen` or `weave agent run`. Never ask for, echo or write the key: it lives in `$WEAVE_TOKEN`.
 
 ## 3. Everyday commands
 
@@ -151,4 +155,4 @@ Stderr carries `{"error":{"code":"conflict","message":"..."}}` and the exit code
 `network` (8) is retryable with backoff; `validation` (6) is not, so fix the input.
 
 More: `references/commands.md`, `references/agent-workflows.md`, `references/events.md`,
-`references/ops.md` (generated list of every op and field).
+`references/prompts.md` (the prompts Weave hands to agents), `references/ops.md` (generated list of every op and field).

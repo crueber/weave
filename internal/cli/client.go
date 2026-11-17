@@ -317,6 +317,12 @@ func itemsOf(v any) []any {
 		if it, ok := t["items"].([]any); ok {
 			return it
 		}
+		// the server wraps list outputs that are structs ({"item":{"items":[...],"nextCursor":...}})
+		if in, ok := t["item"].(map[string]any); ok {
+			if _, has := in["items"]; has {
+				return itemsOf(in)
+			}
+		}
 	case []any:
 		return t
 	}

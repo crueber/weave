@@ -1,0 +1,85 @@
+{
+ "id": "builtin:study-reading",
+ "version": 1,
+ "category": "personal",
+ "name": "Study / reading list",
+ "summary": "Books, courses and articles from wanting to read them to notes you can keep.",
+ "audience": "Students and lifelong learners",
+ "tags": [
+  "study",
+  "reading",
+  "books",
+  "learning",
+  "courses",
+  "notes"
+ ],
+ "defaultView": "kanban",
+ "order": 14,
+ "includesSampleCards": false,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Study & reading list",
+   "defaultView": "kanban",
+   "color": "indigo",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Want to",
+    "type": "active",
+    "position": 65536,
+    "description": "Things you would like to read or take. Add why in a line."
+   },
+   {
+    "id": "l2",
+    "name": "Reading",
+    "type": "active",
+    "position": 131072,
+    "color": "blue",
+    "description": "Currently reading or studying. Keep it to a few so you finish them."
+   },
+   {
+    "id": "l3",
+    "name": "Notes",
+    "type": "active",
+    "position": 196608,
+    "description": "Finished, but you still need to write up what you learned."
+   },
+   {
+    "id": "l4",
+    "name": "Finished",
+    "type": "closed",
+    "position": 262144,
+    "color": "green",
+    "description": "Read, noted and done."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Technology",
+    "color": "indigo"
+   },
+   {
+    "id": "b2",
+    "name": "Science",
+    "color": "teal"
+   },
+   {
+    "id": "b3",
+    "name": "Business",
+    "color": "amber"
+   },
+   {
+    "id": "b4",
+    "name": "Arts",
+    "color": "pink"
+   }
+  ],
+  "cards": []
+ }
+}

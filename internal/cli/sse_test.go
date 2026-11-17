@@ -456,11 +456,12 @@ func TestListenClaimSkipsConflictAndMoves(t *testing.T) {
 	if !strings.Contains(out, `"id":"e2"`) || strings.Contains(out, `"id":"e1"`) || !strings.Contains(out, `"claim"`) {
 		t.Fatalf("out %q", out)
 	}
-	if !strings.Contains(f.body("POST /api/v1/cards/c-e2/claim"), `"ttlSeconds":300`) || !strings.Contains(f.body("POST /api/v1/cards/c-e2/claim"), `"listId":"l1"`) {
+	// the claim itself carries the move (atomic) and never the event's own list as a target
+	if !strings.Contains(f.body("POST /api/v1/cards/c-e2/claim"), `"ttlSeconds":300`) || !strings.Contains(f.body("POST /api/v1/cards/c-e2/claim"), `"listId":"l2"`) {
 		t.Fatalf("claim body %s", f.body("POST /api/v1/cards/c-e2/claim"))
 	}
-	if !strings.Contains(f.body("POST /api/v1/cards/c-e2/move"), `"listId":"l2"`) {
-		t.Fatalf("move body %s", f.body("POST /api/v1/cards/c-e2/move"))
+	if f.called("POST /api/v1/cards/c-e2/move") != 0 {
+		t.Fatalf("no separate move expected: %v", f.calls)
 	}
 }
 
@@ -579,10 +580,8 @@ func TestAgentRunSuccessFailureAndDecline(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake(t)
-			f.json("POST /api/v1/cards/{id}/claim", map[string]any{"item": map[string]any{"claimedBy": "u1"}})
-			f.json("POST /api/v1/cards/{id}/release", map[string]any{"item": map[string]any{}})
-			f.json("POST /api/v1/cards/{id}/move", map[string]any{"item": map[string]any{}})
 			f.json("POST /api/v1/cards/{cardId}/comments", map[string]any{"item": map[string]any{"id": "m"}})
+			f.trackCards(nil)
 			cliSSE(f, ev("e1", "card.created", nil))
 			code, _, errs := f.run("agent", "run", "--board", "Product", "--listen", "Ready", "--claim-move-to", "In progress", "--done-list", "Review",
 				"--comment-output", "--once", "--no-cursor", "--", "sh", "-c", tc.script)

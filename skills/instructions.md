@@ -21,7 +21,8 @@ Env alternative: `WEAVE_URL`, `WEAVE_TOKEN`, `--profile NAME`.
 6. Preview risky calls with `--dry-run`. Deletes need `--yes` in scripts; never delete or clear on a guess.
 7. The column is the brief: a list's `name` and `description` say what a card there asks for (`weave board tree`
    shows both). Infer the request from them; if they do not say, ask on the card instead of guessing.
-8. Watch columns with `weave listen --claim`, never poll them with `weave next`. Asked to watch, work or drain a
+8. Given a Weave project/board prompt (`weave agent prompt`), run its questionnaire and confirm a PLAN before listening.
+9. Watch columns with `weave listen --claim`, never poll them with `weave next`. Asked to watch, work or drain a
    column (or given a column name)? That is `weave listen`. `weave next` is for cron and one-shot scripts only, and
    `--wait` polling is never a substitute for a listener. If listen seems to miss your own moves, add
    `--ignore-self=false`; do not fall back to `weave next`.

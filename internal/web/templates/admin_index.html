@@ -1,19 +1,12 @@
-{{define "page"}}
-<div class="admin-page">
-<h1>{{t "en" "admin.title"}}</h1>
-<nav class="admin-links">
-  <a class="admin-tile" href="/admin/users"><span class="admin-ico" aria-hidden="true">&#128101;</span>{{t "en" "admin.users"}}</a>
-  <a class="admin-tile" href="/admin/groups"><span class="admin-ico" aria-hidden="true">&#129489;&#8205;&#129309;&#8205;&#129489;</span>{{t "en" "admin.groups"}}</a>
-  <a class="admin-tile" href="/admin/agents"><span class="admin-ico" aria-hidden="true">&#129302;</span>{{t "en" "admin.agents"}}</a>
-  <a class="admin-tile" href="/admin/webhooks"><span class="admin-ico" aria-hidden="true">&#128279;</span>{{t "en" "admin.webhooks"}}</a>
-  <a class="admin-tile" href="/admin/config"><span class="admin-ico" aria-hidden="true">&#9881;&#65039;</span>{{t "en" "admin.config"}}</a>
-  <a class="admin-tile" href="/admin/backup" download><span class="admin-ico" aria-hidden="true">&#128190;</span>{{t "en" "admin.backup"}}</a>
-</nav>
-<section class="panel admin-sys">
-  <p>{{t "en" "admin.version"}}: <strong>{{.Data.Version}}</strong></p>
-  <p>{{t "en" "admin.storage"}}: <strong>{{.Data.Storage.TotalBytes}}</strong> bytes (db {{.Data.Storage.DBBytes}}, files {{.Data.Storage.FilesBytes}})</p>
-  <h2>{{t "en" "admin.stats"}}</h2>
-  <table class="admin-stats">{{range $k, $v := .Data.Counts}}<tr><td>{{$k}}</td><td>{{$v}}</td></tr>{{end}}</table>
+{{define "title"}}Admin console - Weave{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "overview" "Crumb" .User.Name}}{{with .Data}}
+<section id="adm-overview" class="boards-sec" aria-labelledby="adm-overview-h">
+  <div class="bs-sec-head"><h2 id="adm-overview-h">Overview</h2></div>
+  <div class="bs-row"><span class="bs-text"><b>{{t "en" "admin.version"}}</b><small>The running Weave build.</small></span><span class="bs-value"><span class="boards-badge">{{.Version}}</span></span></div>
+  <div class="bs-row"><span class="bs-text"><b>{{t "en" "admin.storage"}}</b><small>Database {{adminBytes .Storage.DBBytes}} &middot; files {{adminBytes .Storage.FilesBytes}}</small></span><span class="bs-value"><b>{{adminBytes .Storage.TotalBytes}}</b></span></div>
+  <div class="bs-row"><span class="bs-text"><b>Backup</b><small>A consistent SQLite snapshot (VACUUM INTO). Copy <code>data/files</code> separately.</small></span>
+    <span class="bs-btns"><a class="boards-btn" href="/admin/backup" download>Download backup</a></span></div>
+  <h3 class="bs-sub">{{t "en" "admin.stats"}}</h3>
+  <div class="adm-stats">{{range $k, $v := .Counts}}<div class="adm-stat"><b>{{$v}}</b><span>{{adminLabel $k}}</span></div>{{end}}</div>
 </section>
-</div>
-{{end}}
+{{end}}{{template "admin_bottom"}}{{end}}

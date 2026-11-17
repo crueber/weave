@@ -1,0 +1,101 @@
+{{/* The "New board" gallery: one sheet in the shared <dialog id="modal"> (sized by boards_gallery.css via dialog#modal:has(.tg)).
+   Top bar (title, search, close) / body = category rail (a radio form) + #tg-main, which every pane swaps itself into:
+   the template grid (boards_tpl_grid), a preview with the create form (boards_tpl_preview), the blank-board form and the
+   import form. The search box and the rail share #tg-form, so every request carries the words and the category.
+   No inline script or handlers: everything is hx-* attributes; sample cards use the checkbox + hidden "false" pattern. */}}
+{{define "boards_gallery"}}{{with .Data}}{{$g := .}}<link rel="stylesheet" href="/static/boards_gallery.css">
+<div class="tg" id="tg" data-project="{{.ProjectID}}">
+  <div class="tg-top">
+    <h2 class="tg-h">New board</h2>
+    <input id="tg-q" class="tg-search" type="search" form="tg-form" name="q" value="{{.Query}}" placeholder="Search templates: kanban, hiring, recipes..." aria-label="Search templates" autocomplete="off"
+      hx-get="/ui/board-templates" hx-trigger="keyup changed delay:200ms, input changed delay:200ms, search" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-include="#tg-form" hx-sync="this:replace">
+    <form method="dialog" class="tg-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+  </div>
+  <div class="tg-body">
+    <form id="tg-form" class="tg-rail" hx-get="/ui/board-templates" hx-trigger="submit, change" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-include="#tg-q" hx-sync="this:replace" role="radiogroup" aria-label="Template categories">
+      <input type="hidden" name="projectId" value="{{.ProjectID}}">
+      <label class="tg-cat"><input type="radio" name="category" value=""{{if eq .Category ""}} checked{{end}}><span>All templates</span></label>
+      {{range .Categories}}<label class="tg-cat"><input type="radio" name="category" value="{{.ID}}"{{if eq $g.Category .ID}} checked{{end}}><span>{{.Name}}</span></label>
+      {{end}}{{if .HasPublished}}<label class="tg-cat tg-cat-mine"><input type="radio" name="category" value="published"{{if eq .Category "published"}} checked{{end}}><span>From your team</span></label>
+      {{end}}<button type="button" class="tg-cat tg-cat-import" hx-get="/ui/projects/{{.ProjectID}}/boards/new/import" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span>Import a file</span></button>
+    </form>
+    <div class="tg-main" id="tg-main">{{template "boards_tpl_grid_in" .}}</div>
+  </div>
+</div>{{end}}{{end}}
+
+{{define "boards_tpl_grid"}}{{with .Data}}{{template "boards_tpl_grid_in" .}}{{end}}{{end}}
+{{define "boards_tpl_grid_in"}}{{if .Empty}}<div class="tg-empty"><h3>No templates match</h3><p>Try a different word, or pick another category.{{if .Query}} Searching for <b>{{.Query}}</b>.{{end}}</p></div>{{else}}
+  {{if or .Blank .Builtins}}<div class="tg-grid" role="list">
+    {{if .Blank}}<button type="button" role="listitem" class="tg-tile tg-tile-blank" hx-get="/ui/projects/{{.ProjectID}}/boards/new/blank" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
+      <span class="tg-strip tg-strip-blank" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="tg-name">Blank board</span><span class="tg-sum">Start empty and add your own columns.</span>
+      <span class="tg-meta"><span class="tg-chip">Start here</span></span></button>{{end}}
+    {{range .Builtins}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID}}{{end}}
+  </div>{{end}}
+  {{if .Published}}<h3 class="tg-sec">From your team</h3>
+  <div class="tg-grid" role="list">{{range .Published}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID}}{{end}}</div>{{end}}
+{{end}}{{end}}
+
+{{define "boards_tpl_tile"}}{{$t := .T}}<button type="button" role="listitem" class="tg-tile" hx-get="/ui/board-templates/{{$t.ID}}?projectId={{.P}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
+  <span class="tg-strip" aria-hidden="true">{{range $t.Columns}}<i{{boardsListAttr .Color}}></i>{{end}}</span>
+  <span class="tg-name">{{$t.Name}}</span>
+  <span class="tg-sum">{{if $t.Summary}}{{$t.Summary}}{{else}}{{len $t.Columns}} columns{{if $t.IncludesSampleCards}}, with cards{{end}}.{{end}}</span>
+  <span class="tg-meta">{{if eq $t.Source "builtin"}}<span class="tg-chip">{{$t.CategoryName}}</span>{{else}}<span class="tg-chip tg-chip-vis" data-vis="{{$t.Visibility}}">{{if eq $t.Visibility "public"}}Everyone{{else if eq $t.Visibility "group"}}{{$t.Group}}{{else}}Private{{end}}</span><span class="tg-by">{{$t.Project}}{{if $t.Publisher}} &middot; {{$t.Publisher}}{{end}}</span>{{end}}</span>
+</button>{{end}}
+
+{{/* ---- preview pane: what the board will look like, then the create form ---- */}}
+{{define "boards_tpl_preview"}}{{with .Data}}{{$t := .T}}<div class="tg-pv">
+  <button type="button" class="tg-back" hx-get="/ui/board-templates" hx-include="#tg-form, #tg-q" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span aria-hidden="true">&larr;</span> All templates</button>
+  <header class="tg-pvhead">
+    <h3>{{$t.Name}}</h3>
+    {{if $t.Summary}}<p class="tg-pvsum">{{$t.Summary}}</p>{{end}}
+    <div class="tg-chips">
+      {{if eq $t.Source "builtin"}}<span class="tg-chip">{{$t.CategoryName}}</span>{{else}}<span class="tg-chip tg-chip-vis" data-vis="{{$t.Visibility}}">{{if eq $t.Visibility "public"}}Everyone{{else if eq $t.Visibility "group"}}{{$t.Group}}{{else}}Private{{end}}</span><span class="tg-chip">{{$t.Project}}{{if $t.Publisher}} &middot; {{$t.Publisher}}{{end}}</span>{{end}}
+      <span class="tg-chip">Opens as {{$t.DefaultView}}</span><span class="tg-chip">{{len $t.Columns}} columns</span>{{if $t.Cards}}<span class="tg-chip">{{len $t.Cards}} sample card{{if ne (len $t.Cards) 1}}s{{end}}</span>{{end}}
+    </div>
+    {{if $t.Audience}}<p class="tg-aud">For: {{$t.Audience}}</p>{{end}}
+  </header>
+
+  <section class="tg-stubwrap" aria-label="Layout of the board">
+    <div class="tg-stub">{{range .Cols}}<div class="tg-col"{{boardsListAttr .Color}}>
+      <div class="tg-colhead"><b>{{.Name}}</b>{{if .WIPLimit}}<span class="tg-wip" title="Work-in-progress limit">{{.WIPLimit}}</span>{{end}}</div>
+      {{range .Cards}}<div class="tg-card"><span class="tg-ctitle">{{.Name}}</span>{{if or .Dots .Tasks .HasDue}}<span class="tg-cmeta">{{range .Dots}}<i class="tg-dot"{{boardsListAttr .}}></i>{{end}}{{if .Tasks}}<span>{{.Tasks}} tasks</span>{{end}}{{if .HasDue}}<span>due in {{.Due}}d</span>{{end}}</span>{{end}}</div>{{end}}
+    </div>{{end}}</div>
+  </section>
+
+  <div class="tg-notes">
+    {{if $t.Labels}}<section class="tg-note"><h4>Labels</h4><div class="tg-labels">{{range $t.Labels}}<span class="tg-label"><i{{boardsListAttr .Color}}></i>{{.Name}}{{if .Group}}<small>{{.Group}}</small>{{end}}</span>{{end}}</div>
+      {{if $t.LabelGroups}}<p class="tg-hint">{{range $i, $g := $t.LabelGroups}}{{if $i}}, {{end}}{{$g}}{{end}}: a card takes only one of these.</p>{{end}}</section>{{end}}
+    {{if $t.CustomFields}}<section class="tg-note"><h4>Custom fields</h4>{{range $t.CustomFields}}<p class="tg-fields"><b>{{.Name}}</b>{{range .Fields}}<span class="tg-chip">{{.}}</span>{{end}}</p>{{end}}</section>{{end}}
+    {{$any := false}}{{range .Cols}}{{if .Description}}{{$any = true}}{{end}}{{end}}{{if $any}}<section class="tg-note tg-note-cols"><h4>What each column is for</h4><dl class="tg-how">{{range .Cols}}{{if .Description}}<div><dt>{{.Name}}</dt><dd>{{.Description}}</dd></div>{{end}}{{end}}</dl></section>{{end}}
+  </div>
+
+  <form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards/from-template" hx-disabled-elt="find button.primary">
+    <input type="hidden" name="templateId" value="{{$t.ID}}">
+    <label class="tg-f tg-f-name"><span>Board name</span><input name="name" required maxlength="128" autocomplete="off" placeholder="Name your board (not &ldquo;{{$t.Name}}&rdquo;)"></label>
+    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}"{{if eq . $t.DefaultView}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label class="tg-check"><input type="checkbox" name="sampleCards" value="true"{{if $t.SampleCardsDefault}} checked{{end}}{{if not $t.IncludesSampleCards}} disabled{{end}}><input type="hidden" name="sampleCards" value="false"><span class="tg-checktext"><b>Include sample cards</b><small>{{if $t.IncludesSampleCards}}{{len $t.Cards}} to show how it works{{else}}none in this template{{end}}</small></span></label>
+    <button class="primary tg-go">Create board</button>
+  </form>
+</div>{{end}}{{end}}
+
+{{define "boards_tpl_blank"}}{{with .Data}}<div class="tg-pv tg-pv-narrow">
+  <button type="button" class="tg-back" hx-get="/ui/board-templates" hx-include="#tg-form, #tg-q" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span aria-hidden="true">&larr;</span> All templates</button>
+  <header class="tg-pvhead"><h3>Blank board</h3><p class="tg-pvsum">An empty board. Add columns and cards as you go.</p></header>
+  <form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards" hx-disabled-elt="find button.primary">
+    <label class="tg-f tg-f-name"><span>Board name</span><input name="name" required maxlength="128" autofocus autocomplete="off"></label>
+    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <button class="primary tg-go">Create board</button>
+  </form>
+</div>{{end}}{{end}}
+
+{{define "boards_tpl_import"}}{{with .Data}}<div class="tg-pv tg-pv-narrow">
+  <button type="button" class="tg-back" hx-get="/ui/board-templates" hx-include="#tg-form, #tg-q" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span aria-hidden="true">&larr;</span> All templates</button>
+  <header class="tg-pvhead"><h3>Import a board</h3><p class="tg-pvsum">Bring a board in from a Weave or Planka export, a Trello export or a CSV file.</p></header>
+  <form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards/import" hx-encoding="multipart/form-data" hx-disabled-elt="find button.primary">
+    <label class="tg-f"><span>Format</span><select name="format"><option value="planka">Weave / Planka JSON</option><option value="trello">Trello JSON</option><option value="csv">CSV (list, name, description, due, labels)</option></select></label>
+    <label class="tg-f"><span>Board name (optional)</span><input name="name" maxlength="128" autocomplete="off"></label>
+    <label class="tg-f tg-f-file"><span>File</span><input type="file" name="file" required accept=".json,.csv,application/json,text/csv"></label>
+    <button class="primary tg-go">Import board</button>
+  </form>
+</div>{{end}}{{end}}

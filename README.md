@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo (36 seconds), shown in the dark theme: add cards, drag between lists, open a card, switch to the light theme" width="860"></a><br>
-  <a href="docs/demo.webm"><b>&#9654; Watch the 36-second demo</b></a> &middot; dark and light themes
+  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo (56 seconds): the board header, adding cards, drag and drop, the card sheet, column WIP limits, filters, list, calendar and map views, the board template gallery, Connect an agent, board settings, user settings and the admin console, then the dark theme and a phone view" width="860"></a><br>
+  <a href="docs/demo.webm"><b>&#9654; Watch the 56-second demo</b></a> &middot; light theme to dark, with captions, no sound
 </p>
 
 ## Why Weave
@@ -56,6 +56,25 @@ strict Content-Security-Policy, CSRF protection, rate limits, signed releases an
   <img src="docs/screenshots/colors-list-menu-dark.png" alt="List menu with color picker" width="49%">
   <img src="docs/screenshots/board-settings-dark.png" alt="Board settings" width="49%">
 </p>
+
+<p align="center">
+  <img src="docs/screenshots/gallery-light.png" alt="The New board template gallery: categories, search and a grid of starter boards" width="49%">
+  <img src="docs/screenshots/agent-dialog-dark.png" alt="The Connect an agent dialog with a ready-to-paste prompt and project, board and runner tabs" width="49%">
+</p>
+
+<details>
+<summary>More screenshots</summary>
+
+<p align="center">
+  <img src="docs/screenshots/gallery-preview-dark.png" alt="Template preview with the columns, labels and the name your board form" width="49%">
+  <img src="docs/screenshots/column-sheet-light.png" alt="Column settings sheet: description, type, WIP limit, sorting and activity" width="49%">
+  <img src="docs/screenshots/calendar-light.png" alt="Calendar view with due dates and an unscheduled column" width="49%">
+  <img src="docs/screenshots/project-settings-light.png" alt="Project settings page" width="49%">
+  <img src="docs/screenshots/user-settings-light.png" alt="User settings page" width="49%">
+  <img src="docs/screenshots/admin-dark.png" alt="Admin console overview with storage, backup and statistics" width="49%">
+</p>
+
+</details>
 
 ### Try it in two minutes
 
@@ -260,12 +279,13 @@ Environment variables (secrets in env override values stored in the admin UI):
 |---|---|---|
 | `WEAVE_ADDR` | `:8080` | listen address |
 | `WEAVE_BASE_URL` | `http://localhost:8080` | public URL (links, OIDC redirect, cookies) |
-| `WEAVE_AGENT_INSTALL_URL` | `https://github.com/crueber/weave/releases/latest/download` | download base for `install.sh`/`install.ps1`, quoted in the **Agent prompt** a column copies for an AI agent. Point it at your own release page (it must serve `install.sh`) if agents cannot reach GitHub |
+| `WEAVE_AGENT_INSTALL_URL` | `https://github.com/crueber/weave/releases/latest/download` | download base for `install.sh`/`install.ps1`, quoted in the **Connect an agent** prompts (`weave agent prompt`) copied for an AI agent. Point it at your own release page (it must serve `install.sh`) if agents cannot reach GitHub |
 | `WEAVE_DATA_DIR` | `./data` (`/data` in Docker) | database + uploaded files |
 | `WEAVE_SECRET_KEY` | **required** | signs OIDC state (`openssl rand -hex 32`; keep it stable). It does not encrypt the database: webhook secrets, notification-service URLs and SMTP/OIDC secrets saved in the admin UI are stored in `weave.db` in plaintext, so protect the data volume and backups (or set the secrets via environment variables) |
 | `WEAVE_TRUST_PROXY` | `false` | trust `X-Forwarded-*` |
 | `WEAVE_SESSION_HOURS` | `24` | session lifetime; also editable as `session.hours` in Admin > Configuration (the env var pins it). When it ends the browser is sent back through the OIDC provider, so the IdP decides whether a fresh sign-in is needed |
 | `WEAVE_SESSION_MAX_IDLE_MINUTES` | `0` (none) | instance-wide upper bound on session idleness, also editable as `session.maxIdleMinutes` in Admin > Configuration. A session idle longer than this ends, even if the user's own auto-logout is longer or unset; the stricter of the two applies |
+| `WEAVE_TEMPLATES_HIDDEN` | empty | built-in board templates to hide from the New board gallery (ids like `builtin:sprint`, one per line, comma separated or a JSON array); also editable as `templates.hidden` in Admin > Configuration. Hidden templates cannot be created from either. Boards that people published as templates are not affected |
 | `WEAVE_HSTS` | on when `WEAVE_BASE_URL` is https | `off` stops sending `Strict-Transport-Security: max-age=15552000` (180 days, no `includeSubDomains`/`preload`). Never sent for an http base URL |
 | `WEAVE_HSTS_MAX_AGE` | `15552000` | HSTS `max-age` in seconds |
 | `WEAVE_SMTP_HOST/PORT/USER/PASSWORD/FROM` | - | outgoing email (also editable in Admin > Settings) |

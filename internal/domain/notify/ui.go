@@ -328,6 +328,9 @@ var configForm = []formGroup{
 		{"session.hours", "Session lifetime (hours)", "text", "Default 24. When a session ends the user is sent back through your identity provider, so its own session policy decides whether they must sign in again.", nil},
 		{"session.maxIdleMinutes", "Maximum idle minutes", "text", "Sessions idle longer than this end, whatever the user's own auto-logout says. 0 or empty = no limit.", nil},
 	}},
+	{"Board templates", "templates", []formField{
+		{"templates.hidden", "Hidden built-in templates", "textarea", "Ids of built-in templates to hide from the New board gallery, one per line (hidden ones cannot be used either). Ids: builtin:kanban-basics, builtin:sprint, builtin:bug-tracker, builtin:product-roadmap, builtin:content-calendar, builtin:hiring-pipeline, builtin:sales-pipeline, builtin:okrs, builtin:release-checklist, builtin:event-planning, builtin:weekly-planner, builtin:home-chores, builtin:meal-planning, builtin:study-reading. Boards people published as templates are not affected.", nil},
+	}},
 	{"Terms", "terms", []formField{
 		{"terms.enabled", "Require terms acceptance", "bool", "", nil},
 		{"terms.version", "Terms version", "text", "Change to force everyone to accept again.", nil},
@@ -335,35 +338,36 @@ var configForm = []formGroup{
 	}},
 }
 
-func pageConfig(c *web.Ctx) error {
+// renderConfig draws the Configuration panel; an HTMX action re-renders just the panel (with the
+// "Saved" confirmation or the failure message), a plain GET renders the whole admin page.
+func renderConfig(c *web.Ctx, done bool, errm string) error {
 	v, err := ops.Typed[SettingsView](c.Env, "config.get", NoInput{})
 	if err != nil {
 		return err
 	}
-	return c.Render("notify_config.html", map[string]any{"V": v, "Groups": configForm, "Saved": c.R.URL.Query().Get("saved"), "SMTPOn": SMTPConfigured(c.Env)})
+	d := map[string]any{"V": v, "Groups": configForm, "Done": done, "Error": errm, "SMTPOn": SMTPConfigured(c.Env)}
+	if c.IsHTMX() && c.R.Method != "GET" {
+		return c.RenderBlock("notify_config.html", "config-body", d)
+	}
+	return c.Render("notify_config.html", d)
 }
 
-func uiConfigSave(c *web.Ctx) error {
-	if _, err := c.Do("config.update"); err != nil {
+func pageConfig(c *web.Ctx) error { return renderConfig(c, false, "") }
+
+// configAction runs a config op and re-renders the panel, showing a failure inline.
+func configAction(c *web.Ctx, op string) error {
+	if _, err := c.Do(op); err != nil {
+		if oe, ok := err.(*ops.Error); ok {
+			return renderConfig(c, false, oe.Msg)
+		}
 		return err
 	}
-	c.Redirect("/admin/config?saved=1")
-	return nil
+	return renderConfig(c, true, "")
 }
-func uiLogoUpload(c *web.Ctx) error {
-	if _, err := c.Do("config.logo.upload"); err != nil {
-		return err
-	}
-	c.Redirect("/admin/config?saved=1")
-	return nil
-}
-func uiLogoDelete(c *web.Ctx) error {
-	if _, err := c.Do("config.logo.delete"); err != nil {
-		return err
-	}
-	c.Redirect("/admin/config?saved=1")
-	return nil
-}
+
+func uiConfigSave(c *web.Ctx) error { return configAction(c, "config.update") }
+func uiLogoUpload(c *web.Ctx) error { return configAction(c, "config.logo.upload") }
+func uiLogoDelete(c *web.Ctx) error { return configAction(c, "config.logo.delete") }
 func uiSMTPTest(c *web.Ctx) error {
 	if _, err := c.Do("smtp.test"); err != nil {
 		return err

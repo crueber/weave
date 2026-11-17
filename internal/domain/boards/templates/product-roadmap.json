@@ -1,0 +1,135 @@
+{
+ "id": "builtin:product-roadmap",
+ "version": 1,
+ "category": "product",
+ "name": "Product roadmap",
+ "summary": "Now, next, later and shipped: a roadmap that shows direction without false dates.",
+ "audience": "Product managers and founders",
+ "tags": [
+  "roadmap",
+  "product",
+  "planning",
+  "strategy",
+  "now next later"
+ ],
+ "defaultView": "kanban",
+ "order": 4,
+ "includesSampleCards": true,
+ "sampleCardsDefault": true,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Product roadmap",
+   "defaultView": "kanban",
+   "color": "teal",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Now",
+    "type": "active",
+    "position": 65536,
+    "description": "What we are actively delivering. Few initiatives, each with a clear goal and an owner."
+   },
+   {
+    "id": "l2",
+    "name": "Next",
+    "type": "active",
+    "position": 131072,
+    "description": "Likely to start once something in Now finishes. Shaped, but not committed."
+   },
+   {
+    "id": "l3",
+    "name": "Later",
+    "type": "active",
+    "position": 196608,
+    "description": "Ideas worth keeping that we are not ready to schedule. Revisit each planning round; delete what no longer matters."
+   },
+   {
+    "id": "l4",
+    "name": "Shipped",
+    "type": "active",
+    "position": 262144,
+    "color": "green",
+    "description": "Delivered. Keep recent wins visible, then archive them."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Growth",
+    "color": "teal"
+   },
+   {
+    "id": "b2",
+    "name": "Platform",
+    "color": "indigo"
+   },
+   {
+    "id": "b3",
+    "name": "Delight",
+    "color": "amber"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l1",
+    "name": "Self-serve onboarding",
+    "type": "project",
+    "position": 65536,
+    "description": "**Goal**\nNew customers reach their first success without talking to us.\n\n**Why now**\nSupport time spent on setup is our biggest drag on growth.",
+    "labelIds": [
+     "b1"
+    ],
+    "taskLists": [
+     {
+      "name": "Goals",
+      "tasks": [
+       {
+        "name": "Interview 5 recent customers about setup",
+        "isCompleted": false
+       },
+       {
+        "name": "Define the activation moment",
+        "isCompleted": false
+       },
+       {
+        "name": "Ship a guided first-run checklist",
+        "isCompleted": false
+       },
+       {
+        "name": "Measure the share who activate in week one",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l2",
+    "name": "Usage-based billing",
+    "type": "project",
+    "position": 131072,
+    "description": "Replace flat tiers with metered usage once metering is reliable.",
+    "labelIds": [
+     "b2"
+    ]
+   },
+   {
+    "id": "c3",
+    "listId": "l3",
+    "name": "Dark mode polish",
+    "type": "project",
+    "position": 196608,
+    "description": "Small touches that make the product feel cared for.",
+    "labelIds": [
+     "b3"
+    ]
+   }
+  ]
+ }
+}

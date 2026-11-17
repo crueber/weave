@@ -1,50 +1,55 @@
 {{define "title"}}AI agents - Weave{{end}}
-{{define "page"}}
-<link rel="stylesheet" href="/static/auth_pages.css">
-<link rel="stylesheet" href="/static/agents.css">
-<div class="auth-page"><h1>AI agents</h1>
-<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups">Groups</a> <a href="/admin/agents" aria-current="page">AI agents</a> <a href="/admin/sso">Single sign-on &amp; terms</a></nav>
-<div id="agents-body">{{template "agents-body" .}}</div></div>
-<script src="/static/auth_agents.js" defer></script>
-{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/agents.css">{{template "admin_top" dict "Active" "agents" "Crumb" .User.Name}}{{template "agents-body" .}}{{template "admin_bottom"}}{{end}}
 
-{{define "agents-body"}}{{with .Data}}
-{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
-{{if .NewKey}}<section class="card auth-sec" role="status"><h2>API key for {{.NewKeyName}}</h2>
-  <p class="muted">Copy it now: it is shown once and cannot be recovered (rotate to issue a new one).</p>
-  <div class="agents-key"><code id="agent-key">{{.NewKey}}</code><button type="button" class="primary" data-copy="#agent-key">Copy</button></div>
-  <p class="muted">Use it as <code>WEAVE_TOKEN</code> for the CLI, or send <code>Authorization: Bearer &lt;key&gt;</code>.</p></section>{{end}}
+{{define "agents-body"}}{{with .Data}}<section id="adm-agents" class="boards-sec" aria-labelledby="adm-agents-h">
+  <div class="bs-sec-head"><h2 id="adm-agents-h">AI agents</h2></div>
+  {{template "adm_error" .Error}}
+  {{if .NewKey}}<div class="bs-link as-newkey" role="status">
+    <label class="sr-only" for="agent-key">API key for {{.NewKeyName}}</label>
+    <input id="agent-key" readonly value="{{.NewKey}}" data-secret>
+    <button type="button" class="primary" data-copy="agent-key">Copy key</button>
+    <p class="bs-hint">API key for <b>{{.NewKeyName}}</b>. Copy it now: it is shown once and cannot be recovered (rotate to issue a new one). Use it as <code>WEAVE_TOKEN</code> for the CLI, or send <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+  </div>{{end}}
+  <p class="bs-desc">Agents are service accounts without a login. They act through the API or CLI with their key, see only the boards you grant, and listen to the lists they attach to (the robot icon in a list header shows who listens).</p>
+  <div class="bs-row"><span class="bs-text"><b>Next: give it a prompt</b><small>The prompts (About Weave, Runner; per board from the board page) use <code>$WEAVE_TOKEN</code>. Never paste a key into a chat.</small></span>
+    <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=general" hx-target="#modal" hx-swap="innerHTML">Open the agent prompts</button></span></div>
 
-<p class="muted">Agents are service accounts without a login. They act through the API or CLI with their key, see only the boards you grant, and listen to the lists they attach to (the robot icon in a list header shows who listens).</p>
+  <h3 class="bs-sub">New agent</h3>
+  <form class="bs-form" hx-post="/ui/admin/agents" hx-target="#adm-agents" hx-swap="outerHTML" method="post" action="/ui/admin/agents">
+    {{template "adm_field" dict "ID" "adm-agent-name" "Name" "name" "Title" "Name" "Help" "Shown wherever the agent acts, e.g. Triage bot." "Type" "text" "Placeholder" "Triage bot" "Required" true}}
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="adm-agent-role">Role</label></b><small>Worker is the usual choice for automation.</small></span>
+      <select id="adm-agent-role" name="role"><option value="worker">worker</option><option value="boardUser">boardUser</option><option value="guest">guest</option></select></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="adm-agent-br">Board access</label></b><small>Applied to each board ticked below.</small></span>
+      <select id="adm-agent-br" name="boardRole"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="adm-agent-exp">API key expires</label></b><small>Rotate later to issue a fresh key.</small></span>
+      <select id="adm-agent-exp" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select></div>
+    {{if .Boards}}<div class="bs-row bs-row-stack"><span class="bs-text"><b id="adm-agent-boards">Boards</b><small>The agent can see only boards you tick here.</small></span>
+      <div class="adm-pick" role="group" aria-labelledby="adm-agent-boards">{{range .Boards}}<label class="bs-inline-toggle"><input type="checkbox" name="boardIds" value="{{.ID}}"> {{.Name}}</label>{{end}}</div></div>{{end}}
+    <div class="adm-submit"><button class="primary" type="submit">Create agent</button></div>
+  </form>
 
-<section class="card auth-sec"><h2>New agent</h2>
-  <form class="auth-form" hx-post="/ui/admin/agents" hx-target="#agents-body" method="post" action="/ui/admin/agents">
-    <label>Name<input name="name" required maxlength="100" placeholder="e.g. Triage bot"></label>
-    <div class="auth-grid">
-      <label>Role<select name="role"><option value="worker">worker</option><option value="boardUser">boardUser</option><option value="guest">guest</option></select></label>
-      <label>Board access<select name="boardRole"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select></label>
-      <label>API key expires<select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label>
-    </div>
-    {{if .Boards}}<fieldset class="agents-pick"><legend class="muted">Boards</legend>{{range .Boards}}<label class="inline"><input type="checkbox" name="boardIds" value="{{.ID}}"> {{.Name}}</label>{{end}}</fieldset>{{end}}
-    <button class="primary" type="submit">Create agent</button>
-  </form></section>
-
-{{range $a := .Agents}}
-<section class="card auth-sec {{if $a.IsDeactivated}}is-off{{end}}"><h2>{{template "auth_robot"}} {{$a.Name}} <span class="badge">{{$a.Role}}</span>{{if $a.IsDeactivated}} <span class="badge badge-warn">deactivated</span>{{end}}</h2>
-  <p class="muted">Key <code>{{if $a.KeyPrefix}}{{$a.KeyPrefix}}...{{else}}none{{end}}</code> &middot; created {{$a.CreatedAt}}{{if $a.APIKeyExpired}} &middot; <span class="badge badge-warn">key expired {{deref $a.APIKeyExpiresAt}}</span>{{else if $a.APIKeyExpiresAt}} &middot; expires {{deref $a.APIKeyExpiresAt}}{{end}}</p>
-  <ul class="agents-boards">{{range $a.Boards}}<li><a href="/boards/{{.BoardID}}">{{.BoardName}}</a> <span class="badge">{{.Role}}</span>
-    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/access"><input type="hidden" name="boardId" value="{{.BoardID}}"><input type="hidden" name="revoke" value="true"><button type="submit">Revoke</button></form></li>
-  {{else}}<li class="muted">No board access yet.</li>{{end}}</ul>
-  {{if $.Data.Boards}}<form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/access">
-    <select name="boardId" required aria-label="Board"><option value="">Grant access to...</option>{{range $.Data.Boards}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
-    <select name="role" aria-label="Access"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select>
-    <button type="submit">Grant</button></form>{{end}}
-  <div class="auth-actions">
-    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/update"><input name="name" value="{{$a.Name}}" required aria-label="Name"><button type="submit">Rename</button></form>
-    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#agents-body" method="post" action="/ui/admin/agents/{{$a.ID}}/update"><input type="hidden" name="isDeactivated" value="{{if $a.IsDeactivated}}false{{else}}true{{end}}"><button type="submit">{{if $a.IsDeactivated}}Activate{{else}}Deactivate{{end}}</button></form>
-    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/key" hx-target="#agents-body" hx-confirm="Issue a new key? The current key stops working immediately." method="post" action="/ui/admin/agents/{{$a.ID}}/key"><label class="inline">Expires <select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label> <button type="submit">Rotate key</button></form>
-    <form class="auth-inline" hx-post="/ui/admin/agents/{{$a.ID}}/delete" hx-target="#agents-body" hx-confirm="Delete this agent? Its claims are released." method="post" action="/ui/admin/agents/{{$a.ID}}/delete"><button type="submit" class="danger">Delete</button></form>
+  {{range $a := .Agents}}<div class="adm-block{{if $a.IsDeactivated}} is-off{{end}}">
+    <h3 class="bs-sub">{{template "auth_robot"}} {{$a.Name}} <span class="boards-badge">{{$a.Role}}</span>{{if $a.IsDeactivated}} <span class="boards-badge is-warn">deactivated</span>{{end}}{{if $a.APIKeyExpired}} <span class="boards-badge is-warn">key expired</span>{{end}}</h3>
+    <p class="bs-desc adm-meta">Key <code>{{if $a.KeyPrefix}}{{$a.KeyPrefix}}...{{else}}none{{end}}</code> &middot; created {{$a.CreatedAt}}{{if $a.APIKeyExpired}} &middot; expired {{deref $a.APIKeyExpiresAt}}{{else if $a.APIKeyExpiresAt}} &middot; expires {{deref $a.APIKeyExpiresAt}}{{end}}</p>
+    <ul class="bs-members">{{range $a.Boards}}<li class="bs-member">
+      <span class="bs-member-t"><b><a href="/boards/{{.BoardID}}">{{.BoardName}}</a></b></span><span class="boards-badge">{{.Role}}</span>
+      <form hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#adm-agents" hx-swap="outerHTML" method="post" action="/ui/admin/agents/{{$a.ID}}/access"><input type="hidden" name="boardId" value="{{.BoardID}}"><input type="hidden" name="revoke" value="true"><button type="submit" class="bs-x" aria-label="Revoke access to {{.BoardName}}" title="Revoke access">&times;</button></form></li>
+    {{else}}<li class="bs-empty-row">No board access yet.</li>{{end}}</ul>
+    {{if $.Data.Boards}}<form class="bs-add" hx-post="/ui/admin/agents/{{$a.ID}}/access" hx-target="#adm-agents" hx-swap="outerHTML" method="post" action="/ui/admin/agents/{{$a.ID}}/access">
+      <label class="sr-only" for="adm-ag-b-{{$a.ID}}">Board</label><select id="adm-ag-b-{{$a.ID}}" name="boardId" required><option value="">Grant access to...</option>{{range $.Data.Boards}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+      <label class="sr-only" for="adm-ag-r-{{$a.ID}}">Access</label><select id="adm-ag-r-{{$a.ID}}" name="role"><option value="editor">editor</option><option value="commenter">commenter</option><option value="viewer">viewer</option></select>
+      <button type="submit">Grant</button></form>{{end}}
+    <form class="bs-row bs-row-stack" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#adm-agents" hx-swap="outerHTML" method="post" action="/ui/admin/agents/{{$a.ID}}/update">
+      <span class="bs-text"><b><label for="adm-ag-n-{{$a.ID}}">Name</label></b><small>Press Enter or use Rename to save.</small></span>
+      <span class="bs-btns"><input id="adm-ag-n-{{$a.ID}}" name="name" value="{{$a.Name}}" required maxlength="100"><button type="submit">Rename</button></span></form>
+    <form class="bs-row" hx-post="/ui/admin/agents/{{$a.ID}}/update" hx-target="#adm-agents" hx-swap="outerHTML" method="post" action="/ui/admin/agents/{{$a.ID}}/update"><input type="hidden" name="isDeactivated" value="{{if $a.IsDeactivated}}false{{else}}true{{end}}">
+      <span class="bs-text"><b>{{if $a.IsDeactivated}}Activate{{else}}Deactivate{{end}}</b><small>{{if $a.IsDeactivated}}Let this agent act again.{{else}}Stops the agent acting without deleting it.{{end}}</small></span><span class="bs-btns"><button type="submit">{{if $a.IsDeactivated}}Activate{{else}}Deactivate{{end}}</button></span></form>
+    <form class="bs-row" hx-post="/ui/admin/agents/{{$a.ID}}/key" hx-target="#adm-agents" hx-swap="outerHTML" hx-confirm="Issue a new key? The current key stops working immediately." method="post" action="/ui/admin/agents/{{$a.ID}}/key">
+      <span class="bs-text"><b>Rotate key</b><small>Issues a new key; the current one stops working immediately.</small></span>
+      <span class="bs-btns"><label class="sr-only" for="adm-ag-e-{{$a.ID}}">Expires</label><select id="adm-ag-e-{{$a.ID}}" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select><button type="submit">Rotate</button></span></form>
+    <form class="bs-row" hx-post="/ui/admin/agents/{{$a.ID}}/delete" hx-target="#adm-agents" hx-swap="outerHTML" hx-confirm="Delete this agent? Its claims are released." method="post" action="/ui/admin/agents/{{$a.ID}}/delete">
+      <span class="bs-text"><b>Delete agent</b><small>Releases its claims and removes the account.</small></span><span class="bs-btns"><button type="submit" class="danger">Delete</button></span></form>
   </div>
+  {{else}}<p class="bs-empty-row">No agents yet.</p>{{end}}
 </section>
-{{else}}<p class="muted">No agents yet.</p>{{end}}
 {{end}}{{end}}

@@ -23,6 +23,7 @@
       {{template "boards_set_filters_in" .}}
       {{template "boards_set_sharing_in" .}}
       {{template "boards_set_templates_in" .}}
+      {{template "boards_set_agents_in" .}}
       {{if .CanManage}}{{template "boards_set_notifications_in" .}}
       {{template "boards_set_danger_in" .}}{{end}}
     </div>
@@ -74,16 +75,7 @@
   <div class="bs-sec-head"><h2 id="set-members-h">Members &amp; access</h2></div>
   <p class="bs-desc">Editors can change cards, commenters can read and comment, viewers can only read. Group members get access through the group.</p>
   {{if .CanManage}}<form class="bs-add" hx-post="/ui/boards/{{.Board.ID}}/members" hx-target="#set-members" hx-swap="outerHTML">
-    <div class="bs-combo" data-combo>
-      <label class="sr-only" for="bs-combo-in">Search people and groups</label>
-      <input id="bs-combo-in" type="text" role="combobox" aria-expanded="false" aria-controls="bs-combo-list" aria-autocomplete="list" autocomplete="off" placeholder="Add people or groups...">
-      <input type="hidden" name="userId" value=""><input type="hidden" name="groupId" value="">
-      <ul id="bs-combo-list" role="listbox" aria-label="People and groups" hidden>
-        {{range .Users}}<li role="option" data-user="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm avatar-ph" aria-hidden="true">{{authInitial .Name}}</span><span class="bs-opt-t"><b>{{.Name}}</b><small>{{.Email}}</small></span></li>{{end}}
-        {{range .Groups}}<li role="option" data-group="{{.ID}}" data-label="{{.Name}}"><span class="avatar avatar-sm bs-group-av" aria-hidden="true">&#9679;&#9679;</span><span class="bs-opt-t"><b>{{.Name}}</b><small>Group</small></span></li>{{end}}
-        <li class="bs-empty" role="presentation" hidden>No matches</li>
-      </ul>
-    </div>
+    {{template "bs_combo" dict "ID" "bs-combo" "Label" "Search people and groups" "ListLabel" "People and groups" "Placeholder" "Add people or groups..." "Users" .Users "Groups" .Groups}}
     <label class="sr-only" for="bs-add-role">Role</label>
     <select id="bs-add-role" name="role"><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option></select>
     <button class="primary" disabled data-add>Add</button>
@@ -175,8 +167,16 @@
 {{define "boards_set_templates"}}{{template "boards_set_templates_in" .Data}}{{end}}
 {{define "boards_set_templates_in"}}<section id="set-templates" class="boards-sec bs-panel" data-panel="templates" aria-labelledby="set-templates-h">
   <div class="bs-sec-head"><h2 id="set-templates-h">Templates &amp; export</h2>{{template "bs_status" .}}</div>
-  {{if .CanManage}}<form class="bs-form" hx-post="/ui/boards/{{.Board.ID}}/template" hx-trigger="change" hx-target="#set-templates" hx-swap="outerHTML">
-    {{template "bs_toggle" dict "ID" "bs-tpl" "Name" "isTemplate" "Title" "Publish as board template" "Help" "Let people start new boards from this one's lists, labels and cards." "On" .Board.IsTemplate "Off" false}}
+  {{if .CanManage}}{{$b := .Board}}{{$groups := .AllGroups}}<form class="bs-form" hx-post="/ui/boards/{{.Board.ID}}/template" hx-trigger="change" hx-target="#set-templates" hx-swap="outerHTML">
+    {{template "bs_toggle" dict "ID" "bs-tpl" "Name" "isTemplate" "Title" "Publish as board template" "Help" "Let people start new boards from this one's columns, labels, custom fields and cards. Due dates are kept as days after the moment you publish." "On" .Board.IsTemplate "Off" false}}
+    {{if .Board.IsTemplate}}<div class="bs-row bs-tplvis"><span class="bs-text"><b>Who can use it</b><small>Everyone who can already open this board can always use it.</small></span>
+      <span class="bs-seg" role="radiogroup" aria-label="Who can use this template">
+        <label><input type="radio" name="visibility" value="private"{{if eq $b.TemplateVisibility "private"}} checked{{end}}><span>Only me</span></label>
+        <label><input type="radio" name="visibility" value="group"{{if eq $b.TemplateVisibility "group"}} checked{{end}}{{if not $groups}} disabled{{end}}><span>A group</span></label>
+        <label><input type="radio" name="visibility" value="public"{{if eq $b.TemplateVisibility "public"}} checked{{end}}><span>Everyone</span></label>
+      </span></div>
+    <div class="bs-row bs-tplgroup"><span class="bs-text"><b>Group</b><small>Its members can start boards from this template.</small></span>
+      <select name="groupId" aria-label="Group that can use this template">{{range $groups}}<option value="{{.ID}}"{{if and $b.TemplateGroupID (eq .ID (deref $b.TemplateGroupID))}} selected{{end}}>{{.Name}}</option>{{end}}</select></div>{{end}}
   </form>{{end}}
   <div class="bs-row"><span class="bs-text"><b>Export</b><small>Download the board with all lists, cards and labels.</small></span>
     <span class="bs-btns"><a class="boards-btn" href="/ui/boards/{{.Board.ID}}/export?format=json" download>JSON</a><a class="boards-btn" href="/ui/boards/{{.Board.ID}}/export?format=csv" download>CSV</a></span></div>
@@ -209,3 +209,15 @@
     <div class="boards-tile-name"><span class="boards-tile-link">Write the launch announcement</span></div>
     <div class="boards-tile-meta"><span class="boards-due boards-due-overdue">Overdue &middot; Nov 9</span></div>
   </article>{{end}}
+
+{{/* "Agents": connect AI agents to this board (the "Connect an agent" dialog, shown to everyone who can view the board). */}}
+{{define "boards_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel" data-panel="agents" aria-labelledby="set-agents-h">
+  <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2></div>
+  <p class="bs-desc">Connect AI agents to this board. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>. A personal key acts with your full role, and an agent needs Edit access to claim cards.{{if .IsAdmin}} Create dedicated agent accounts under <a href="/admin/agents">Admin &rarr; Agents</a>.{{else}} Agent accounts are created by admins.{{end}}</p>
+  <div class="bs-row"><span class="bs-text"><b>Board prompt</b><small>Interviews you about what to attach to (columns, destinations, authority), then listens.</small></span>
+    <span class="bs-btns"><button type="button" class="primary" hx-get="/ui/agent-prompt?scope=board&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button></span></div>
+  <div class="bs-row"><span class="bs-text"><b>Unattended runner</b><small>A service that picks up cards and runs a coding agent headless.</small></span>
+    <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=runner&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML">Runner prompt</button></span></div>
+  {{range .AgentCols}}<div class="bs-row"><span class="bs-text"><b>{{.Name}}</b><small>{{if .Listeners}}Listening now: {{range $i, $x := .Listeners}}{{if $i}}, {{end}}{{$x.Name}}{{if $x.Label}} ({{$x.Label}}){{end}}{{end}}{{else}}No agent is listening.{{end}}</small></span>
+    <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=list&amp;id={{.List.ID}}" hx-target="#modal" hx-swap="innerHTML">Prompt</button><a class="boards-btn" href="/lists/{{.List.ID}}">Open column</a></span></div>{{end}}
+</section>{{end}}

@@ -49,6 +49,7 @@ func registerSpec(name string, specs []FlagSpec, f cmdFunc) {
 // listenCfg is the resolved configuration shared by `listen` and `agent run`.
 type listenCfg struct {
 	boards, lists, types []string
+	extraLists           []string          // the claim-move-to lists: watched only for expired leases (stranded cards)
 	listBoard            map[string]string // list id -> board id
 	cursorFile           string
 	since                string
@@ -140,7 +141,7 @@ func (a *App) buildListener(c *listenCfg) *Listener {
 		}
 	}
 	l := &Listener{
-		App: a, Boards: c.boards, Lists: c.lists, Types: serverTypes, Since: c.since,
+		App: a, Boards: c.boards, Lists: append(append([]string{}, c.lists...), c.extraLists...), Types: serverTypes, Since: c.since,
 		CursorFile: c.cursorFile, Heartbeat: c.heartbeat, AgentLabel: c.label,
 	}
 	if c.verbose {
@@ -160,6 +161,9 @@ func (a *App) buildListener(c *listenCfg) *Listener {
 	}
 	listSet := map[string]bool{}
 	for _, x := range c.lists {
+		listSet[x] = true
+	}
+	for _, x := range c.extraLists {
 		listSet[x] = true
 	}
 	typeSet := map[string]bool{}
@@ -207,7 +211,7 @@ func (a *App) existingEvents(ctx context.Context, c *listenCfg) ([]Event, error)
 	}
 	var out []Event
 	targets := map[string]string{} // list -> board
-	for _, l := range c.lists {
+	for _, l := range append(append([]string{}, c.lists...), c.extraLists...) {
 		targets[l] = c.listBoard[l]
 	}
 	if len(c.lists) == 0 { // whole boards
@@ -236,7 +240,7 @@ func (a *App) existingEvents(ctx context.Context, c *listenCfg) ([]Event, error)
 			if lid == "" {
 				lid = strings.TrimPrefix(l, "*")
 			}
-			if len(c.lists) > 0 && !contains(c.lists, lid) {
+			if len(c.lists) > 0 && !contains(c.lists, lid) && !contains(c.extraLists, lid) {
 				continue
 			}
 			env := map[string]any{"id": "", "type": "card.existing", "boardId": b, "listId": lid, "toListId": lid,
@@ -263,6 +267,20 @@ type execSpec struct {
 	shell string   // run through the platform shell
 	argv  []string // or run directly
 	env   []string
+	// clean (outbox mode): no inherited WEAVE_* variables (so no token, no URL), no card text, and stdin is
+	// /dev/null instead of the event envelope; env carries only ids and file paths.
+	clean bool
+}
+
+// cleanEnv is the inherited environment without any WEAVE_* variable.
+func cleanEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "WEAVE_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func (a *App) childEnv(ev Event) []string {
@@ -320,8 +338,12 @@ func (a *App) runChild(ctx context.Context, es execSpec, ev Event, timeout time.
 	default:
 		cmd = exec.CommandContext(ctx, es.argv[0], es.argv[1:]...)
 	}
-	cmd.Env = append(a.childEnv(ev), es.env...)
-	cmd.Stdin = bytes.NewReader(append(ev.marshal(), '\n'))
+	if es.clean {
+		cmd.Env = append(cleanEnv(), es.env...)
+	} else {
+		cmd.Env = append(a.childEnv(ev), es.env...)
+		cmd.Stdin = bytes.NewReader(append(ev.marshal(), '\n'))
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = io.MultiWriter(a.Stderr, errTail)
 	cmd.WaitDelay = 5 * time.Second
@@ -427,8 +449,7 @@ func (a *App) runListen(p *Parsed) int {
 			return
 		}
 		if claim {
-			ok := a.tryClaim(ctx, &ev, cfg, ttl, p.Str("claim-note"), p.Str("claim-move-to"))
-			if !ok {
+			if a.tryClaim(ctx, &ev, cfg, claimOpts{ttl: ttl, note: p.Str("claim-note"), moveTo: p.Str("claim-move-to")}) != claimYes {
 				done()
 				return
 			}
@@ -539,69 +560,164 @@ func claimTypes() []string {
 	return []string{"card.created", "card.moved", "card.released", "card.restored", "card.existing"}
 }
 
-// tryClaim claims the event's card when it is claimable (in a watched list, unclaimed, open).
-// A 409 is quiet (someone else won). On success the envelope gains a "claim" object and, with
-// moveTo, the card is moved to that list.
-func (a *App) tryClaim(ctx context.Context, ev *Event, cfg *listenCfg, ttl time.Duration, note, moveTo string) bool {
+// claimOpts tunes tryClaim.
+type claimOpts struct {
+	ttl       time.Duration
+	note      string
+	moveTo    string                   // list NAME to move the card to when the claim succeeds
+	respecWIP bool                     // do not claim-move into a list at or over its WIP limit
+	inflight  func(cardID string) bool // true when this process is already working the card
+}
+
+type claimResult int
+
+const (
+	claimNo       claimResult = iota // not claimable (or lost the race): skip quietly
+	claimYes                         // claimed
+	claimDeferred                    // claimable but the target list is full (WIP): try again later
+)
+
+// claimable reports whether a card with this claim state may be claimed by me: nobody holds a live
+// lease, or (mine=true) the lease is mine.
+func (a *App) claimable(ctx context.Context, card map[string]any, allowMine bool) bool {
+	cb := str(card, "claimedBy")
+	if cb == "" {
+		return true
+	}
+	if until := str(card, "claimedUntil"); until != "" {
+		if t, err := time.Parse(time.RFC3339, until); err == nil && t.Before(time.Now()) {
+			return true // lapsed lease: unclaimed
+		}
+	}
+	if !allowMine {
+		return false
+	}
+	me, err := a.Whoami(ctx)
+	return err == nil && cb == me.ID
+}
+
+// tryClaim claims the event's card when it is claimable. It never trusts the event: the card is read
+// fresh and must still be in a watched list (or, for a stranded card, in the claim-move-to list after a
+// lease expiry), open, and unclaimed (or mine in a watched list). The event's list is never the claim
+// target, so a stale or replayed event cannot drag a card backwards; only --claim-move-to moves it,
+// atomically with the claim. A 409 is quiet (someone else won). On success the envelope gains a
+// "claim" object, the fresh card, and "originListId".
+func (a *App) tryClaim(ctx context.Context, ev *Event, cfg *listenCfg, o claimOpts) claimResult {
 	cardID := ev.CardID()
 	if cardID == "" {
-		return false
+		return claimNo
 	}
 	switch ev.Type {
 	case "card.created", "card.moved", "card.released", "card.restored", "card.existing", "card.updated":
 	default:
-		return false
+		return claimNo
 	}
-	if card := ev.Card(); card != nil {
-		if v, _ := card["isClosed"].(bool); v {
-			return false
-		}
-		if cb := str(card, "claimedBy"); cb != "" {
-			if me, err := a.Whoami(ctx); err != nil || cb != me.ID {
-				return false
-			}
-		}
+	if o.inflight != nil && o.inflight(cardID) {
+		return claimNo
 	}
-	lid := ev.ListID()
-	if len(cfg.lists) > 0 && !contains(cfg.lists, lid) {
-		return false
+	r, err := a.Do(ctx, "card.get", Params{"id": cardID})
+	if err != nil {
+		if ctx.Err() == nil && cfg.verbose {
+			a.stderrf("claim %s: cannot read the card: %v", cardID, err)
+		}
+		return claimNo
+	}
+	card := itemOf(r.JSON())
+	if v, _ := card["isClosed"].(bool); v {
+		return claimNo
+	}
+	cur := str(card, "listId")
+	boardID := firstNonEmpty(str(card, "boardId"), ev.BoardID())
+	switch {
+	case contains(cfg.lists, cur):
+		if !a.claimable(ctx, card, true) {
+			return claimNo
+		}
+	case contains(cfg.extraLists, cur) && (ev.Type == "card.released" || ev.Type == "card.existing"):
+		// a stranded card: its lease expired in the claim-move-to list, so nothing else would pick it up again
+		if !a.claimable(ctx, card, false) {
+			return claimNo
+		}
+	default:
+		return claimNo
 	}
 	params := Params{"id": cardID}
-	if lid != "" {
-		params["listId"] = lid
+	target := ""
+	if o.moveTo != "" {
+		id, err := a.Resolve(ctx, "list", o.moveTo, Scope{BoardID: boardID})
+		if err != nil {
+			a.stderrf("claim %s: cannot resolve --claim-move-to %q: %v", cardID, o.moveTo, err)
+			return claimNo
+		}
+		if id != cur {
+			target = id
+			if o.respecWIP && a.listFull(ctx, boardID, id) {
+				if cfg.verbose {
+					a.stderrf("claim %s deferred: %q is at its WIP limit", cardID, o.moveTo)
+				}
+				return claimDeferred
+			}
+			params["listId"] = id
+		}
 	}
-	if ttl > 0 {
-		params["ttlSeconds"] = float64(int(ttl.Seconds()))
+	if o.ttl > 0 {
+		params["ttlSeconds"] = float64(int(o.ttl.Seconds()))
 	}
-	if note != "" {
-		params["note"] = note
+	if o.note != "" {
+		params["note"] = o.note
 	}
-	r, err := a.Do(ctx, "card.claim", params)
+	cr, err := a.Do(ctx, "card.claim", params)
 	if err != nil {
 		if ae, ok := err.(*APIError); ok && ae.Code == "conflict" {
 			if cfg.verbose {
 				a.stderrf("card %s already claimed; skipping", cardID)
 			}
-			return false
+			return claimNo
 		}
 		if ctx.Err() == nil {
 			a.stderrf("claim %s failed: %v", cardID, err)
 		}
-		return false
+		return claimNo
 	}
-	ev.M["claim"] = itemOf(r.JSON())
-	if moveTo != "" {
-		if err := a.moveCardToList(ctx, cardID, ev.BoardID(), moveTo); err != nil {
-			a.stderrf("claimed %s but move to %q failed: %v", cardID, moveTo, err)
-		} else if c := ev.Card(); c != nil {
-			if id, e := a.Resolve(ctx, "list", moveTo, Scope{BoardID: ev.BoardID()}); e == nil {
-				c["listId"] = id
-			}
-		}
+	ev.M["claim"] = itemOf(cr.JSON())
+	ev.M["originListId"] = cur
+	now := cur
+	if target != "" {
+		now = target
+	}
+	card["listId"] = now
+	ev.M["card"] = card
+	ev.M["listId"] = now
+	if _, ok := ev.M["toListId"]; ok {
+		ev.M["toListId"] = now
 	}
 	raw, _ := json.Marshal(ev.M)
 	ev.Raw = raw
-	return true
+	return claimYes
+}
+
+// listFull reports whether a list has a WIP limit and already holds that many cards (advisory).
+func (a *App) listFull(ctx context.Context, boardID, listID string) bool {
+	lr, err := a.Do(ctx, "list.get", Params{"id": listID})
+	if err != nil {
+		return false
+	}
+	lim := 0
+	if f, ok := itemOf(lr.JSON())["wipLimit"].(float64); ok {
+		lim = int(f)
+	}
+	if lim <= 0 {
+		return false
+	}
+	op, err := a.mustOp("card.list")
+	if err != nil {
+		return false
+	}
+	r, err := a.fetchPaged(ctx, op, Params{"boardId": boardID, "listId": listID}, nil, 0, true)
+	if err != nil {
+		return false
+	}
+	return len(itemsOf(r.JSON())) >= lim
 }
 
 func (a *App) moveCardToList(ctx context.Context, cardID, boardID, listName string) error {

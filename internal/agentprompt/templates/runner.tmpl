@@ -1,0 +1,102 @@
+{{define "runner"}}You are an AI agent setting up an UNATTENDED Weave runner: a small service that picks up cards and hands each one to a coding agent, headless.
+{{if .HasBoard}}Board: {{q .Board.Name}} (board id {{.Board.ID}}){{end}}
+
+{{template "instance" .}}
+{{template "connect" .}}
+{{template "keynote" .}}
+How it works
+  Weave ships the daemon: `weave agent run` listens, claims cards, renews the lease, runs your command once per card and
+  reports back. You write ONLY a small wrapper script and a service unit around it. Do NOT write your own event-stream
+  loop, reconnect logic or lease renewal.
+  With `--outbox` the runner, per card: fetches the card (comments, checklists, attachments) into a private temp
+  directory, writes a work order that names only file paths, runs your wrapper with NO Weave credentials and NO card
+  text in its environment, then reads what the wrapper left in the out directory and does the reporting itself.
+  The wrapper receives these variables (ids and file paths only):
+    WEAVE_CARD_ID WEAVE_LIST_ID WEAVE_BOARD_ID WEAVE_CARD_FILE WEAVE_BOARD_FILE WEAVE_WORKORDER_FILE WEAVE_OUT_DIR
+  The coding agent writes into $WEAVE_OUT_DIR:
+    result              one word: done | blocked | skip
+    comment.md          the summary, or the exact blocking question
+    attachments/*       optional files to attach to the card
+  The runner posts comment.md (size capped, tokens redacted), uploads the attachments and moves or releases the card.
+  The wrapper never moves, releases or comments itself. Exit codes: 0 = use the result file, 3 = blocked, 11 = skip,
+  anything else = failed.
+
+Step 1: interview the user (once) and confirm a PLAN
+{{template "questionnaire" .}}
+For the runner the "run:" line is the `weave agent run` command, for example:
+  weave agent run --board {{if .HasBoard}}{{q .Board.Name}}{{else}}"<board>"{{end}} --listen "<column>" --claim-move-to "<on-claim column>" \
+    --done-list "<done column>" --blocked-list "<needs-info column>" --fail-list "<needs-info column>" \
+    --ttl 15m --concurrency 1 --exec-timeout 25m --max-attempts 2 --respect-wip --include-existing \
+    --outbox --agent-label "<name>" -- ./weave-handle.sh
+--exec-timeout is REQUIRED (a hung agent would otherwise hold the lease). The default is 30m; always set it explicitly.
+The runner refuses a plan where a listened column is also the done, blocked, fail or on-claim column.
+
+Step 2: write ./weave-handle.sh (one file; POSIX sh; run `shellcheck` on it)
+  Set PROJECT_DIR to the project checkout. The Claude preset is shown; swap only the AGENT line (see presets below).
+
+#!/bin/sh
+# weave-handle.sh: called by `weave agent run --outbox` once per claimed card. It has no Weave credentials.
+set -eu
+cd "${PROJECT_DIR:?set PROJECT_DIR to the project checkout}"
+OUT=${WEAVE_OUT_DIR:?}; ORDER=${WEAVE_WORKORDER_FILE:?}
+mkdir -p "$OUT/attachments"
+rc=0
+# AGENT: headless, no Weave credentials, no stdin, hard timeout, least-privilege tools
+timeout 25m env -u WEAVE_TOKEN -u WEAVE_PROFILE \
+  claude --bare -p "$(cat "$ORDER")" --permission-prompts none \
+    --allowedTools "Read,Edit,Bash(git diff *),Bash(git status *),Bash(<project test command> *)" \
+    --output-format json </dev/null >"$OUT/agent.json" 2>"$OUT/agent.err" || rc=$?
+jq -r '.result // empty' "$OUT/agent.json" >"$OUT/agent.txt" 2>/dev/null || :
+if [ "$rc" -ne 0 ]; then
+  [ -s "$OUT/result" ] || echo blocked >"$OUT/result"
+  [ -s "$OUT/comment.md" ] || printf 'The coding agent stopped with exit status %s before finishing.\n' "$rc" >"$OUT/comment.md"
+fi
+[ -s "$OUT/comment.md" ] || cp "$OUT/agent.txt" "$OUT/comment.md" 2>/dev/null || :
+case "$(tr -d '[:space:]' <"$OUT/result" 2>/dev/null || :)" in
+  done) exit 0 ;;
+  skip) exit 11 ;;
+  blocked) exit 3 ;;
+  *) echo "weave-handle: the agent wrote no valid result file" >&2; exit 1 ;;
+esac
+
+Headless presets: replace the AGENT command (flags verified 2026-11-17 against the vendors' docs and local --help; re-check with `--help` before use)
+  Claude Code (docs: code.claude.com/docs/en/headless, verified 2026-11-17): the command above. `--bare` needs
+    ANTHROPIC_API_KEY (or an apiKeyHelper) in the unit's environment and skips CLAUDE.md, hooks and MCP; `--permission-prompts none`
+    needs Claude Code 2.1.259 or newer; drop `--bare` for subscription logins. Failures can arrive as text in .result, so the
+    exit status matters too.
+  Codex (docs: learn.chatgpt.com/docs/non-interactive-mode, verified 2026-11-17):
+    timeout 25m env -u WEAVE_TOKEN -u WEAVE_PROFILE codex exec --sandbox workspace-write --skip-git-repo-check -o "$OUT/agent.txt" - <"$ORDER" >/dev/null 2>"$OUT/agent.err" || rc=$?
+    (drop the `jq` line: -o writes the final message to agent.txt)
+  Gemini CLI (docs: geminicli.com/docs/cli/headless, verified 2026-11-17; its docs say it was replaced by the Antigravity CLI on 2026-06-18, so check the binary name):
+    timeout 25m env -u WEAVE_TOKEN -u WEAVE_PROFILE gemini -p "$(cat "$ORDER")" --output-format json </dev/null >"$OUT/agent.json" 2>"$OUT/agent.err" || rc=$?
+    (the answer is `.response`, not `.result`; exit 53 = turn limit, treat as failure; auto-approval flags are not documented: check `gemini --help`)
+  OpenCode (docs: opencode.ai/docs/cli; flags UNVERIFIED beyond `run`, check `opencode run --help`; local help showed `--auto` for unattended permissions):
+    timeout 25m env -u WEAVE_TOKEN -u WEAVE_PROFILE opencode run "$(cat "$ORDER")" </dev/null >"$OUT/agent.txt" 2>"$OUT/agent.err" || rc=$?
+
+Step 3: run it as a service (write the files, show them to the user, do NOT start anything yet)
+  Credentials: an env file with mode 0600 that holds only WEAVE_URL and WEAVE_TOKEN. The user creates it; you never see the key.
+  systemd unit (e.g. ~/.config/systemd/user/weave-runner.service):
+    [Unit]
+    Description=Weave agent runner
+    After=network-online.target
+    [Service]
+    EnvironmentFile=%h/.config/weave/runner.env
+    Environment=PROJECT_DIR=/path/to/checkout
+    WorkingDirectory=/path/to/checkout
+    ExecStart=/usr/local/bin/weave agent run <the exact flags from the PLAN> -- /path/to/weave-handle.sh
+    Restart=always
+    RestartSec=5
+    [Install]
+    WantedBy=default.target
+  docker-compose variant: the same `weave agent run ...` as the command, `env_file: runner.env`, the project mounted at
+  /work, and a volume for ~/.config/weave so listener cursors survive restarts.
+  Logs must never contain the token or card bodies: do not print the card file or the work order from the wrapper.
+
+Step 4: verify and get approval
+  - `shellcheck weave-handle.sh`
+  - Create a test card in the listened column and run once: `weave agent run <the flags> --once --timeout 2m -- ./weave-handle.sh`
+  - Show the user the wrapper, the unit and the command and get explicit approval. NEVER start or enable the service unasked.
+
+{{template "etiquette" .}}
+{{template "security" .}}
+{{template "readmore" .}}{{end}}

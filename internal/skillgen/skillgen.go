@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"github.com/crueber/weave/internal/agentprompt"
 	"sort"
 	"strings"
 
@@ -43,6 +44,7 @@ func Render(base []cli.Op) map[string][]byte {
 		"skills/weave/references/commands.md":        []byte(read("commands.md")),
 		"skills/weave/references/agent-workflows.md": []byte(read("agent-workflows.md")),
 		"skills/weave/references/events.md":          []byte(read("events.md")),
+		"skills/weave/references/prompts.md":         []byte(agentprompt.Reference()),
 		"skills/weave/references/ops.md":             []byte(renderOps(merged)),
 		// Compact form for tools that only read instruction/rules files (AGENTS.md, GEMINI.md, .mdc ...).
 		"skills/instructions.md": []byte(read("INSTRUCTIONS.md")),

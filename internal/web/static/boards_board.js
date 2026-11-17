@@ -264,37 +264,4 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') document.querySelectorAll('details.boards-menu[open], details.boards-dd[open]').forEach(function (d) { d.removeAttribute('open'); var s = d.querySelector('summary'); s && s.focus(); });
   });
-
-  // Copy a field's text to the clipboard: [data-copy="#selector"] (the agent prompt dialog).
-  function copyFallback(text) {
-    try {
-      var t = document.createElement('textarea');
-      t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.top = '-1000px';
-      document.body.appendChild(t); t.select();
-      var ok = document.execCommand('copy'); t.remove();
-      return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
-    } catch (err) { return Promise.reject(err); }
-  }
-  function copyText(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(function () { return copyFallback(text); });
-    }
-    return copyFallback(text);
-  }
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest && e.target.closest('[data-copy]');
-    if (btn) {
-      var el = document.querySelector(btn.getAttribute('data-copy'));
-      if (el) {
-        var text = 'value' in el ? el.value : el.textContent;
-        var label = btn.textContent;
-        copyText(text).then(function () {
-          btn.textContent = 'Copied';
-          setTimeout(function () { btn.textContent = label; }, 2000);
-          B.toast('Copied to clipboard'); B.announce('Agent prompt copied to the clipboard');
-        }, function () { B.toast('Could not copy. Select the text and press Ctrl+C.', { error: true }); });
-      }
-      return;
-    }
-  });
 })();

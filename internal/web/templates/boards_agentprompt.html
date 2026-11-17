@@ -1,0 +1,39 @@
+{{/* "Connect an agent": one sheet in the shared <dialog id="modal"> (sized by agent_prompt.css via dialog#modal:has(.ap)).
+   Tabs (only the ones that apply where it was opened) refetch this fragment with ?scope=&id=; the two toggles do the same
+   with noinstall= / compact=. The prompt is rendered on the server by the agent.prompt op; the textarea is only an editable
+   preview (Reset restores it). Copy is the shared static/copy.js ([data-copy="#selector"]). It never contains a key. */}}
+{{define "page"}}{{template "boards_agentprompt" .}}{{end}}
+{{define "boards_agentprompt"}}{{$d := .Data}}
+<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/agent_prompt.css"><script src="/static/copy.js"></script>
+<div id="ap" class="ap" data-scope="{{$d.Scope}}" aria-label="Connect an agent">
+  <div class="ap-top">
+    <div class="ap-heading"><h2 id="ap-h">Connect an agent</h2><p class="ap-sub">Copy a prompt into your coding agent (Claude Code, Codex, Gemini, OpenCode...). Showing: {{$d.Out.Title}}.</p></div>
+    <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+  </div>
+  <div class="ap-tabs" role="tablist" aria-label="Prompt kind">
+    {{range $d.Tabs}}<button type="button" role="tab" class="ap-tab{{if .Active}} is-on{{end}}" aria-selected="{{if .Active}}true{{else}}false{{end}}"
+      hx-get="/ui/agent-prompt?scope={{.Scope}}{{if .ID}}&amp;id={{.ID}}{{end}}{{if $d.PID}}&amp;pid={{$d.PID}}{{end}}{{if $d.BID}}&amp;bid={{$d.BID}}{{end}}{{if $d.LID}}&amp;lid={{$d.LID}}{{end}}{{if $d.NoInstall}}&amp;noinstall=1{{end}}{{if $d.Compact}}&amp;compact=1{{end}}" hx-target="#modal" hx-swap="innerHTML">{{.Label}}</button>{{end}}
+  </div>
+  <div class="ap-body">
+    <details class="ap-key"><summary>About the key</summary>
+      <p>The prompt never contains a key. It reads <code>$WEAVE_TOKEN</code> from the agent's environment and tells the agent to stop and ask you to set it, never to ask for it in chat.</p>
+      <p>Get a key in <a href="/settings">Settings &rarr; API key</a>. A personal key acts with <b>your full role</b>.{{if $d.IsAdmin}} For unattended work create a dedicated agent account under <a href="/admin/agents">Admin &rarr; Agents</a>.{{else}} Agent accounts are created by admins (<code>/admin/agents</code>); ask one for a dedicated key.{{end}}</p>
+      <p>Claiming a card needs <b>Edit</b> access on the board: an agent with a worker or viewer role can read and comment but cannot claim cards.</p>
+    </details>
+    <form id="ap-opts" class="ap-opts" hx-get="/ui/agent-prompt" hx-trigger="change" hx-target="#modal" hx-swap="innerHTML" hx-sync="this:replace">
+      <input type="hidden" name="scope" value="{{$d.Scope}}">{{if $d.ID}}<input type="hidden" name="id" value="{{$d.ID}}">{{end}}{{if $d.PID}}<input type="hidden" name="pid" value="{{$d.PID}}">{{end}}{{if $d.BID}}<input type="hidden" name="bid" value="{{$d.BID}}">{{end}}{{if $d.LID}}<input type="hidden" name="lid" value="{{$d.LID}}">{{end}}
+      <label class="ap-toggle"><input type="checkbox" name="noinstall" value="1"{{if $d.NoInstall}} checked{{end}}> Leave out the install steps</label>
+      <label class="ap-toggle"><input type="checkbox" name="compact" value="1"{{if $d.Compact}} checked{{end}}> Compact</label>
+    </form>
+    <form id="ap-edit" class="ap-edit">
+      <label class="boards-sr" for="ap-text">Prompt text (editable)</label>
+      <textarea id="ap-text" class="ap-text" spellcheck="false">{{$d.Out.Text}}</textarea>
+      <div class="ap-actions">
+        <span class="ap-hint">Edit before copying if you like; <b>Reset</b> restores the original.</span>
+        <button type="reset" class="ap-reset">Reset</button>
+        <button type="button" class="primary ap-copy" data-copy="#ap-text">Copy prompt</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}

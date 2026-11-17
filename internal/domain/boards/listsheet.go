@@ -18,7 +18,6 @@ type ListSheetData struct {
 	WIP         int // 0 = no limit
 	Over        bool
 	CanEdit     bool
-	Prompt      string // copy-paste agent brief (editors only)
 	Targets     []List // other columns of the board (move-all targets)
 	Columns     []List // every column of the board in board order (the breadcrumb switcher)
 	PrevID      string // neighbouring columns (prev/next buttons); "" at the ends
@@ -80,9 +79,6 @@ func loadListSheet(c *web.Ctx, id string) (*ListSheetData, error) {
 		for _, x := range c.Env.Hub.Listeners.ForList(l.ID) {
 			d.Listeners = append(d.Listeners, ListenerOut{UserID: x.UserID, Name: x.Name, IsAgent: x.IsAgent, Label: x.Label, Since: x.Since})
 		}
-	}
-	if d.CanEdit {
-		d.Prompt = AgentPrompt(agentBaseURL(c.Env), agentInstallBase(c.Env), b, l, lists)
 	}
 	return d, nil
 }

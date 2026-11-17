@@ -119,6 +119,8 @@ type Settings struct {
 
 	SessionHours          *string `json:"session.hours" desc:"Session lifetime in hours (default 24); when it ends the user is sent back through the identity provider"`
 	SessionMaxIdleMinutes *string `json:"session.maxIdleMinutes" desc:"Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"`
+
+	TemplatesHidden *string `json:"templates.hidden" desc:"Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all"`
 }
 
 var (
@@ -252,6 +254,9 @@ func init() {
 						if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 8760 {
 							return ops.Invalid("session.hours must be a whole number of hours between 1 and 8760")
 						}
+					}
+					if key == "templates.hidden" && len(val) > 4096 {
+						return ops.Invalid("templates.hidden is too long")
 					}
 					if key == "smtp.port" && val != "" {
 						n := 0

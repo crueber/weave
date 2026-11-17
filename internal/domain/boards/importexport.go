@@ -37,29 +37,42 @@ type impTask struct {
 	Done bool
 }
 type impTaskList struct {
-	Name  string
-	Tasks []impTask
+	Name                  string
+	Tasks                 []impTask
+	ShowOnFront, HideDone bool
 }
 type impComment struct {
 	Text, CreatedAt string
 }
 type impCard struct {
+	Key                            string // id inside the document; custom-field values are addressed by it
 	ListKey, Name, Desc, Due, Type string
 	DueDone                        bool
+	DueOffsetDays                  *int // relative due date (days from the moment the board is created); wins over Due
 	Pos                            float64
 	LabelKeys                      []string
 	MemberEmails                   []string
 	TaskLists                      []impTaskList
 	Comments                       []impComment
+	Values                         []FieldValueDoc
 }
 type impBoard struct {
 	Name          string
 	Color         string // normalised #rrggbb or ""
 	CardColorMode string // pill|fill or ""
+	View          string // default view; "" = kanban
+	CardType      string // default card type; "" = project
+	Flags         impFlags
 	Lists         []impList
 	Groups        []impGroup
 	Labels        []impLabel
 	Cards         []impCard
+	FieldGroups   []FieldGroupDoc
+}
+
+// impFlags are the board's on/off settings (they travel with exports and templates).
+type impFlags struct {
+	LimitCardTypes, AlwaysCreator, ExpandTasks, CardCounter, CardAges, Inbox bool
 }
 
 // ---- Weave/Planka JSON export document ----
@@ -72,6 +85,8 @@ type exportDoc struct {
 	Groups  []exportGroup  `json:"labelGroups"`
 	Labels  []exportLabel  `json:"labels"`
 	Cards   []exportCard   `json:"cards"`
+	// CustomFields are the board's custom-field groups (additive: files without them import as before).
+	CustomFields []FieldGroupDoc `json:"customFields,omitempty"`
 }
 type exportList struct {
 	ID          string  `json:"id"`
@@ -94,8 +109,10 @@ type exportLabel struct {
 	GroupID string `json:"groupId,omitempty"`
 }
 type exportTaskList struct {
-	Name  string       `json:"name"`
-	Tasks []exportTask `json:"tasks"`
+	Name          string       `json:"name"`
+	Tasks         []exportTask `json:"tasks"`
+	ShowOnFront   bool         `json:"showOnFrontOfCard,omitempty"`
+	HideCompleted bool         `json:"hideCompletedTasks,omitempty"`
 }
 type exportTask struct {
 	Name        string `json:"name"`
@@ -113,12 +130,14 @@ type exportCard struct {
 	Description    string           `json:"description,omitempty"`
 	Type           string           `json:"type"`
 	DueDate        string           `json:"dueDate,omitempty"`
+	DueOffsetDays  *int             `json:"dueOffsetDays,omitempty"`
 	IsDueCompleted bool             `json:"isDueCompleted,omitempty"`
 	Position       float64          `json:"position"`
 	LabelIDs       []string         `json:"labelIds,omitempty"`
 	MemberEmails   []string         `json:"memberEmails,omitempty"`
 	TaskLists      []exportTaskList `json:"taskLists,omitempty"`
 	Comments       []exportComment  `json:"comments,omitempty"`
+	CustomValues   []FieldValueDoc  `json:"customFieldValues,omitempty"`
 }
 
 type ImportIn struct {
@@ -175,38 +194,79 @@ func importBoard(e *ops.Env, in ImportIn) (Board, error) {
 	if name == "" {
 		name = "Imported board"
 	}
+	return createImported(e, in.ProjectID, ib, importOpts{Name: name, Source: in.Format, Event: map[string]any{"imported": true}})
+}
+
+// importOpts tunes createImported.
+type importOpts struct {
+	Name   string
+	View   string         // overrides the document's default view when valid
+	Source string         // recorded in board_imports; empty for built-in and published templates
+	Event  map[string]any // extra fields for the board.created event
+}
+
+// createImported is the one place that turns a parsed board document into a new board: file imports, built-in
+// templates and published templates all go through it, so labels, colours and limits are validated the same way.
+func createImported(e *ops.Env, projectID string, ib impBoard, o importOpts) (Board, error) {
+	view := "kanban"
+	if validView(ib.View) {
+		view = ib.View
+	}
+	if validView(o.View) {
+		view = o.View
+	}
 	id := db.NewID()
-	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		if err := insertBoard(e, tx, id, in.ProjectID, name, "kanban", nil); err != nil {
+	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		if err := insertBoard(e, tx, id, projectID, o.Name, view, nil); err != nil {
 			return err
 		}
-		uid := ""
-		if e.User != nil {
-			uid = e.User.UserID
+		if o.Source != "" {
+			if _, err := tx.ExecContext(e.Ctx, `INSERT INTO board_imports(id,user_id,source,status,created_at) VALUES(?,?,?,?,?)`, db.NewID(), strOrEmpty(userOrNil(e)), o.Source, "done", db.Now()); err != nil {
+				return err
+			}
 		}
-		if _, err := tx.ExecContext(e.Ctx, `INSERT INTO board_imports(id,user_id,source,status,created_at) VALUES(?,?,?,?,?)`, db.NewID(), uid, in.Format, "done", db.Now()); err != nil {
-			return err
-		}
-		return writeImport(e, tx, id, in.ProjectID, ib)
+		return writeImport(e, tx, id, projectID, ib, time.Now().UTC())
 	})
 	if err != nil {
 		return Board{}, err
 	}
-	emit(e, "boardCreate", "board.created", id, map[string]any{"id": id, "projectId": in.ProjectID, "imported": true})
-	e.Hub.Publish(projectEvent("board.created", in.ProjectID, id))
+	data := map[string]any{"id": id, "projectId": projectID}
+	for k, v := range o.Event {
+		data[k] = v
+	}
+	emit(e, "boardCreate", "board.created", id, data)
+	e.Hub.Publish(projectEvent("board.created", projectID, id))
 	return GetBoard(e.Ctx, e.DB, id)
 }
 
-func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard) error {
+func strOrEmpty(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// dueFromOffset turns a relative due date (days from now) into the stored timestamp; offsets outside +-10 years are dropped.
+func dueFromOffset(now time.Time, days *int) (string, bool) {
+	if days == nil || *days < -3650 || *days > 3650 {
+		return "", false
+	}
+	return now.AddDate(0, 0, *days).UTC().Format(time.RFC3339), true
+}
+
+// writeImport fills a freshly inserted board from ib. now anchors relative due dates (dueOffsetDays).
+func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard, nowT time.Time) error {
 	ctx, now := e.Ctx, db.Now()
-	if ib.Color != "" || ib.CardColorMode != "" {
-		mode := ib.CardColorMode
-		if mode == "" {
-			mode = CardColorPill
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=? WHERE id=?`, nullStr(ib.Color), mode, boardID); err != nil {
-			return err
-		}
+	mode, ctype := ib.CardColorMode, ib.CardType
+	if mode == "" {
+		mode = CardColorPill
+	}
+	if ctype == "" {
+		ctype = "project"
+	}
+	f := ib.Flags
+	if _, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,default_card_type=?,limit_card_types_to_default=?,always_display_card_creator=?,
+		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=? WHERE id=?`, nullStr(ib.Color), mode, ctype, boolInt(f.LimitCardTypes),
+		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), boardID); err != nil {
+		return err
 	}
 	var useProject bool
 	_ = tx.QueryRowContext(ctx, `SELECT use_project_labels FROM projects WHERE id=?`, projectID).Scan(&useProject)
@@ -281,6 +341,8 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 		}
 	}
 	emails := map[string]string{}
+	cardIDs := map[string]string{}
+	values := map[string][]FieldValueDoc{}
 	for ci, c := range ib.Cards {
 		lid, ok := lists[c.ListKey]
 		if !ok {
@@ -303,13 +365,21 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 		cid := db.NewID()
 		var due any
 		var done any
-		if c.Due != "" {
+		if d, ok := dueFromOffset(nowT, c.DueOffsetDays); ok {
+			due, done = d, 0
+		} else if c.Due != "" {
 			due = c.Due
 			done = boolInt(c.DueDone)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,due_date,is_due_completed,comments_total,list_changed_at,created_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), typ, pos, c.Name, nullStr(c.Desc), due, done, len(c.Comments), now, now); err != nil {
 			return err
+		}
+		if c.Key != "" {
+			cardIDs[c.Key] = cid
+			if len(c.Values) > 0 {
+				values[c.Key] = c.Values
+			}
 		}
 		seen := map[string]bool{}
 		for _, k := range c.LabelKeys {
@@ -334,7 +404,8 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 		}
 		for ti, tl := range c.TaskLists {
 			tlid := db.NewID()
-			if _, err := tx.ExecContext(ctx, `INSERT INTO task_lists(id,card_id,position,name,created_at) VALUES(?,?,?,?,?)`, tlid, cid, float64(ti+1)*db.PositionGap, nonEmpty(tl.Name, "Tasks"), now); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO task_lists(id,card_id,position,name,show_on_front_of_card,hide_completed_tasks,created_at) VALUES(?,?,?,?,?,?,?)`,
+				tlid, cid, float64(ti+1)*db.PositionGap, nonEmpty(tl.Name, "Tasks"), boolInt(tl.ShowOnFront), boolInt(tl.HideDone), now); err != nil {
 				return err
 			}
 			for k, t := range tl.Tasks {
@@ -348,6 +419,11 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 			if _, err := tx.ExecContext(ctx, `INSERT INTO comments(id,card_id,user_id,text,created_at) VALUES(?,?,?,?,?)`, db.NewID(), cid, userOrNil(e), cm.Text, at); err != nil {
 				return err
 			}
+		}
+	}
+	if len(ib.FieldGroups) > 0 && ImportCustomFields != nil {
+		if err := ImportCustomFields(ctx, tx, boardID, ib.FieldGroups, values, cardIDs); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -383,17 +459,28 @@ func parseWeave(data []byte) (impBoard, error) {
 	if len(d.Lists) == 0 && len(d.Cards) == 0 {
 		return impBoard{}, fmt.Errorf("no lists or cards found")
 	}
-	ib := impBoard{}
-	if n, ok := d.Board["name"].(string); ok {
-		ib.Name = n
-	}
+	return impFromDoc(&d), nil
+}
+
+// impFromDoc converts a weave-board document into the importer's representation. Everything in it is untrusted.
+func impFromDoc(d *exportDoc) impBoard {
+	ib := impBoard{FieldGroups: d.CustomFields}
+	str := func(k string) string { s, _ := d.Board[k].(string); return s }
+	flag := func(k string) bool { b, _ := d.Board[k].(bool); return b }
+	ib.Name = str("name")
 	// Colours from a file are untrusted: anything that does not validate is dropped, never stored.
-	if c, ok := d.Board["color"].(string); ok {
-		ib.Color, _ = NormalizeColor(c)
-	}
-	if m, ok := d.Board["cardColorMode"].(string); ok && validCardColorMode(m) {
+	ib.Color, _ = NormalizeColor(str("color"))
+	if m := str("cardColorMode"); validCardColorMode(m) {
 		ib.CardColorMode = m
 	}
+	if v := str("defaultView"); validView(v) {
+		ib.View = v
+	}
+	if t := str("defaultCardType"); validCardType(t) {
+		ib.CardType = t
+	}
+	ib.Flags = impFlags{LimitCardTypes: flag("limitCardTypesToDefault"), AlwaysCreator: flag("alwaysDisplayCardCreator"), ExpandTasks: flag("expandTaskListsByDefault"),
+		CardCounter: flag("showCardCounter"), CardAges: flag("showCardAges"), Inbox: flag("hasInbox")}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
 		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position, WIP: l.WIPLimit})
@@ -405,9 +492,10 @@ func parseWeave(data []byte) (impBoard, error) {
 		ib.Labels = append(ib.Labels, impLabel{Key: l.ID, Name: l.Name, Color: l.Color, Group: l.GroupID})
 	}
 	for _, c := range d.Cards {
-		ic := impCard{ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, Type: c.Type, Pos: c.Position, LabelKeys: c.LabelIDs, MemberEmails: c.MemberEmails}
+		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, DueOffsetDays: c.DueOffsetDays, Type: c.Type, Pos: c.Position,
+			LabelKeys: c.LabelIDs, MemberEmails: c.MemberEmails, Values: c.CustomValues}
 		for _, tl := range c.TaskLists {
-			x := impTaskList{Name: tl.Name}
+			x := impTaskList{Name: tl.Name, ShowOnFront: tl.ShowOnFront, HideDone: tl.HideCompleted}
 			for _, t := range tl.Tasks {
 				x.Tasks = append(x.Tasks, impTask{t.Name, t.IsCompleted})
 			}
@@ -418,7 +506,7 @@ func parseWeave(data []byte) (impBoard, error) {
 		}
 		ib.Cards = append(ib.Cards, ic)
 	}
-	return ib, nil
+	return ib
 }
 
 var trelloColors = map[string]string{"green": "bright-moss", "yellow": "egg-yellow", "orange": "pumpkin-orange", "red": "berry-red", "purple": "lilac-eyes",
@@ -648,8 +736,10 @@ func exportBoard(e *ops.Env, in ExportIn) (*ops.Stream, error) {
 	return nil, ops.Invalid("format must be json or csv")
 }
 
-func buildExport(ctx context.Context, d *db.DB, b Board) (*exportDoc, error) {
-	doc := &exportDoc{Format: "weave-board", Version: 1, Board: map[string]any{"name": b.Name, "defaultView": b.DefaultView, "defaultCardType": b.DefaultCardType, "cardColorMode": b.CardColorMode}}
+func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
+	doc := &exportDoc{Format: "weave-board", Version: 1, Board: map[string]any{"name": b.Name, "defaultView": b.DefaultView, "defaultCardType": b.DefaultCardType, "cardColorMode": b.CardColorMode,
+		"limitCardTypesToDefault": b.LimitCardTypesToDefault, "alwaysDisplayCardCreator": b.AlwaysDisplayCardCreator, "expandTaskListsByDefault": b.ExpandTaskListsByDefault,
+		"showCardCounter": b.ShowCardCounter, "showCardAges": b.ShowCardAges, "hasInbox": b.HasInbox}}
 	if b.Color != nil {
 		doc.Board["color"] = *b.Color
 	}
@@ -726,14 +816,20 @@ func buildExport(ctx context.Context, d *db.DB, b Board) (*exportDoc, error) {
 		return nil, err
 	}
 	tlIdx := map[string][2]int{}
-	if err := each(`SELECT tl.card_id,tl.id,tl.name,0 FROM task_lists tl JOIN cards c ON c.id=tl.card_id WHERE c.board_id=? ORDER BY tl.position`, func(id, tlid, name string, _ bool) {
-		if i, ok := idx[id]; ok {
-			doc.Cards[i].TaskLists = append(doc.Cards[i].TaskLists, exportTaskList{Name: name})
-			tlIdx[tlid] = [2]int{i, len(doc.Cards[i].TaskLists) - 1}
-		}
-	}); err != nil {
+	tlRows, err := d.QueryContext(ctx, `SELECT tl.card_id,tl.id,tl.name,tl.show_on_front_of_card,tl.hide_completed_tasks FROM task_lists tl JOIN cards c ON c.id=tl.card_id WHERE c.board_id=? ORDER BY tl.position`, b.ID)
+	if err != nil {
 		return nil, err
 	}
+	for tlRows.Next() {
+		var cardID, tlid, name string
+		var front, hide bool
+		_ = tlRows.Scan(&cardID, &tlid, &name, &front, &hide)
+		if i, ok := idx[cardID]; ok {
+			doc.Cards[i].TaskLists = append(doc.Cards[i].TaskLists, exportTaskList{Name: name, ShowOnFront: front, HideCompleted: hide})
+			tlIdx[tlid] = [2]int{i, len(doc.Cards[i].TaskLists) - 1}
+		}
+	}
+	tlRows.Close()
 	if err := each(`SELECT t.task_list_id,t.name,'',t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN cards c ON c.id=tl.card_id WHERE c.board_id=? ORDER BY t.position`, func(tlid, name, _ string, done bool) {
 		if p, ok := tlIdx[tlid]; ok {
 			tl := &doc.Cards[p[0]].TaskLists[p[1]]
@@ -748,6 +844,18 @@ func buildExport(ctx context.Context, d *db.DB, b Board) (*exportDoc, error) {
 		}
 	}); err != nil {
 		return nil, err
+	}
+	if ExportCustomFields != nil {
+		groups, values, err := ExportCustomFields(ctx, d, b.ID, true)
+		if err != nil {
+			return nil, err
+		}
+		doc.CustomFields = groups
+		for id, vs := range values {
+			if i, ok := idx[id]; ok {
+				doc.Cards[i].CustomValues = vs
+			}
+		}
 	}
 	return doc, nil
 }

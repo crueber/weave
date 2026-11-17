@@ -1,41 +1,43 @@
 {{define "title"}}Single sign-on - Weave{{end}}
-{{define "page"}}
-<link rel="stylesheet" href="/static/auth_pages.css">
-<div class="auth-page"><h1>Single sign-on &amp; terms</h1>
-<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups">Groups</a> <a href="/admin/agents">AI agents</a> <a href="/admin/sso" aria-current="page">Single sign-on &amp; terms</a></nav>
-<div id="sso-body">{{template "sso-body" .}}</div></div>
-{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "sso" "Crumb" .User.Name}}{{template "sso-body" .}}{{template "admin_bottom"}}{{end}}
 
-{{define "sso-body"}}{{with .Data}}
-{{if .Flash}}<div class="auth-flash" role="status">{{.Flash}}</div>{{end}}
-{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
-<section class="card auth-sec"><h2>OpenID Connect</h2>
-  <p class="muted">Redirect URI to register with your provider: <code>{{.S.RedirectURL}}</code>.{{if .S.FromEnv}} Overridden by environment: {{range .S.FromEnv}}<code>{{.}}</code> {{end}}{{end}}</p>
-  <form class="auth-form auth-grid" hx-post="/ui/admin/sso" hx-target="#sso-body" method="post" action="/ui/admin/sso">
-    <label>Issuer URL <input name="issuer" value="{{.S.Issuer}}" placeholder="https://idp.example.com/realms/main"></label>
-    <label>Client ID <input name="clientId" value="{{.S.ClientID}}"></label>
-    <label>Client secret <input type="password" name="clientSecret" placeholder="{{if .S.HasSecret}}(unchanged){{end}}" autocomplete="off"></label>
-    <label>Scopes <input name="scopes" value="{{.S.Scopes}}"></label>
-    <label>Email claim <input name="emailClaim" value="{{.S.EmailClaim}}"></label>
-    <label>Name claim <input name="nameClaim" value="{{.S.NameClaim}}"></label>
-    <label>Username claim <input name="usernameClaim" value="{{.S.UsernameClaim}}"></label>
-    <fieldset><legend>Groups (roles are owned by your identity provider)</legend>
-    <label>Groups claim <input name="groupsClaim" value="{{.S.GroupsClaim}}" placeholder="groups"></label>
-    <label>Admin group <input name="adminGroup" value="{{.S.AdminGroup}}"></label>
-    <label>Project owner group <input name="ownerGroup" value="{{.S.OwnerGroup}}"></label>
-    <label>User group <input name="userGroup" value="{{.S.UserGroup}}"></label>
-    <label>Worker group <input name="workerGroup" value="{{.S.WorkerGroup}}"></label>
-    <label>Guest group <input name="guestGroup" value="{{.S.GuestGroup}}"></label>
-    <label>Team group prefix <input name="teamPrefix" value="{{.S.TeamPrefix}}"></label>
-    <label class="inline"><input type="checkbox" name="requireGroup" value="true" {{if .S.RequireGroup}}checked{{end}}><input type="hidden" name="requireGroup" value="false"> Deny sign-in unless in a role group</label>
-    </fieldset>
-    <label class="inline"><input type="checkbox" name="autoProvision" value="true" {{if .S.AutoProvision}}checked{{end}}><input type="hidden" name="autoProvision" value="false"> Create accounts on first sign-in</label>
-    <button class="primary" type="submit">Save SSO settings</button>
+{{define "sso-body"}}{{with .Data}}<section id="adm-sso" class="boards-sec" aria-labelledby="adm-sso-h">
+  <div class="bs-sec-head"><h2 id="adm-sso-h">Single sign-on</h2>{{template "adm_status" dict "Done" (ne .Flash "")}}</div>
+  {{template "adm_error" .Error}}
+  <p class="bs-desc">Weave signs people in with OpenID Connect only. Register this redirect URI with your provider: <code>{{.S.RedirectURL}}</code>.{{if .S.FromEnv}} Overridden by environment: {{range .S.FromEnv}}<code>{{.}}</code> {{end}}{{end}}</p>
+  <form class="bs-form" hx-post="/ui/admin/sso" hx-trigger="change" hx-target="#adm-sso" hx-swap="outerHTML" method="post" action="/ui/admin/sso">
+    <h3 class="bs-sub">Provider</h3>
+    {{template "adm_field" dict "ID" "adm-sso-issuer" "Name" "issuer" "Title" "Issuer URL" "Help" "Your provider's OIDC base URL." "Type" "text" "Value" .S.Issuer "Placeholder" "https://idp.example.com/realms/main" "Off" (notifyHas $.Data.S.FromEnv "issuer")}}
+    {{template "adm_field" dict "ID" "adm-sso-clientId" "Name" "clientId" "Title" "Client ID" "Help" "" "Type" "text" "Value" .S.ClientID "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "clientId")}}
+    {{template "adm_field" dict "ID" "adm-sso-clientSecret" "Name" "clientSecret" "Title" "Client secret" "Help" "Write-only; leave blank to keep the stored secret." "Type" "password" "Placeholder" (or (and .S.HasSecret "(stored)") "") "Off" (notifyHas $.Data.S.FromEnv "clientSecret")}}
+    {{template "adm_field" dict "ID" "adm-sso-scopes" "Name" "scopes" "Title" "Scopes" "Help" "Space separated." "Type" "text" "Value" .S.Scopes "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "scopes")}}
+    <h3 class="bs-sub">Claims</h3>
+    {{template "adm_field" dict "ID" "adm-sso-emailClaim" "Name" "emailClaim" "Title" "E-mail claim" "Help" "ID-token claim holding the e-mail address." "Type" "text" "Value" .S.EmailClaim "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "emailClaim")}}
+    {{template "adm_field" dict "ID" "adm-sso-nameClaim" "Name" "nameClaim" "Title" "Name claim" "Help" "Claim holding the display name." "Type" "text" "Value" .S.NameClaim "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "nameClaim")}}
+    {{template "adm_field" dict "ID" "adm-sso-usernameClaim" "Name" "usernameClaim" "Title" "Username claim" "Help" "Claim holding the username." "Type" "text" "Value" .S.UsernameClaim "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "usernameClaim")}}
+    <h3 class="bs-sub">Groups and roles</h3>
+    <p class="bs-desc">Roles are owned by your identity provider: they refresh on every sign-in.</p>
+    {{template "adm_field" dict "ID" "adm-sso-groupsClaim" "Name" "groupsClaim" "Title" "Groups claim" "Help" "Claim listing the user's groups." "Type" "text" "Value" .S.GroupsClaim "Placeholder" "groups" "Off" (notifyHas $.Data.S.FromEnv "groupsClaim")}}
+    {{template "adm_field" dict "ID" "adm-sso-adminGroup" "Name" "adminGroup" "Title" "Admin group" "Help" "Grants the admin role." "Type" "text" "Value" .S.AdminGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "adminGroup")}}
+    {{template "adm_field" dict "ID" "adm-sso-ownerGroup" "Name" "ownerGroup" "Title" "Project owner group" "Help" "Grants the projectOwner role." "Type" "text" "Value" .S.OwnerGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "ownerGroup")}}
+    {{template "adm_field" dict "ID" "adm-sso-userGroup" "Name" "userGroup" "Title" "User group" "Help" "Grants the boardUser role." "Type" "text" "Value" .S.UserGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "userGroup")}}
+    {{template "adm_field" dict "ID" "adm-sso-workerGroup" "Name" "workerGroup" "Title" "Worker group" "Help" "Grants the worker role." "Type" "text" "Value" .S.WorkerGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "workerGroup")}}
+    {{template "adm_field" dict "ID" "adm-sso-guestGroup" "Name" "guestGroup" "Title" "Guest group" "Help" "Grants the guest role." "Type" "text" "Value" .S.GuestGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "guestGroup")}}
+    {{template "adm_field" dict "ID" "adm-sso-teamPrefix" "Name" "teamPrefix" "Title" "Team group prefix" "Help" "Groups with this prefix sync into Weave user groups." "Type" "text" "Value" .S.TeamPrefix "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "teamPrefix")}}
+    <h3 class="bs-sub">Sign-in policy</h3>
+    {{template "bs_toggle" dict "ID" "adm-sso-requireGroup" "Name" "requireGroup" "Title" "Require a role group" "Help" "Deny sign-in unless the user is in one of the role groups." "On" .S.RequireGroup "Off" (notifyHas $.Data.S.FromEnv "requireGroup")}}
+    {{template "bs_toggle" dict "ID" "adm-sso-autoProvision" "Name" "autoProvision" "Title" "Create accounts on first sign-in" "Help" "Turn off to admit only people who already have an account." "On" .S.AutoProvision "Off" (notifyHas $.Data.S.FromEnv "autoProvision")}}
   </form>
-</section>
-<section class="card auth-sec"><h2>Terms of service</h2>
-  <p class="muted">When set, every user must accept the current text at sign-in. Changing the text asks everyone again. Leave empty to disable.</p>
-  <form class="auth-form" hx-post="/ui/admin/sso/terms" hx-target="#sso-body" method="post" action="/ui/admin/sso/terms">
-    <textarea name="text" rows="8">{{.Terms.Text}}</textarea><button class="primary" type="submit">Save terms</button></form>
+  <p class="bs-hint">Changes save automatically.</p>
+
+  <div class="adm-block">
+    <h3 class="bs-sub">Terms of service</h3>
+    <p class="bs-desc">When set, every user must accept the current text at sign-in. Changing the text asks everyone again. Leave empty to disable.</p>
+    <form hx-post="/ui/admin/sso/terms" hx-target="#adm-sso" hx-swap="outerHTML" method="post" action="/ui/admin/sso/terms">
+      <label class="sr-only" for="adm-terms-text">Terms of service text</label>
+      <textarea id="adm-terms-text" name="text" rows="8" class="adm-terms">{{.Terms.Text}}</textarea>
+      <div class="adm-submit"><button class="primary" type="submit">Save terms</button></div>
+    </form>
+  </div>
 </section>
 {{end}}{{end}}

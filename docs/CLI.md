@@ -161,6 +161,32 @@ Listen, claim (409 skipped), move, run the command (event on stdin, `WEAVE_*` en
 exit 0 -> comment (optional), move to `--done-list`, release; exit 11 -> release quietly; other -> comment with the error tail, release,
 optional `--fail-list`. `--no-claim` and `--keep-claim` skip claiming / releasing; `--once` handles one card.
 
+Safety and correctness (all on by default or flag-controlled):
+- **The event is never trusted.** Before claiming, the card is read fresh and must still be in a `--listen` column, open and unclaimed (or
+  mine). The claim never targets the event's list; only `--claim-move-to` moves the card, atomically with the claim.
+- **A claim is a lease, not a lock.** Before the final move the card is re-read; if a person moved it meanwhile the runner comments and
+  releases only. On shutdown (`--grace` exceeded) a running handler is cancelled and the card is released quietly and moved back.
+- **No stranded cards.** The `--claim-move-to` list is also watched for expired leases (`card.released`), and swept at start with `--include-existing`.
+- `--exec-timeout` defaults to **30m** (`0` = unlimited); `--max-attempts N` counts "agent run failed" comments on the card (needs `--fail-list`
+  or `--blocked-list`); `--respect-wip` does not claim-move into a column at its WIP limit (rechecked on `card.moved` out of it and every 60s).
+- A `--listen` column may not also be `--claim-move-to`, `--done-list`, `--fail-list` or `--blocked-list` (usage error, `--allow-loop` overrides).
+
+**Token-free outbox mode** (`--outbox`, `--blocked-list L`, `--no-board-file`): the runner fetches the card into a private temp directory and runs
+the command with only `WEAVE_CARD_ID WEAVE_LIST_ID WEAVE_BOARD_ID WEAVE_CARD_FILE WEAVE_BOARD_FILE WEAVE_WORKORDER_FILE WEAVE_OUT_DIR` (no token, no
+URL, no card text, empty stdin). The command writes `$WEAVE_OUT_DIR/result` (`done|blocked|skip`), `comment.md` and optional `attachments/*`; the
+runner posts the comment (capped, tokens redacted), uploads the attachments and moves/releases the card. Exit 3 = blocked, 11 = skip.
+The legacy mode (event on stdin, `WEAVE_TOKEN` in the environment) still works but should not be used with coding agents.
+
+## `weave agent prompt`
+
+```sh
+weave agent prompt [--general | --runner [--board B] | --project P | --board B | --board B --list L
+                   | --work-order --board B --list L --card C [--card-file F]] [--compact] [--no-install]
+```
+Prints (raw text) the copy-paste prompt that connects an AI agent: the same text as the browser's **Connect an agent** dialog, rendered by the
+`agent.prompt` op. Prompts never contain a key; they reference `$WEAVE_TOKEN`. Board and project prompts ask the agent to interview you and confirm a
+PLAN before it listens; the runner prompt contains the complete wrapper script and service unit; the work order names files only.
+
 ## Agent skill
 
 ```sh

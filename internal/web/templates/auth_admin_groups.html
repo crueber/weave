@@ -1,30 +1,28 @@
 {{define "title"}}Groups - Weave{{end}}
-{{define "page"}}
-<link rel="stylesheet" href="/static/auth_pages.css">
-<div class="auth-page"><h1>User groups</h1>
-<nav class="auth-tabs"><a href="/admin/users">Users</a> <a href="/admin/groups" aria-current="page">Groups</a> <a href="/admin/agents">AI agents</a> <a href="/admin/sso">Single sign-on &amp; terms</a></nav>
-<div id="groups-body">{{template "groups-body" .}}</div></div>
-{{end}}
+{{define "page"}}{{if .Data.IsAdmin}}{{template "admin_top" dict "Active" "groups" "Crumb" .User.Name}}{{template "groups-body" .}}{{template "admin_bottom"}}{{else}}<div class="admin-console auth-settings"><link rel="stylesheet" href="/static/boards_board.css"><link rel="stylesheet" href="/static/auth_pages.css"><link rel="stylesheet" href="/static/admin.css"><header class="bs-head"><div><h1>User groups</h1></div></header>{{template "groups-body" .}}</div>{{end}}{{end}}
 
-{{define "groups-body"}}{{with .Data}}
-{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
-{{if .IsAdmin}}
-<section class="card auth-sec"><h2>New group</h2>
-  <form class="auth-inline" hx-post="/ui/admin/groups" hx-target="#groups-body" method="post" action="/ui/admin/groups">
-    <input name="name" placeholder="Group name" required><button class="primary" type="submit">Create</button></form></section>
-{{end}}
-{{range $g := .Groups}}
-<section class="card auth-sec"><h2>{{$g.Name}} <small class="muted">({{len $g.Members}})</small></h2>
-  <ul class="auth-list">{{range $g.Members}}<li><span>{{.Name}} {{if .Username}}<small class="muted">@{{deref .Username}}</small>{{end}}</span>
-    {{if $.Data.IsAdmin}}<form hx-post="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove"><button type="submit">Remove</button></form>{{end}}</li>
-  {{else}}<li class="muted">No members.</li>{{end}}</ul>
-  {{if $.Data.IsAdmin}}
-  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}/members" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}/members">
-    <select name="userId" required><option value="">Add member...</option>{{range $.Data.Users}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><button type="submit">Add</button></form>
-  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}" hx-target="#groups-body" method="post" action="/ui/admin/groups/{{$g.ID}}">
-    <input name="name" value="{{$g.Name}}" required><button type="submit">Rename</button></form>
-  <form class="auth-inline" hx-post="/ui/admin/groups/{{$g.ID}}/delete" hx-target="#groups-body" hx-confirm="Delete this group? Its board memberships are removed." method="post" action="/ui/admin/groups/{{$g.ID}}/delete"><button class="danger" type="submit">Delete group</button></form>
-  {{end}}
+{{define "groups-body"}}{{with .Data}}{{$adm := .IsAdmin}}<section id="adm-groups" class="boards-sec" aria-labelledby="adm-groups-h">
+  <div class="bs-sec-head"><h2 id="adm-groups-h">Groups</h2></div>
+  {{template "adm_error" .Error}}
+  <p class="bs-desc">Groups bundle people so a whole team can be added to a board at once. Groups named with your SSO team prefix sync from the identity provider on sign-in.</p>
+  {{if $adm}}<form class="bs-add" hx-post="/ui/admin/groups" hx-target="#adm-groups" hx-swap="outerHTML" method="post" action="/ui/admin/groups">
+    <label class="sr-only" for="adm-group-new">New group name</label>
+    <input id="adm-group-new" name="name" placeholder="New group name" required maxlength="100"><button class="primary" type="submit">Create group</button></form>{{end}}
+  {{range $g := .Groups}}<div class="adm-block">
+    <h3 class="bs-sub">{{$g.Name}} <span class="boards-badge">{{len $g.Members}} member{{if ne (len $g.Members) 1}}s{{end}}</span></h3>
+    <ul class="bs-members">{{range $g.Members}}<li class="bs-member">
+      <span class="bs-member-t"><b>{{.Name}}</b>{{if .Username}}<small>@{{deref .Username}}</small>{{end}}</span>
+      {{if $adm}}<form hx-post="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove" hx-target="#adm-groups" hx-swap="outerHTML" method="post" action="/ui/admin/groups/{{$g.ID}}/members/{{.ID}}/remove"><button type="submit" class="bs-x" aria-label="Remove {{.Name}} from {{$g.Name}}" title="Remove from group">&times;</button></form>{{end}}</li>
+    {{else}}<li class="bs-empty-row">No members yet.</li>{{end}}</ul>
+    {{if $adm}}<form class="bs-add" hx-post="/ui/admin/groups/{{$g.ID}}/members" hx-target="#adm-groups" hx-swap="outerHTML" method="post" action="/ui/admin/groups/{{$g.ID}}/members">
+      <label class="sr-only" for="adm-gm-{{$g.ID}}">Add member to {{$g.Name}}</label>
+      <select id="adm-gm-{{$g.ID}}" name="userId" required><option value="">Add a member...</option>{{range $.Data.Users}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select><button type="submit">Add</button></form>
+    <form class="bs-row bs-row-stack" hx-post="/ui/admin/groups/{{$g.ID}}" hx-target="#adm-groups" hx-swap="outerHTML" method="post" action="/ui/admin/groups/{{$g.ID}}">
+      <span class="bs-text"><b><label for="adm-gn-{{$g.ID}}">Group name</label></b><small>Press Enter or use Rename to save.</small></span>
+      <span class="bs-btns"><input id="adm-gn-{{$g.ID}}" name="name" value="{{$g.Name}}" required maxlength="100"><button type="submit">Rename</button></span></form>
+    <form class="bs-row" hx-post="/ui/admin/groups/{{$g.ID}}/delete" hx-target="#adm-groups" hx-swap="outerHTML" hx-confirm="Delete this group? Its board memberships are removed." method="post" action="/ui/admin/groups/{{$g.ID}}/delete">
+      <span class="bs-text"><b>Delete group</b><small>Board memberships granted through this group are removed too.</small></span><span class="bs-btns"><button class="danger" type="submit">Delete group</button></span></form>{{end}}
+  </div>
+  {{else}}<p class="bs-empty-row">No groups yet.</p>{{end}}
 </section>
-{{else}}<p class="muted">No groups yet.</p>{{end}}
 {{end}}{{end}}

@@ -101,7 +101,6 @@ type Column struct {
 	Total      int // unfiltered card count
 	AddCardURL string
 	Listeners  []ListenerOut // open event streams on this list (agents, integrations)
-	Prompt     string        // copy-paste agent brief for this column (empty when the caller cannot edit)
 }
 
 // Crumb is a board plus its project's name: what the top bar's breadcrumbs and view switcher need (templates _boards_topbar.html).
@@ -188,10 +187,6 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		return nil, err
 	}
 	pattern := addCardPattern()
-	base, install := "", ""
-	if pd.CanEdit {
-		base, install = agentBaseURL(e), agentInstallBase(e)
-	}
 	cols := make([]Column, 0, len(lists))
 	idx := map[string]int{}
 	for _, l := range lists {
@@ -202,9 +197,6 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		}
 		if pd.CanEdit && pattern != "" {
 			c.AddCardURL = replaceParams(pattern, l.ID)
-		}
-		if pd.CanEdit {
-			c.Prompt = AgentPrompt(base, install, b, l, lists)
 		}
 		cols = append(cols, c)
 	}

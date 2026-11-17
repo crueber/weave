@@ -278,6 +278,11 @@ func nextCursorOf(v any) string {
 	if !ok {
 		return ""
 	}
+	if in, ok := m["item"].(map[string]any); ok {
+		if _, has := in["items"]; has {
+			m = in
+		}
+	}
 	for _, k := range []string{"nextCursor", "next_cursor", "cursor", "next"} {
 		if s, ok := m[k].(string); ok && s != "" {
 			return s

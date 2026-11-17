@@ -1,0 +1,95 @@
+{
+ "id": "builtin:weekly-planner",
+ "version": 1,
+ "category": "personal",
+ "name": "Weekly planner",
+ "summary": "Monday to Friday, the weekend and a someday column.",
+ "audience": "Anyone planning their week",
+ "tags": [
+  "weekly",
+  "planner",
+  "personal",
+  "week",
+  "schedule"
+ ],
+ "defaultView": "kanban",
+ "order": 11,
+ "includesSampleCards": false,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Weekly planner",
+   "defaultView": "kanban",
+   "color": "sky",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Mon",
+    "type": "active",
+    "position": 65536,
+    "description": "What you will do on Monday. Be realistic: three or four things."
+   },
+   {
+    "id": "l2",
+    "name": "Tue",
+    "type": "active",
+    "position": 131072
+   },
+   {
+    "id": "l3",
+    "name": "Wed",
+    "type": "active",
+    "position": 196608
+   },
+   {
+    "id": "l4",
+    "name": "Thu",
+    "type": "active",
+    "position": 262144
+   },
+   {
+    "id": "l5",
+    "name": "Fri",
+    "type": "active",
+    "position": 327680,
+    "description": "Finish the week: wrap up, tidy and plan next week."
+   },
+   {
+    "id": "l6",
+    "name": "Weekend",
+    "type": "active",
+    "position": 393216,
+    "description": "Rest, people and anything that is not work."
+   },
+   {
+    "id": "l7",
+    "name": "Someday",
+    "type": "active",
+    "position": 458752,
+    "description": "Not this week. Park things here so they are not forgotten and not nagging."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Work",
+    "color": "blue"
+   },
+   {
+    "id": "b2",
+    "name": "Home",
+    "color": "green"
+   },
+   {
+    "id": "b3",
+    "name": "Health",
+    "color": "pink"
+   }
+  ],
+  "cards": []
+ }
+}

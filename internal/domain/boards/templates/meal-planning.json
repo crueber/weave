@@ -1,0 +1,128 @@
+{
+ "id": "builtin:meal-planning",
+ "version": 1,
+ "category": "personal",
+ "name": "Meal planning",
+ "summary": "Collect recipes, plan the week and build a shopping list.",
+ "audience": "Home cooks",
+ "tags": [
+  "meals",
+  "recipes",
+  "cooking",
+  "food",
+  "shopping",
+  "groceries"
+ ],
+ "defaultView": "kanban",
+ "order": 13,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Meal planning",
+   "defaultView": "kanban",
+   "color": "amber",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Ideas",
+    "type": "active",
+    "position": 65536,
+    "description": "Recipes you want to try. Paste the link in the description."
+   },
+   {
+    "id": "l2",
+    "name": "This week",
+    "type": "active",
+    "position": 131072,
+    "description": "Meals planned for the next seven days."
+   },
+   {
+    "id": "l3",
+    "name": "Shopping list",
+    "type": "active",
+    "position": 196608,
+    "description": "Ingredients to buy. Tick items off as they go into the basket."
+   },
+   {
+    "id": "l4",
+    "name": "Cooked",
+    "type": "active",
+    "position": 262144,
+    "color": "green",
+    "description": "Made it. Note what you would change; move favourites back to Ideas."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Vegetarian",
+    "color": "green"
+   },
+   {
+    "id": "b2",
+    "name": "Vegan",
+    "color": "lime"
+   },
+   {
+    "id": "b3",
+    "name": "Gluten-free",
+    "color": "amber"
+   },
+   {
+    "id": "b4",
+    "name": "Quick",
+    "color": "sky"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l2",
+    "name": "Chickpea curry",
+    "type": "project",
+    "position": 65536,
+    "description": "Serves 4, about 30 minutes.",
+    "labelIds": [
+     "b2",
+     "b4"
+    ],
+    "taskLists": [
+     {
+      "name": "Ingredients",
+      "tasks": [
+       {
+        "name": "2 tins chickpeas",
+        "isCompleted": false
+       },
+       {
+        "name": "1 tin chopped tomatoes",
+        "isCompleted": false
+       },
+       {
+        "name": "1 onion",
+        "isCompleted": false
+       },
+       {
+        "name": "Garlic and ginger",
+        "isCompleted": false
+       },
+       {
+        "name": "Curry paste",
+        "isCompleted": false
+       },
+       {
+        "name": "Rice",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

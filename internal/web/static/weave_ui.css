@@ -183,6 +183,17 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:blur(3px)}
 .admin-stats{width:100%;max-width:420px}
 .admin-stats td{padding:.3rem .5rem;border-bottom:1px solid var(--border)}.admin-stats td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 
+/* The Weave preset names (colors.go) on the same tokens, so labels created with them (built-in templates do) read in card sheets too. */
+.lc-crimson,.cards-color-crimson{background:var(--label-red);color:var(--label-fg)}
+.lc-orange,.cards-color-orange{background:var(--label-orange);color:var(--label-fg)}
+.lc-amber,.cards-color-amber{background:var(--label-yellow);color:var(--label-fg)}
+.lc-lime,.cards-color-lime,.lc-green,.cards-color-green{background:var(--label-green);color:var(--label-fg)}
+.lc-teal,.cards-color-teal{background:var(--label-teal);color:var(--label-fg)}
+.lc-sky,.cards-color-sky,.lc-blue,.cards-color-blue{background:var(--label-blue);color:var(--label-fg)}
+.lc-indigo,.cards-color-indigo{background:var(--label-indigo);color:var(--label-fg)}
+.lc-violet,.cards-color-violet{background:var(--label-purple);color:var(--label-fg)}
+.lc-pink,.cards-color-pink{background:var(--label-pink);color:var(--label-fg)}
+.lc-slate,.cards-color-slate{background:var(--label-gray);color:var(--label-fg)}
 /* ---- label colours: Planka palette names mapped onto the --label-* tokens (.lc-NAME) ---- */
 .lc-berry-red,.cards-color-berry-red,.lc-apricot-red,.cards-color-apricot-red,.lc-piggy-red,.cards-color-piggy-red,.lc-red-burgundy,.cards-color-red-burgundy,.lc-shady-rust,.cards-color-shady-rust{background:var(--label-red);color:var(--label-fg)}
 .lc-pumpkin-orange,.cards-color-pumpkin-orange,.lc-orange-peel,.cards-color-orange-peel,.lc-light-orange,.cards-color-light-orange,.lc-autumn-leafs,.cards-color-autumn-leafs,.lc-light-cocoa,.cards-color-light-cocoa{background:var(--label-orange);color:var(--label-fg)}

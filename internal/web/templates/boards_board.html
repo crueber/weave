@@ -72,26 +72,12 @@
 <symbol id="i-more" viewBox="0 0 16 16"><path fill="currentColor" d="M3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></symbol>
 <symbol id="i-robot" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 1h1.6v1.6H11A2.5 2.5 0 0 1 13.5 5v5a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 10V5A2.5 2.5 0 0 1 5 2.6h2.2V1zM5 4.1a.9.9 0 0 0-.9.9v5c0 .5.4.9.9.9h6c.5 0 .9-.4.9-.9V5a.9.9 0 0 0-.9-.9H5zM6 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM1 6.5h1v3H1zm13 0h1v3h-1zM6 14h4v1H6z"/></symbol>
 <symbol id="i-gear" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3.25h12v1.5H2zM2 7.25h12v1.5H2zM2 11.25h12v1.5H2zM10 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM5 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM11 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></symbol>
+<symbol id="i-keyboard" viewBox="0 0 16 16"><rect x="1" y="3" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path fill="currentColor" d="M3.5 5.5H5V7H3.5zM6.25 5.5h1.5V7h-1.5zM9 5.5h1.5V7H9zM11.5 5.5H13V7h-1.5zM3.5 8H5v1.5H3.5zM6.25 8h1.5v1.5h-1.5zM9 8h1.5v1.5H9zM11.5 8H13v1.5h-1.5zM5 10.4h6V11.7H5z"/></symbol>
 <symbol id="i-chev" viewBox="0 0 16 16"><path fill="currentColor" d="M10.5 3.5 9.4 2.4 3.8 8l5.6 5.6 1.1-1.1L6 8z"/></symbol>
 </defs></svg>{{end}}
 
 {{define "boards_list_options"}}{{range .Data}}{{if or (eq .Type "active") (eq .Type "closed")}}<option value="{{.ID}}">{{deref .Name}}</option>{{end}}{{end}}{{end}}
 
-{{/* "Agent prompt" dialog: the copy-paste brief for one column (opened from the column sheet). */}}
-{{define "boards_agent_prompt"}}{{$d := .Data}}
-<article class="boards-ap" aria-labelledby="boards-ap-h">
-  <header class="boards-ap-head">
-    <div><h2 id="boards-ap-h">Agent prompt</h2><p class="boards-ap-sub">{{deref $d.List.Name}} &middot; {{$d.Board.Name}}</p></div>
-    <button type="button" class="boards-x" data-close-dialog aria-label="Close">&times;</button>
-  </header>
-  <p class="boards-ap-hint">Give this to an AI agent. Edit the text before copying to paste the API key or add more columns (one <code>--list</code> per column).</p>
-  <label class="boards-sr" for="boards-ap-text">Agent prompt text</label>
-  <textarea id="boards-ap-text" class="boards-ap-text" rows="18" spellcheck="false">{{$d.Prompt}}</textarea>
-  <div class="boards-ap-actions">
-    <button type="button" class="btn btn-primary boards-btn-primary" data-copy="#boards-ap-text">Copy to clipboard</button>
-    <button type="button" class="btn btn-ghost boards-btn" data-close-dialog>Close</button>
-  </div>
-</article>{{end}}
 {{define "boards_body"}}{{template "boards_body_in" .Data}}{{end}}
 
 {{/* fragments returned by the quick endpoints */}}

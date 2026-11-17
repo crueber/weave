@@ -1,0 +1,131 @@
+{{define "title"}}{{.Data.P.Name}} settings - Weave{{end}}
+{{define "page"}}{{template "projects_settings_in" .Data}}{{end}}
+{{define "topbar-page"}}{{with .Data}}{{template "projects_crumbs" .P}}{{end}}{{end}}
+
+{{/* Crumbs for the top bar: Projects / Project (a plain link; the page has its own h1). */}}
+{{define "projects_crumbs"}}<nav class="topbar-crumbs" aria-label="Breadcrumb"><ol>
+  <li class="crumb-root"><a href="/">Projects</a></li>
+  <li class="crumb-cur"><a href="/projects/{{.ID}}" title="{{.Name}}">{{.Name}}</a></li>
+</ol></nav>{{end}}
+
+{{define "projects_settings_in"}}<link rel="stylesheet" href="/static/boards_board.css">
+<link rel="stylesheet" href="/static/projects_ui.css">
+<div class="boards-settings projects-settings" data-active="{{.Active}}" data-project="{{.P.ID}}">
+  <header class="bs-head">
+    <div>
+      <h1>Project settings</h1>
+    </div>
+    <a class="boards-btn" href="/projects/{{.P.ID}}">&larr; Back to project</a>
+  </header>
+  <div class="bs-layout">
+    <nav class="bs-nav" aria-label="Settings sections">
+      {{range .Sections}}<a href="?section={{.ID}}#{{.ID}}" data-section="{{.ID}}" class="{{if eq .ID "danger"}}bs-nav-danger{{end}}"{{if eq .ID $.Active}} aria-current="true"{{end}}>{{.Title}}</a>{{end}}
+    </nav>
+    <div class="bs-panels">
+      {{template "projects_set_general_in" .}}
+      {{template "projects_set_background_in" .}}
+      {{template "projects_set_managers_in" .}}
+      {{template "projects_set_fields_in" .}}
+      {{template "projects_set_danger_in" .}}
+    </div>
+  </div>
+</div>
+<script src="/static/boards_settings.js" defer></script>{{end}}
+
+{{define "projects_set_general"}}{{template "projects_set_general_in" .Data}}{{end}}
+{{define "projects_set_general_in"}}<section id="set-general" class="boards-sec bs-panel" data-panel="general" aria-labelledby="set-general-h">
+  <div class="bs-sec-head"><h2 id="set-general-h">General</h2>{{template "bs_status" .}}</div>
+  <form hx-post="/ui/projects/{{.P.ID}}" hx-trigger="change, submit" hx-target="#set-general" hx-swap="outerHTML" class="bs-form">
+    <input type="hidden" name="_section" value="general">
+    <div class="bs-row bs-row-stack">
+      <span class="bs-text"><b><label for="ps-name">Project name</label></b><small>Shown on the home page, in the top bar and in notifications.</small></span>
+      <input id="ps-name" name="name" value="{{.P.Name}}" required maxlength="128">
+    </div>
+    <div class="bs-row bs-row-stack">
+      <span class="bs-text"><b><label for="ps-desc">Description</label></b><small>A line or two for the project page. Optional.</small></span>
+      <textarea id="ps-desc" name="description" rows="3" maxlength="1024">{{.P.Description}}</textarea>
+    </div>
+    {{template "bs_toggle" dict "ID" "ps-labels" "Name" "useProjectLabels" "Title" "Project-wide labels" "Help" "One label set shared by every board in this project. Only managers can change those labels." "On" .P.UseProjectLabels}}
+    {{template "bs_toggle" dict "ID" "ps-hidden" "Name" "isHidden" "Title" "Hidden" "Help" "Hidden projects are not listed on the home page by default." "On" .P.IsHidden}}
+  </form>
+  <p class="bs-hint">Changes save automatically.</p>
+</section>{{end}}
+
+{{define "projects_set_background"}}{{template "projects_set_background_in" .Data}}{{end}}
+{{define "projects_set_background_in"}}<section id="set-background" class="boards-sec bs-panel" data-panel="background" aria-labelledby="set-background-h">
+  <div class="bs-sec-head"><h2 id="set-background-h">Background</h2>{{template "bs_status" .}}</div>
+  <p class="bs-desc">Shown behind the title on the project page. Pick a colour, a preset or an image of your own.</p>
+  <div class="bs-row"><span class="bs-text"><b>Current background</b><small>{{if .P.BackgroundType}}A {{.P.BackgroundType}} background is set.{{else}}No background; the header stays plain.{{end}}</small></span>
+    <form class="bs-btns" hx-post="/ui/projects/{{.P.ID}}" hx-target="#set-background" hx-swap="outerHTML"><input type="hidden" name="_section" value="background"><input type="hidden" name="backgroundType" value="">
+      <button{{if not .P.BackgroundType}} disabled{{end}}>Remove background</button></form></div>
+  <div class="bs-row"><span class="bs-text"><b><label for="ps-color">Colour</label></b><small>A flat tint with a solid edge. Saves when you pick.</small></span>
+    <form hx-post="/ui/projects/{{.P.ID}}" hx-trigger="change" hx-target="#set-background" hx-swap="outerHTML"><input type="hidden" name="_section" value="background"><input type="hidden" name="backgroundType" value="color">
+      <input id="ps-color" class="ps-color" type="color" name="backgroundColor" value="{{if .P.BackgroundColor}}{{.P.BackgroundColor}}{{else}}#1d6fa5{{end}}"></form></div>
+  <h3 class="bs-sub">Presets</h3>
+  <div class="ps-swatches" role="group" aria-label="Preset backgrounds">{{range .Gradients}}<form hx-post="/ui/projects/{{$.P.ID}}" hx-target="#set-background" hx-swap="outerHTML"><input type="hidden" name="_section" value="background">
+    <input type="hidden" name="backgroundType" value="gradient"><input type="hidden" name="backgroundGradient" value="{{.Name}}">
+    <button class="ps-swatch{{if eq .Name $.P.BackgroundGradient}} on{{end}}" style="{{.CSS}}" title="{{.Name}}" aria-label="{{.Name}}"{{if eq .Name $.P.BackgroundGradient}} aria-pressed="true"{{end}}></button></form>{{end}}</div>
+  <h3 class="bs-sub">Images</h3>
+  <div class="ps-swatches" role="group" aria-label="Uploaded images">{{range .Images}}<div class="ps-img">
+    <form hx-post="/ui/projects/{{$.P.ID}}" hx-target="#set-background" hx-swap="outerHTML"><input type="hidden" name="_section" value="background">
+      <input type="hidden" name="backgroundType" value="image"><input type="hidden" name="backgroundImageId" value="{{.ID}}">
+      <button class="ps-swatch{{if eq .ID $.P.BackgroundImageID}} on{{end}}" style="background:center/cover url(/projects/{{$.P.ID}}/background-images/{{.ID}}/thumbnail)" aria-label="Use this image"{{if eq .ID $.P.BackgroundImageID}} aria-pressed="true"{{end}}></button></form>
+    <button type="button" class="bs-x" aria-label="Delete image" title="Delete image" hx-delete="/ui/projects/{{$.P.ID}}/background-images/{{.ID}}" hx-target="#set-background" hx-swap="outerHTML" hx-confirm="Delete this image?">&times;</button></div>{{else}}<p class="bs-empty-row">No images yet.</p>{{end}}</div>
+  <form class="bs-add ps-upload" hx-post="/ui/projects/{{.P.ID}}/background-images" hx-target="#set-background" hx-swap="outerHTML" hx-encoding="multipart/form-data">
+    <input type="hidden" name="apply" value="true"><label class="sr-only" for="ps-file">Image file</label>
+    <input id="ps-file" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required><button class="primary">Upload and use</button></form>
+</section>{{end}}
+
+{{define "projects_set_managers"}}{{template "projects_set_managers_in" .Data}}{{end}}
+{{define "projects_set_managers_in"}}<section id="set-managers" class="boards-sec bs-panel" data-panel="managers" aria-labelledby="set-managers-h">
+  <div class="bs-sec-head"><h2 id="set-managers-h">Managers</h2></div>
+  <p class="bs-desc">Managers can change these settings and create boards. Only admin and project owner users can be managers.</p>
+  <form class="bs-add" hx-post="/ui/projects/{{.P.ID}}/managers" hx-target="#set-managers" hx-swap="outerHTML">
+    {{template "bs_combo" dict "ID" "ps-combo" "Label" "Search people" "ListLabel" "People" "Placeholder" "Add a manager..." "Users" .Candidates}}
+    <button class="primary" disabled data-add>Add</button>
+  </form>
+  <ul class="bs-members">
+  {{range .Managers}}<li class="bs-member">
+    <span class="avatar avatar-ph" aria-hidden="true">{{authInitial .Name}}</span>
+    <span class="bs-member-t"><b>{{.Name}}{{if .IsOwner}} <span class="boards-badge">Owner</span>{{end}}</b>{{if .Email}}<small>{{.Email}}</small>{{end}}</span>
+    <button class="bs-x" aria-label="Remove {{.Name}}" title="Remove" hx-delete="/ui/projects/{{$.P.ID}}/managers/{{.ID}}" hx-target="#set-managers" hx-swap="outerHTML" hx-confirm="Remove {{.Name}} as manager?">&times;</button>
+  </li>{{else}}<li class="bs-empty-row">No managers yet.</li>{{end}}
+  </ul>
+</section>{{end}}
+
+{{define "projects_set_fields"}}{{template "projects_set_fields_in" .Data}}{{end}}
+{{define "projects_set_fields_in"}}<section id="set-fields" class="boards-sec bs-panel" data-panel="fields" aria-labelledby="set-fields-h">
+  <div class="bs-sec-head"><h2 id="set-fields-h">Custom fields</h2></div>
+  <p class="bs-desc">Field groups defined here can be added to any card in the project. Rename a group inline; changes save when you leave the field.</p>
+  {{range .Groups}}<section class="ps-group" aria-label="Field group {{.Name}}">
+    <form class="ps-group-head" hx-post="/ui/fieldgroups/{{.ID}}?pid={{$.P.ID}}" hx-trigger="change" hx-target="#set-fields" hx-swap="outerHTML">
+      <label class="sr-only" for="ps-gn-{{.ID}}">Group name</label><input id="ps-gn-{{.ID}}" name="name" value="{{.Name}}" required maxlength="128">
+      <button type="button" class="bs-x" aria-label="Delete group {{.Name}}" title="Delete group" hx-delete="/ui/fieldgroups/{{.ID}}?pid={{$.P.ID}}" hx-target="#set-fields" hx-swap="outerHTML" hx-confirm="Delete group '{{.Name}}' and its fields?">&times;</button>
+    </form>
+    <ul class="bs-members ps-fields">{{range .Fields}}<li class="bs-member">
+      <span class="bs-member-t"><b>{{.Name}}</b><small>{{.Type}}{{if .Options}}: {{range $i, $o := .Options}}{{if $i}}, {{end}}{{$o}}{{end}}{{end}}{{if .ShowOnFrontOfCard}} &middot; on card front{{end}}</small></span>
+      <button class="bs-x" aria-label="Delete field {{.Name}}" title="Delete field" hx-delete="/ui/basefields/{{.ID}}?pid={{$.P.ID}}" hx-target="#set-fields" hx-swap="outerHTML" hx-confirm="Delete field '{{.Name}}'?">&times;</button>
+    </li>{{else}}<li class="bs-empty-row">No fields in this group yet.</li>{{end}}</ul>
+    <form class="bs-add ps-add-field" hx-post="/ui/fieldgroups/{{.ID}}/fields?pid={{$.P.ID}}" hx-target="#set-fields" hx-swap="outerHTML">
+      <label class="sr-only" for="ps-fn-{{.ID}}">New field name</label><input id="ps-fn-{{.ID}}" name="name" placeholder="New field name" required maxlength="128">
+      <label class="sr-only" for="ps-ft-{{.ID}}">Field type</label><select id="ps-ft-{{.ID}}" name="type">{{range $.FieldTypes}}<option>{{.}}</option>{{end}}</select>
+      <label class="sr-only" for="ps-fo-{{.ID}}">Options</label><input id="ps-fo-{{.ID}}" name="options" placeholder="Options (select), comma separated">
+      <label class="bs-inline-toggle"><span class="bs-switch"><input type="checkbox" role="switch" name="showOnFrontOfCard" value="true"><i aria-hidden="true"></i></span> On card front</label>
+      <button>Add field</button>
+    </form>
+  </section>{{else}}<p class="bs-empty-row">No custom field groups yet.</p>{{end}}
+  <h3 class="bs-sub">New group</h3>
+  <form class="bs-add" hx-post="/ui/projects/{{.P.ID}}/fieldgroups" hx-target="#set-fields" hx-swap="outerHTML">
+    <label class="sr-only" for="ps-newgroup">New group name</label><input id="ps-newgroup" name="name" placeholder="New group name" required maxlength="128"><button class="primary">Add group</button>
+  </form>
+</section>{{end}}
+
+{{define "projects_set_danger_in"}}<section id="set-danger" class="boards-sec bs-panel danger-zone" data-panel="danger" aria-labelledby="set-danger-h">
+  <div class="bs-sec-head"><h2 id="set-danger-h">Danger zone</h2></div>
+  <p class="bs-desc">Deleting the project removes all its boards, cards, labels, custom fields and history. This cannot be undone.</p>
+  <div class="bs-delete" data-name="{{.P.Name}}">
+    <label for="ps-del-in"><b>Type the project name to confirm</b><small>{{.P.Name}}</small></label>
+    <input id="ps-del-in" autocomplete="off" spellcheck="false" placeholder="{{.P.Name}}" data-del-in>
+    <button class="danger" disabled data-del hx-delete="/ui/projects/{{.P.ID}}">Delete this project</button>
+  </div>
+</section>{{end}}

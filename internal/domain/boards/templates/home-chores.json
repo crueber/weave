@@ -1,0 +1,107 @@
+{
+ "id": "builtin:home-chores",
+ "version": 1,
+ "category": "personal",
+ "name": "Home & chores",
+ "summary": "Share household jobs and see what is done this week.",
+ "audience": "Households and flatmates",
+ "tags": [
+  "home",
+  "chores",
+  "household",
+  "family",
+  "cleaning"
+ ],
+ "defaultView": "kanban",
+ "order": 12,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Home & chores",
+   "defaultView": "kanban",
+   "color": "lime",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "To do",
+    "type": "active",
+    "position": 65536,
+    "description": "Jobs that need doing sometime. Add a room label so it is easy to find."
+   },
+   {
+    "id": "l2",
+    "name": "This week",
+    "type": "active",
+    "position": 131072,
+    "description": "What you have agreed to get done this week."
+   },
+   {
+    "id": "l3",
+    "name": "Doing",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "In hand right now. Three at a time keeps things finishing.",
+    "wipLimit": 3
+   },
+   {
+    "id": "l4",
+    "name": "Done",
+    "type": "active",
+    "position": 262144,
+    "color": "green",
+    "description": "Finished. Move repeating jobs back to To do."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Kitchen",
+    "color": "orange"
+   },
+   {
+    "id": "b2",
+    "name": "Bathroom",
+    "color": "sky"
+   },
+   {
+    "id": "b3",
+    "name": "Living room",
+    "color": "violet"
+   },
+   {
+    "id": "b4",
+    "name": "Garden",
+    "color": "green"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l2",
+    "name": "Deep-clean the oven",
+    "type": "project",
+    "position": 65536,
+    "description": "Do the racks in the sink first; leave the cleaner on overnight.",
+    "labelIds": [
+     "b1"
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l1",
+    "name": "Mow the lawn",
+    "type": "project",
+    "position": 131072,
+    "labelIds": [
+     "b4"
+    ]
+   }
+  ]
+ }
+}

@@ -1,16 +1,17 @@
 {{define "title"}}Webhook deliveries - Weave{{end}}
-{{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
-<section class="notify-page">
-<div class="notify-head"><h1>Deliveries: {{.Data.W.Name}}</h1><div class="notify-actions"><a href="/admin/webhooks">Back to webhooks</a></div></div>
-<p class="notify-meta">{{.Data.W.URL}}</p>
-{{if not .Data.Items}}<p class="notify-empty">No deliveries yet.</p>{{end}}
-<table class="notify-table"><thead><tr><th>When</th><th>Event</th><th>State</th><th>HTTP</th><th>Attempts</th><th>Time</th><th></th></tr></thead><tbody>
-{{range .Data.Items}}<tr>
-  <td>{{notifyTime .CreatedAt}}</td><td>{{.Event}}</td>
-  <td><span class="notify-state {{.State}}">{{.State}}</span>{{if .NextAttemptAt}}<div class="notify-meta">next {{notifyTime .NextAttemptAt}}</div>{{end}}</td>
-  <td>{{if .Status}}{{.Status}}{{else}}-{{end}}{{if .Error}}<div class="notify-meta">{{.Error}}</div>{{end}}</td>
-  <td>{{.Attempts}}</td><td>{{.DurationMs}} ms</td>
-  <td><button class="notify-btn" hx-post="/ui/admin/webhook-deliveries/{{.ID}}/retry">Redeliver</button></td>
-</tr>{{if .ResponseBody}}<tr><td colspan="7"><pre class="notify-pre">{{.ResponseBody}}</pre></td></tr>{{end}}{{end}}
-</tbody></table>
-</section>{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "webhooks" "Crumb" .User.Name}}{{with .Data}}
+<section id="adm-deliveries" class="boards-sec" aria-labelledby="adm-deliveries-h">
+  <div class="bs-sec-head"><h2 id="adm-deliveries-h">Deliveries: {{.W.Name}}</h2><a href="/admin/webhooks">&larr; All webhooks</a></div>
+  <p class="bs-desc adm-url">{{.W.URL}}</p>
+  {{if not .Items}}<p class="bs-empty-row">No deliveries yet.</p>{{else}}
+  <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">State</th><th scope="col">HTTP</th><th scope="col" class="num">Attempts</th><th scope="col" class="num">Time</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>
+  {{range .Items}}<tr>
+    <td>{{notifyTime .CreatedAt}}</td><td>{{.Event}}</td>
+    <td><span class="boards-badge {{if eq .State "delivered"}}is-ok{{else if eq .State "failed"}}is-bad{{else}}is-warn{{end}}">{{.State}}</span>{{if .NextAttemptAt}}<small class="adm-sub-line">next {{notifyTime .NextAttemptAt}}</small>{{end}}</td>
+    <td>{{if .Status}}{{.Status}}{{else}}-{{end}}{{if .Error}}<small class="adm-sub-line">{{.Error}}</small>{{end}}</td>
+    <td class="num">{{.Attempts}}</td><td class="num">{{.DurationMs}} ms</td>
+    <td class="act"><button type="button" hx-post="/ui/admin/webhook-deliveries/{{.ID}}/retry">Redeliver</button></td>
+  </tr>{{if .ResponseBody}}<tr class="adm-resp"><td colspan="7"><pre>{{.ResponseBody}}</pre></td></tr>{{end}}{{end}}
+  </tbody></table></div>{{end}}
+</section>
+{{end}}{{template "admin_bottom"}}{{end}}

@@ -39,9 +39,14 @@ type gradient struct {
 
 type candidate struct{ ID, Name, Email string }
 
+// settingsSection is one entry of the settings navigation (same shape as boards.SettingsSection).
+type settingsSection struct{ ID, Title string }
+
 type settingsData struct {
 	P          Project
-	Tabs       [][2]string
+	Sections   []settingsSection
+	Active     string // section shown first (?section=)
+	Done       bool   // render the "Saved" confirmation
 	Gradients  []gradient
 	Images     []BackgroundImage
 	Managers   []Manager
@@ -74,7 +79,7 @@ func init() {
 		if _, err := c.Do("project.update"); err != nil {
 			return err
 		}
-		return renderTab(c, c.R.PathValue("id"), c.R.FormValue("tab"))
+		return renderSection(c, c.R.PathValue("id"), sectionParam(c), true)
 	})
 	web.Route("DELETE /ui/projects/{id}", func(c *web.Ctx) error {
 		if _, err := c.Do("project.delete"); err != nil {
@@ -86,41 +91,49 @@ func init() {
 	web.Route("POST /ui/projects/{id}/favorite", func(c *web.Ctx) error { return favorite(c, "project.favorite") })
 	web.Route("DELETE /ui/projects/{id}/favorite", func(c *web.Ctx) error { return favorite(c, "project.unfavorite") })
 
-	web.Route("GET /ui/projects/{id}/settings", func(c *web.Ctx) error {
-		d, err := loadSettings(c, c.R.PathValue("id"), "general")
+	// The settings are a page (like board settings); the old dialog URL now lands there.
+	web.Route("GET /projects/{id}/settings", func(c *web.Ctx) error {
+		d, err := loadSettings(c, c.R.PathValue("id"))
 		if err != nil {
 			return err
 		}
-		return c.RenderBlock("projects_project.html", "projects-settings", d)
+		return c.Render("projects_settings.html", d)
+	})
+	web.Route("GET /ui/projects/{id}/settings", func(c *web.Ctx) error {
+		if _, err := loadSettings(c, c.R.PathValue("id")); err != nil {
+			return err
+		}
+		c.Redirect("/projects/" + c.R.PathValue("id") + "/settings")
+		return nil
 	})
 	web.Route("GET /ui/projects/{id}/settings/{tab}", func(c *web.Ctx) error {
-		return renderTab(c, c.R.PathValue("id"), c.R.PathValue("tab"))
+		return renderSection(c, c.R.PathValue("id"), c.R.PathValue("tab"), false)
 	})
 
 	web.Route("POST /ui/projects/{id}/managers", func(c *web.Ctx) error {
 		if _, err := c.Do("project.manager.add"); err != nil {
 			return err
 		}
-		return renderTab(c, c.R.PathValue("id"), "managers")
+		return renderSection(c, c.R.PathValue("id"), "managers", false)
 	})
 	web.Route("DELETE /ui/projects/{id}/managers/{managerId}", func(c *web.Ctx) error {
 		if _, err := c.Do("project.manager.remove"); err != nil {
 			return err
 		}
-		return renderTab(c, c.R.PathValue("id"), "managers")
+		return renderSection(c, c.R.PathValue("id"), "managers", false)
 	})
 
 	web.Route("POST /ui/projects/{id}/background-images", func(c *web.Ctx) error {
 		if _, err := c.Do("project.background.upload"); err != nil {
 			return err
 		}
-		return renderTab(c, c.R.PathValue("id"), "background")
+		return renderSection(c, c.R.PathValue("id"), "background", false)
 	})
 	web.Route("DELETE /ui/projects/{id}/background-images/{imageId}", func(c *web.Ctx) error {
 		if _, err := c.Do("project.background.delete"); err != nil {
 			return err
 		}
-		return renderTab(c, c.R.PathValue("id"), "background")
+		return renderSection(c, c.R.PathValue("id"), "background", false)
 	})
 	web.Route("GET /projects/{id}/background-images/{imageId}/{variant}", func(c *web.Ctx) error {
 		out, err := c.Do("project.background.file")
@@ -155,7 +168,7 @@ func init() {
 			if pid == "" {
 				pid = c.R.PathValue("id")
 			}
-			return renderTab(c, pid, "fields")
+			return renderSection(c, pid, "fields", false)
 		}
 	}
 	web.Route("POST /ui/projects/{id}/fieldgroups", fieldsTab("project.fieldgroup.create"))
@@ -302,9 +315,18 @@ func projectPage(c *web.Ctx) error {
 	return c.Render("projects_project.html", d)
 }
 
-var tabs = [][2]string{{"general", "General"}, {"background", "Background"}, {"managers", "Managers"}, {"fields", "Custom fields"}}
+var sections = []settingsSection{{"general", "General"}, {"background", "Background"}, {"managers", "Managers"}, {"fields", "Custom fields"}, {"danger", "Danger zone"}}
 
-func loadSettings(c *web.Ctx, id, tab string) (settingsData, error) {
+// sectionParam is the section a UI mutation came from (_section, or the legacy tab field).
+func sectionParam(c *web.Ctx) string {
+	if s := c.R.FormValue("_section"); s != "" {
+		return s
+	}
+	return c.R.FormValue("tab")
+}
+
+// loadSettings loads everything the settings page shows; managers only (others get 403 as before).
+func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 	p, err := Get(c.Env, id)
 	if err != nil {
 		return settingsData{}, err
@@ -312,46 +334,56 @@ func loadSettings(c *web.Ctx, id, tab string) (settingsData, error) {
 	if !p.CanManage {
 		return settingsData{}, ops.Forbidden()
 	}
-	d := settingsData{P: p, Tabs: tabs, FieldTypes: FieldTypes}
-	switch tab {
-	case "background":
-		for _, n := range GradientNames() {
-			d.Gradients = append(d.Gradients, gradient{n, BackgroundCSS(Project{BackgroundType: "gradient", BackgroundGradient: n})})
+	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes}
+	if c.R != nil {
+		q := c.R.URL.Query().Get("section")
+		for _, s := range sections {
+			if s.ID == q {
+				d.Active = q
+			}
 		}
-		d.Images, err = ops.Typed[[]BackgroundImage](c.Env, "project.background.list", IDIn{id})
-	case "managers":
-		if d.Managers, err = ops.Typed[[]Manager](c.Env, "project.manager.list", IDIn{id}); err != nil {
+	}
+	for _, n := range GradientNames() {
+		d.Gradients = append(d.Gradients, gradient{n, BackgroundCSS(Project{BackgroundType: "gradient", BackgroundGradient: n})})
+	}
+	if d.Images, err = ops.Typed[[]BackgroundImage](c.Env, "project.background.list", IDIn{id}); err != nil {
+		return d, err
+	}
+	if d.Managers, err = ops.Typed[[]Manager](c.Env, "project.manager.list", IDIn{id}); err != nil {
+		return d, err
+	}
+	// Read-only candidate lookup on users (page-specific join).
+	rows, qerr := c.Env.DB.QueryContext(c.Env.Ctx, `SELECT id,name,email FROM users WHERE role IN ('admin','projectOwner')
+		AND is_deactivated=0 AND deleted_at IS NULL AND id NOT IN (SELECT user_id FROM project_managers WHERE project_id=?) ORDER BY name COLLATE NOCASE`, id)
+	if qerr != nil {
+		return d, qerr
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cd candidate
+		if err := rows.Scan(&cd.ID, &cd.Name, &cd.Email); err != nil {
 			return d, err
 		}
-		// Read-only candidate lookup on users (page-specific join).
-		rows, qerr := c.Env.DB.QueryContext(c.Env.Ctx, `SELECT id,name,email FROM users WHERE role IN ('admin','projectOwner')
-			AND is_deactivated=0 AND deleted_at IS NULL AND id NOT IN (SELECT user_id FROM project_managers WHERE project_id=?) ORDER BY name COLLATE NOCASE`, id)
-		if qerr != nil {
-			return d, qerr
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var cd candidate
-			if err := rows.Scan(&cd.ID, &cd.Name, &cd.Email); err != nil {
-				return d, err
-			}
-			d.Candidates = append(d.Candidates, cd)
-		}
-	case "fields":
-		d.Groups, err = ops.Typed[[]BaseGroup](c.Env, "project.fieldgroup.list", IDIn{id})
+		d.Candidates = append(d.Candidates, cd)
 	}
+	if err := rows.Err(); err != nil {
+		return d, err
+	}
+	d.Groups, err = ops.Typed[[]BaseGroup](c.Env, "project.fieldgroup.list", IDIn{id})
 	return d, err
 }
 
-func renderTab(c *web.Ctx, id, tab string) error {
-	switch tab {
+// renderSection re-renders one settings section after a change; done shows the "Saved" tick.
+func renderSection(c *web.Ctx, id, section string, done bool) error {
+	switch section {
 	case "background", "managers", "fields":
 	default:
-		tab = "general"
+		section = "general"
 	}
-	d, err := loadSettings(c, id, tab)
+	d, err := loadSettings(c, id)
 	if err != nil {
 		return err
 	}
-	return c.RenderBlock("projects_project.html", "projects-tab-"+tab, d)
+	d.Done = done
+	return c.RenderBlock("projects_settings.html", "projects_set_"+section, d)
 }

@@ -1,0 +1,134 @@
+{
+ "id": "builtin:release-checklist",
+ "version": 1,
+ "category": "software",
+ "name": "Software release checklist",
+ "summary": "A repeatable path from code freeze to post-release, with a rollback plan.",
+ "audience": "Teams shipping software on a schedule",
+ "tags": [
+  "release",
+  "deploy",
+  "checklist",
+  "launch",
+  "qa"
+ ],
+ "defaultView": "kanban",
+ "order": 9,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Release checklist",
+   "defaultView": "kanban",
+   "color": "slate",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Prep",
+    "type": "active",
+    "position": 65536,
+    "description": "Everything before the release: freeze, changelog, migrations and communication."
+   },
+   {
+    "id": "l2",
+    "name": "Verify",
+    "type": "active",
+    "position": 131072,
+    "description": "Prove it works on a release candidate: tests, smoke checks and sign-offs."
+   },
+   {
+    "id": "l3",
+    "name": "Ship",
+    "type": "active",
+    "position": 196608,
+    "description": "The release itself. Do not start if the rollback plan is unclear."
+   },
+   {
+    "id": "l4",
+    "name": "Post-release",
+    "type": "active",
+    "position": 262144,
+    "color": "green",
+    "description": "Watch the dashboards, tell people and capture what to improve."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Blocker",
+    "color": "crimson"
+   },
+   {
+    "id": "b2",
+    "name": "Docs",
+    "color": "sky"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l1",
+    "name": "Release 1.0",
+    "type": "project",
+    "position": 65536,
+    "description": "Due a week from now: adjust the date when you know the real one.",
+    "taskLists": [
+     {
+      "name": "Release checklist",
+      "tasks": [
+       {
+        "name": "Write the changelog",
+        "isCompleted": false
+       },
+       {
+        "name": "Tag the release",
+        "isCompleted": false
+       },
+       {
+        "name": "Run the smoke test",
+        "isCompleted": false
+       },
+       {
+        "name": "Announce the release",
+        "isCompleted": false
+       },
+       {
+        "name": "Write down the rollback plan",
+        "isCompleted": false
+       }
+      ]
+     }
+    ],
+    "dueOffsetDays": 7
+   },
+   {
+    "id": "c2",
+    "listId": "l2",
+    "name": "Smoke test the release candidate",
+    "type": "project",
+    "position": 131072,
+    "description": "Run the critical paths on a production-like environment.",
+    "labelIds": [
+     "b1"
+    ],
+    "dueOffsetDays": 5
+   },
+   {
+    "id": "c3",
+    "listId": "l4",
+    "name": "Announce and monitor",
+    "type": "project",
+    "position": 196608,
+    "description": "Post the notes, update the docs and watch errors for the first day.",
+    "labelIds": [
+     "b2"
+    ],
+    "dueOffsetDays": 8
+   }
+  ]
+ }
+}

@@ -56,15 +56,11 @@
         </form>{{end}}
       </section>
 
-      {{if $edit}}<section class="cm-sec is-collapsed" data-ls-sec="prompt" aria-label="Agent prompt">
-        <div class="x-head"><h3 class="x-h"><button type="button" class="x-toggle" data-ls-sec-toggle aria-expanded="false" aria-controls="ls-prompt-body"><span class="x-chev" aria-hidden="true"></span>Agent prompt</button></h3></div>
-        <div class="ls-secbody" id="ls-prompt-body">
-          <p class="cm-hint">Give this to an AI agent. Edit the text before copying to paste the API key or add more columns (one <code>--list</code> per column).</p>
-          <label class="boards-sr" for="ls-ap-text">Agent prompt text</label>
-          <textarea id="ls-ap-text" class="ls-ap-text" rows="9" spellcheck="false">{{$d.Prompt}}</textarea>
-          <div class="cards-actions"><button type="button" class="primary" data-copy="#ls-ap-text">Copy to clipboard</button></div>
-        </div>
-      </section>{{end}}
+      <section class="cm-sec" aria-label="Connect an agent">
+        <div class="cm-sec-head"><h3>Connect an agent</h3></div>
+        <p class="cm-hint">Put an AI agent to work on this column: a ready-to-paste prompt with this column's brief, the connection steps and the rules cards are handled by. It never contains a key.</p>
+        <div class="cards-actions"><button type="button" class="primary" hx-get="/ui/agent-prompt?scope=list&amp;id={{$l.ID}}" hx-target="#modal" hx-swap="innerHTML">Get the prompt</button></div>
+      </section>
 
       {{if $d.Listeners}}<section class="cm-sec" aria-label="Agents listening">
         <div class="cm-sec-head"><h3>Listening now</h3><span class="cm-count">{{len $d.Listeners}}</span></div>

@@ -1,0 +1,167 @@
+{
+ "id": "builtin:sales-pipeline",
+ "version": 1,
+ "category": "sales-marketing",
+ "name": "CRM / sales pipeline",
+ "summary": "Leads to won deals, with a deal value on every card.",
+ "audience": "Small sales teams and freelancers",
+ "tags": [
+  "crm",
+  "sales",
+  "leads",
+  "deals",
+  "pipeline"
+ ],
+ "defaultView": "kanban",
+ "order": 7,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Sales pipeline",
+   "defaultView": "kanban",
+   "color": "green",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Lead",
+    "type": "active",
+    "position": 65536,
+    "description": "Someone who might need what you offer. Qualify quickly: is there a need, a budget and a decision-maker?"
+   },
+   {
+    "id": "l2",
+    "name": "Contacted",
+    "type": "active",
+    "position": 131072,
+    "description": "You have reached out. Follow up on a schedule until they reply or you stop."
+   },
+   {
+    "id": "l3",
+    "name": "Proposal",
+    "type": "active",
+    "position": 196608,
+    "description": "A proposal or quote is out. Note when you will follow up."
+   },
+   {
+    "id": "l4",
+    "name": "Negotiation",
+    "type": "active",
+    "position": 262144,
+    "description": "Terms are being agreed. Resolve blockers fast."
+   },
+   {
+    "id": "l5",
+    "name": "Won",
+    "type": "closed",
+    "position": 327680,
+    "color": "green",
+    "description": "Signed. Hand over to delivery."
+   },
+   {
+    "id": "l6",
+    "name": "Lost",
+    "type": "closed",
+    "position": 393216,
+    "color": "slate",
+    "description": "Not this time. Record why: it is the most useful data you will collect."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Hot",
+    "color": "crimson"
+   },
+   {
+    "id": "b2",
+    "name": "Warm",
+    "color": "amber"
+   },
+   {
+    "id": "b3",
+    "name": "Cold",
+    "color": "sky"
+   }
+  ],
+  "customFields": [
+   {
+    "id": "f1",
+    "name": "Deal",
+    "repeatable": false,
+    "fields": [
+     {
+      "id": "f1_1",
+      "name": "Deal value",
+      "type": "number",
+      "showOnFrontOfCard": true
+     },
+     {
+      "id": "f1_2",
+      "name": "Source",
+      "type": "select",
+      "options": [
+       "Inbound",
+       "Outbound",
+       "Referral",
+       "Event"
+      ]
+     }
+    ]
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l3",
+    "name": "Acme Co: annual plan",
+    "type": "project",
+    "position": 65536,
+    "description": "Follow up on the proposal within the week.",
+    "labelIds": [
+     "b2"
+    ],
+    "taskLists": [
+     {
+      "name": "Next steps",
+      "tasks": [
+       {
+        "name": "Send the proposal",
+        "isCompleted": false
+       },
+       {
+        "name": "Book a follow-up call",
+        "isCompleted": false
+       },
+       {
+        "name": "Introduce a technical contact",
+        "isCompleted": false
+       },
+       {
+        "name": "Prepare the contract",
+        "isCompleted": false
+       }
+      ]
+     }
+    ],
+    "dueOffsetDays": 5,
+    "customFieldValues": [
+     {
+      "groupId": "f1",
+      "fieldId": "f1_1",
+      "content": "12000"
+     },
+     {
+      "groupId": "f1",
+      "fieldId": "f1_2",
+      "content": "Referral"
+     }
+    ]
+   }
+  ]
+ }
+}

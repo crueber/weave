@@ -194,6 +194,59 @@
   "fields": null
  },
  {
+  "name": "agent.prompt",
+  "tag": "agent",
+  "summary": "Render the copy-paste prompt that connects an AI agent to Weave (scope general, project, board, list, runner or workorder); no key is ever included",
+  "method": "GET",
+  "path": "/agent/prompt",
+  "auth": "user",
+  "ui": "GET /ui/agent-prompt",
+  "fields": [
+   {
+    "name": "scope",
+    "in": "query",
+    "type": "string",
+    "required": true,
+    "desc": "general | project | board | list | runner | workorder"
+   },
+   {
+    "name": "id",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "project id (scope project), board id (board, runner: optional) or list id (list, workorder)"
+   },
+   {
+    "name": "cardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "workorder only: the card (must be on the list's board)"
+   },
+   {
+    "name": "cardFile",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "workorder only: path of the card JSON file the runner wrote (single line, max 512 chars)"
+   },
+   {
+    "name": "install",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "include the install steps for the CLI and skill (default true)"
+   },
+   {
+    "name": "compact",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "shorter etiquette section"
+   }
+  ]
+ },
+ {
   "name": "agent.rotateKey",
   "tag": "agent",
   "summary": "Issue a new API key for an agent (the old key stops working); returned once",
@@ -881,7 +934,7 @@
  {
   "name": "board.instantiate",
   "tag": "board",
-  "summary": "Create a board from a template in a project",
+  "summary": "Create a board in a project from a built-in or published template (project manager)",
   "method": "POST",
   "path": "/projects/{projectId}/boards/from-template",
   "auth": "user",
@@ -899,7 +952,7 @@
     "in": "body",
     "type": "string",
     "required": true,
-    "desc": "template board id"
+    "desc": "a built-in template id (builtin:\u003cslug\u003e, see board.template.list) or the id of a published template board"
    },
    {
     "name": "name",
@@ -907,6 +960,20 @@
     "type": "string",
     "required": true,
     "desc": "new board name"
+   },
+   {
+    "name": "sampleCards",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "include the template's sample cards (default true). Cards carry their task lists and custom-field values; due dates are relative to now"
+   },
+   {
+    "name": "defaultView",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "override the template's default view: kanban|grid|list|calendar|map"
    }
   ]
  },
@@ -1144,9 +1211,27 @@
   ]
  },
  {
+  "name": "board.template.get",
+  "tag": "board",
+  "summary": "Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields",
+  "method": "GET",
+  "path": "/board-templates/{templateId}",
+  "auth": "user",
+  "ui": "GET /ui/board-templates/{templateId}",
+  "fields": [
+   {
+    "name": "templateId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "builtin:\u003cslug\u003e or a published board id"
+   }
+  ]
+ },
+ {
   "name": "board.template.list",
   "tag": "board",
-  "summary": "List board templates visible to the caller",
+  "summary": "List the board templates the caller may use: built-in ones (with category and summary) and published boards, searchable with q and category",
   "method": "GET",
   "path": "/board-templates",
   "auth": "user",
@@ -1157,14 +1242,28 @@
     "in": "query",
     "type": "string",
     "required": false,
-    "desc": "limit to a project (optional)"
+    "desc": "limit published templates to boards of this project (optional)"
+   },
+   {
+    "name": "q",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "search words matched against name, summary, tags, category, project and publisher"
+   },
+   {
+    "name": "category",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "basics|software|product|sales-marketing|people|personal|planning, or published for user-published templates only"
    }
   ]
  },
  {
   "name": "board.template.publish",
   "tag": "board",
-  "summary": "Publish/unpublish a board as a template",
+  "summary": "Publish/unpublish a board as a template and choose who may use it (board manager). Due dates of its cards become offsets from the publish moment; unpublish and publish again to refresh them",
   "method": "POST",
   "path": "/boards/{id}/template",
   "auth": "user",
@@ -1181,7 +1280,21 @@
     "in": "body",
     "type": "bool",
     "required": false,
-    "desc": "mark the board as a reusable template"
+    "desc": "mark the board as a reusable template (false unpublishes it)"
+   },
+   {
+    "name": "visibility",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "who may use it: private (you and people with access to the board; the default for a new template) | group | public (every signed-in user). Omitted on an already published template keeps its visibility"
+   },
+   {
+    "name": "groupId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "the user group, when visibility is group"
    }
   ]
  },
@@ -2846,6 +2959,13 @@
     "type": "string",
     "required": false,
     "desc": "Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"
+   },
+   {
+    "name": "templates.hidden",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all"
    }
   ]
  },

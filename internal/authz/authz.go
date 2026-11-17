@@ -167,3 +167,33 @@ func RoomAllowed(e *ops.Env, room string) bool {
 	}
 	return room == "global" && e.User != nil
 }
+
+// TemplateVisible reports whether the caller may see and start boards from a published board template: admins always;
+// everyone who can already see the board (its project members); the publisher; and, depending on the publisher's choice
+// (boards.template_visibility), the members of one user group or every signed-in user.
+func TemplateVisible(e *ops.Env, boardID string) bool {
+	if e.User == nil {
+		return false
+	}
+	var tpl bool
+	var vis string
+	var group, publisher *string
+	if e.DB.QueryRowContext(e.Ctx, `SELECT is_template,template_visibility,template_group_id,template_publisher_id FROM boards WHERE id=?`, boardID).
+		Scan(&tpl, &vis, &group, &publisher) != nil || !tpl {
+		return false
+	}
+	if e.User.Role == "admin" || BoardLevel(e, boardID) >= View || (publisher != nil && *publisher == e.User.UserID) {
+		return true
+	}
+	switch vis {
+	case "public":
+		return true
+	case "group":
+		var n int
+		if group != nil {
+			_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM user_group_members WHERE group_id=? AND user_id=?`, *group, e.User.UserID).Scan(&n)
+		}
+		return n > 0
+	}
+	return false
+}

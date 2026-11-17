@@ -159,6 +159,21 @@ NS="$ID"; [ -n "$NS" ] && cleanup_add "notificationservice.delete|notification.s
 step "webhook.create" "webhook.create" "name=e2e-$RUN" "url=http://localhost:9/hook" "events=cardCreate,cardUpdate"
 WH="$ID"; [ -n "$WH" ] && cleanup_add "webhook.delete" "id=$WH"
 
+# ---- agent prompts + the token-free runner (outbox mode) with a stub agent
+if "$BIN" agent prompt --general >/dev/null 2>&1; then
+  P_BOARD="$("$BIN" agent prompt --board "Board $RUN" 2>"$TMP/err")"
+  if grep -q 'PLAN board' <<<"$P_BOARD" && ! grep -Eq 'wk_[A-Za-z0-9]{8,}' <<<"$P_BOARD"; then ok "agent prompt (board: questionnaire, no key)"; else bad "agent prompt" "$(cat "$TMP/err")"; fi
+  P_WO="$("$BIN" agent prompt --work-order --board "Board $RUN" --list Todo --card "$CARD" --card-file /tmp/card.json 2>"$TMP/err")"
+  if grep -q 'DONE MEANS' <<<"$P_WO" && ! grep -q "Card $RUN" <<<"$P_WO"; then ok "agent prompt (work order has no card text)"; else bad "agent prompt work order" "$(cat "$TMP/err")"; fi
+  "$BIN" list create --board "Board $RUN" --name Doing >/dev/null 2>&1; "$BIN" list create --board "Board $RUN" --name Done >/dev/null 2>&1
+  if "$BIN" agent run --board "Board $RUN" --listen Todo --claim-move-to Doing --done-list Done --outbox --once --include-existing --no-cursor --timeout 90s --exec-timeout 60s \
+       --agent-label e2e -- sh -c 'test -z "${WEAVE_TOKEN:-}" && test -n "$WEAVE_CARD_FILE" && echo done > "$WEAVE_OUT_DIR/result" && echo "e2e outbox ok" > "$WEAVE_OUT_DIR/comment.md"' >/dev/null 2>"$TMP/err"; then
+    if "$BIN" card show "$CARD" --full 2>/dev/null | grep -q 'e2e outbox ok'; then ok "agent run --outbox (stub agent: no token, comment posted by the runner)"; else bad "agent run --outbox" "comment not found on the card"; fi
+  else bad "agent run --outbox" "$(tail -3 "$TMP/err")"; fi
+else
+  skp "agent prompt" "server has no agent.prompt op"
+fi
+
 # ---- search + exports
 step "search" "search.query|search.run|search.cards|search.global" "q|query=Card $RUN"
 if resolve_op "search.query|search.run|search.cards|search.global" >/dev/null; then

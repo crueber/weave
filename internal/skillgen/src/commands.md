@@ -39,6 +39,8 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 | `weave whoami` / `weave doctor` / `weave version [--check]` | identity, health checks, version skew |
 | `weave config list\|use NAME\|set url\|token V\|get K\|remove NAME\|path` | profiles |
 | `weave board tree --board B` | lists with their cards |
+| `weave board template.list [--q WORDS] [--category C]` / `weave board template.get --templateId ID` | ready-made board templates (`builtin:<slug>` ids such as `builtin:sprint`, plus published boards): list or preview their columns, limits, labels and sample cards |
+| `weave board instantiate --projectId P --templateId ID --name N [--sampleCards=false]` | create a board from a template; due dates in templates are relative to now |
 | `weave inbox [--assigned\|--claimed]` | my cards across boards |
 | `weave list stats --board B [--list L]` | per-list counts: cards, claimed, unclaimed, overdue |
 | `weave next --board B --list L [--list L2] [--claim] [--move-to L] [--ttl 15m] [--wait 60s]` | pull the next card; exit 10 if none |
@@ -52,6 +54,7 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 | `weave task add CARD "text"...` / `task check\|uncheck ID` / `task check --card C --n 2` / `task list CARD` | checklists |
 | `weave listen ...` / `weave watch ...` | event stream (see below) |
 | `weave agent run ... -- CMD` | listen + claim + run + report |
+| `weave agent prompt [--general\|--runner\|--project P\|--board B\|--board B --list L\|--work-order --board B --list L --card C] [--compact] [--no-install]` | print the copy-paste prompt that connects an agent (never contains a key; uses `$WEAVE_TOKEN`) |
 | `weave skill print\|install\|check\|targets\|uninstall` | this skill; `install` covers every detected coding agent (Claude Code, Codex, OpenCode, pi, Gemini, Cursor, ...) |
 | `weave completion bash\|zsh\|fish\|powershell` | shell completion |
 | `weave ops [tag]` / `weave schema OP` | discovery |
@@ -75,9 +78,11 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 ## `weave agent run`
 
 `weave agent run --board B --listen L [--listen L2] [--claim-move-to L] [--done-list L] [--fail-list L]
-[--ttl 15m] [--concurrency N] [--comment-output] [--no-claim] [--keep-claim] [--once] [--include-existing] -- CMD [ARGS...]`
+[--blocked-list L] [--ttl 15m] [--concurrency N] [--exec-timeout 30m] [--max-attempts N] [--respect-wip] [--outbox]
+[--comment-output] [--no-claim] [--keep-claim] [--once] [--include-existing] -- CMD [ARGS...]`
 
-Exit codes of CMD: 0 success, 11 decline (release, no comment), anything else failure.
+Exit codes of CMD: 0 success, 11 decline (release, no comment), anything else failure. With `--outbox`, 3 means blocked and
+the handler reports through files in `$WEAVE_OUT_DIR` (see agent-workflows.md).
 
 ## Exit codes
 

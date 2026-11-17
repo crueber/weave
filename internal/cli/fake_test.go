@@ -71,6 +71,12 @@ func newFake(t *testing.T) *fake {
 		map[string]any{"id": "l3", "name": "Review"}, map[string]any{"id": "l4", "name": "Needs info"},
 		map[string]any{"id": "l5", "name": "Backlog"}, map[string]any{"id": "l6", "name": "Backlog archive"},
 	}})
+	// a card that is still in Ready, open and unclaimed (what the claim preflight reads)
+	f.handleFunc("GET /api/v1/cards/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"item": map[string]any{"id": r.PathValue("id"), "boardId": "b1", "listId": "l1", "name": "Card", "isClosed": false, "claimedBy": nil}})
+	})
+	f.json("GET /api/v1/cards/{cardId}/comments", map[string]any{"items": []any{}})
 	return f
 }
 
@@ -133,3 +139,82 @@ func (l *lockedBuf) Write(p []byte) (int, error) {
 	return l.b.Write(p)
 }
 func (l *lockedBuf) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+// cardState is a tiny stateful card store: claim/move/release really move the card, so tests can
+// exercise the "where is the card now" checks. Call it after registering any custom handlers.
+type cardState struct {
+	mu    sync.Mutex
+	list  map[string]string // card -> list id
+	claim map[string]string // card -> claimant
+}
+
+func (f *fake) trackCards(initial map[string]string) *cardState {
+	cs := &cardState{list: initial, claim: map[string]string{}}
+	if cs.list == nil {
+		cs.list = map[string]string{}
+	}
+	get := func(id string) (string, string) {
+		cs.mu.Lock()
+		defer cs.mu.Unlock()
+		l := cs.list[id]
+		if l == "" {
+			l = "l1"
+		}
+		return l, cs.claim[id]
+	}
+	reply := func(w http.ResponseWriter, id string) {
+		l, c := get(id)
+		var cb any
+		if c != "" {
+			cb = c
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"item": map[string]any{"id": id, "boardId": "b1", "listId": l, "name": "Card", "isClosed": false, "claimedBy": cb}})
+	}
+	body := func(r *http.Request) map[string]any {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		return m
+	}
+	f.handleFunc("GET /api/v1/cards/{id}", func(w http.ResponseWriter, r *http.Request) { reply(w, r.PathValue("id")) })
+	f.handleFunc("POST /api/v1/cards/{id}/claim", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		cs.mu.Lock()
+		cs.claim[id] = "u1"
+		if l, _ := body(r)["listId"].(string); l != "" {
+			cs.list[id] = l
+		}
+		cs.mu.Unlock()
+		reply(w, id)
+	})
+	f.handleFunc("POST /api/v1/cards/{id}/move", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		cs.mu.Lock()
+		if l, _ := body(r)["listId"].(string); l != "" {
+			cs.list[id] = l
+		}
+		cs.mu.Unlock()
+		reply(w, id)
+	})
+	f.handleFunc("POST /api/v1/cards/{id}/release", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		cs.mu.Lock()
+		delete(cs.claim, id)
+		if l, _ := body(r)["listId"].(string); l != "" {
+			cs.list[id] = l
+		}
+		cs.mu.Unlock()
+		reply(w, id)
+	})
+	return cs
+}
+
+func (cs *cardState) listOf(id string) string {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if l := cs.list[id]; l != "" {
+		return l
+	}
+	return "l1"
+}
+func (cs *cardState) set(id, list string) { cs.mu.Lock(); cs.list[id] = list; cs.mu.Unlock() }

@@ -41,6 +41,7 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 .boards-actions{display:flex;gap:.5rem;align-items:center;flex:none;margin-left:auto}
 .boards-filterbar .view-pick{display:none}
 .boards-settings-btn .ico{display:none}
+.boards-help-btn .ico{display:inline-block;width:1.25em;height:1.25em;vertical-align:middle}
 .boards-filter input[type=search]{min-width:14rem}
 .boards-filter input,.boards-filter select,.boards-saved-save input,.boards-menu-pop input,.boards-menu-pop select{background:var(--surface,#fff);color:var(--fg,#111);border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);padding:.3rem .5rem;font:inherit}
 .boards-filter input:focus,.boards-filter select:focus{border-color:var(--accent,#4f46e5)}
@@ -268,7 +269,7 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-settings[data-active=views] #set-views,.boards-settings[data-active=filters] #set-filters,.boards-settings[data-active=sharing] #set-sharing,
 .boards-settings[data-active=profile] #set-profile,.boards-settings[data-active=appearance] #set-appearance,.boards-settings[data-active=workspace] #set-workspace,
 .boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,
-.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=danger] #set-danger{display:block}
+.boards-settings[data-active=agents] #set-agents,.boards-settings[data-active=background] #set-background,.boards-settings[data-active=managers] #set-managers,.boards-settings[data-active=fields] #set-fields,.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=danger] #set-danger{display:block}
 .bs-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-2)}
 .bs-sec-head h2{margin:0;font-size:var(--text-lg);font-weight:700;letter-spacing:-.01em}
 .bs-status{min-height:1.2em;font-size:var(--text-sm)}.bs-saved{color:var(--success);font-weight:600}
@@ -339,13 +340,11 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-new{cursor:pointer;color:var(--accent,#4f46e5);border-style:dashed}
 .boards-newdlg{padding:1rem}
 /* "Agent prompt" dialog (opened from a column menu into #modal) */
-.boards-ap{padding:1rem;max-width:46rem;min-width:min(46rem,90vw);max-height:92vh;overflow:auto}
-.boards-ap-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem}
-.boards-ap-head h2{margin:0;font-size:var(--text-lg,1.05rem)}
-.boards-ap-sub{margin:.1rem 0 0;color:var(--muted,#6b7280);font-size:var(--text-sm,.85rem)}
-.boards-ap-hint{margin:.5rem 0;color:var(--muted,#6b7280);font-size:var(--text-sm,.85rem)}
-.boards-ap-hint code{font-family:var(--font-mono)}
-.boards-ap-text{width:100%;box-sizing:border-box;height:min(64vh,34rem);font-family:var(--font-mono);font-size:var(--text-sm,.85rem);line-height:1.45;padding:.55rem .65rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius,6px);background:var(--surface-2,#f4f4f5);color:var(--fg,#111);resize:vertical}
-.boards-ap-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.6rem}
-@media(max-width:640px){.boards-col,.boards-addlist{flex-basis:84vw}.boards-ap{min-width:0;max-width:100%}}
+@media(max-width:640px){.boards-col,.boards-addlist{flex-basis:84vw}}
 .bs-head .boards-btn{white-space:nowrap}.bs-text label{font:inherit;color:inherit}
+
+/* board settings: template visibility (the group picker only shows with "A group") */
+.bs-tplvis .bs-seg span{text-transform:none}
+.bs-tplgroup{display:none}
+.bs-form:has(input[name=visibility][value=group]:checked) .bs-tplgroup{display:flex}
+.bs-tplgroup select{flex:0 1 16rem}

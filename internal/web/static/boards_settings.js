@@ -27,13 +27,13 @@
   window.addEventListener('hashchange', () => show(fromURL(), false));
   document.addEventListener('htmx:afterSettle', () => {
     absLinks();
-    root()?.querySelectorAll('.bs-saved').forEach(m => setTimeout(() => m.remove(), 2500));
+    document.querySelectorAll('.bs-saved').forEach(m => setTimeout(() => m.remove(), 2500));
   });
 
   document.addEventListener('click', e => {
     const a = e.target.closest?.('.bs-nav a[data-section]');
     if (a) { e.preventDefault(); show(a.dataset.section, true); return; }
-    const cp = e.target.closest?.('[data-copy]');
+    const cp = e.target.closest?.('[data-copy]:not([data-copy^="#"])'); // "#selector" copies are handled by static/copy.js
     if (cp) {
       const input = document.getElementById(cp.dataset.copy); input.select();
       const done = () => { const t = cp.dataset.label || (cp.dataset.label = cp.textContent); cp.textContent = 'Copied!'; setTimeout(() => cp.textContent = t, 1800); };
@@ -71,20 +71,20 @@
   }
   function pick(c, o) {
     const f = c.closest('form');
-    c.querySelector('[name=userId]').value = o.dataset.user || ''; c.querySelector('[name=groupId]').value = o.dataset.group || '';
+    c.querySelector('[name=userId]').value = o.dataset.user || ''; const g = c.querySelector('[name=groupId]'); if (g) g.value = o.dataset.group || '';
     c.querySelector('[role=combobox]').value = o.dataset.label; closeCombo(c); f.querySelector('[data-add]').disabled = false;
-    f.querySelector('select[name=role]').focus();
+    (f.querySelector('select[name=role]') || f.querySelector('[data-add]')).focus(); // user-only pickers (project managers) have no role
   }
   document.addEventListener('input', e => {
     const inp = e.target.closest?.('[data-combo] [role=combobox]'); if (!inp) return;
     const c = inp.closest('[data-combo]');
-    c.querySelector('[name=userId]').value = ''; c.querySelector('[name=groupId]').value = ''; c.closest('form').querySelector('[data-add]').disabled = true;
+    c.querySelector('[name=userId]').value = ''; const g = c.querySelector('[name=groupId]'); if (g) g.value = ''; c.closest('form').querySelector('[data-add]').disabled = true;
     const f = filter(c); if (f) f.setAttribute('aria-selected', 'true');
   });
   document.addEventListener('focusin', e => {
     const inp = e.target.closest?.('[data-combo] [role=combobox]'); if (!inp) return;
     const c = inp.closest('[data-combo]');
-    if (!c.querySelector('[name=userId]').value && !c.querySelector('[name=groupId]').value) filter(c);
+    if (!c.querySelector('[name=userId]').value && !c.querySelector('[name=groupId]')?.value) filter(c);
   });
   document.addEventListener('keydown', e => {
     const inp = e.target.closest?.('[data-combo] [role=combobox]'); if (!inp) return;

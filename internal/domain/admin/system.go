@@ -3,9 +3,11 @@ package admin
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/crueber/weave/internal/config"
@@ -78,7 +80,22 @@ func storage(e *ops.Env) StorageOut {
 
 var statTables = []string{"users", "projects", "boards", "lists", "cards", "comments", "attachments", "webhooks", "notification_services", "actions"}
 
+// humanBytes renders a size for the admin overview ("12.4 MB").
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit && exp < 4; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTP"[exp])
+}
+
 func init() {
+	web.AddFuncs(template.FuncMap{"adminBytes": humanBytes, "adminLabel": func(s string) string { return strings.ReplaceAll(s, "_", " ") }})
 	ops.Register(ops.Op{Name: "system.version", Summary: "Server version", Method: "GET", Path: "/version", Auth: ops.AuthPublic, UI: "exempt:footer"},
 		func(e *ops.Env, _ NoInput) (VersionOut, error) { return VersionOut{Version}, nil })
 

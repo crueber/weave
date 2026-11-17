@@ -108,6 +108,8 @@
     <span class="bs-btns"><label class="sr-only" for="as-exp">Expires</label><select id="as-exp" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select>
     <button type="submit" class="primary">{{if $u.HasAPIKey}}Rotate{{else}}Create{{end}}</button></span>
   </form>
+  <div class="bs-row"><span class="bs-text"><b>Connect an agent</b><small>Copy a prompt for Claude Code, Codex, Gemini or OpenCode. It uses <code>$WEAVE_TOKEN</code>, never contains your key, and the agent acts with your full role.</small></span>
+    <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=general" hx-target="#modal" hx-swap="innerHTML">About Weave</button><button type="button" hx-get="/ui/agent-prompt?scope=runner" hx-target="#modal" hx-swap="innerHTML">Runner</button></span></div>
 </section>{{end}}
 
 {{define "auth_set_sessions"}}{{template "auth_set_sessions_in" .Data}}{{end}}

@@ -82,6 +82,19 @@ The handler gets the envelope on stdin and env `WEAVE_EVENT_TYPE WEAVE_EVENT_ID 
 WEAVE_CARD_NAME WEAVE_LIST_ID WEAVE_FROM_LIST_ID WEAVE_BOARD_ID WEAVE_ACTOR_ID WEAVE_URL WEAVE_TOKEN`, so it
 can call `weave` itself. Exit 0 = success, 11 = decline (silent release), other = failure (comment + release).
 `--comment-output` posts the handler's stdout as a comment. `--once` handles one card and exits.
+Before each terminal move the runner re-reads the card: if a person moved it meanwhile it only comments and
+releases. On shutdown it gives the card back quietly. `--exec-timeout` defaults to 30m (0 = off), so a hung handler
+cannot hold a lease; `--max-attempts N` counts the "agent run failed" comments already on the card; `--respect-wip`
+does not claim-move into a list at its WIP limit; a listened column may not also be a destination.
+A card taken into `--claim-move-to` whose lease later expires is picked up again.
+
+**Token-free outbox mode (recommended for coding agents):** add `--outbox` (and `--blocked-list`). The runner
+fetches the card into a private temp dir and runs the handler with NO Weave credentials, no card text in the
+environment and an empty stdin. The handler gets only
+`WEAVE_CARD_ID WEAVE_LIST_ID WEAVE_BOARD_ID WEAVE_CARD_FILE WEAVE_BOARD_FILE WEAVE_WORKORDER_FILE WEAVE_OUT_DIR` and writes
+`$WEAVE_OUT_DIR/result` (`done|blocked|skip`), `comment.md` and optional `attachments/*`; the runner posts the comment
+(size capped, tokens redacted), uploads the attachments and moves or releases the card. Exit 3 = blocked, 11 = skip.
+`weave agent prompt --runner` prints the complete wrapper script and service unit.
 
 ## Column roles (typical wiring)
 

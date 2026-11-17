@@ -1,0 +1,41 @@
+{{/* Admin console shell shared by every /admin page (bs-* styles from boards_board.css, admin.css for the rest).
+   admin_top opens the header, section nav and the panel column; admin_bottom closes them.
+   Args to admin_top: Active (nav id), Crumb (small line above the title).  Each page renders one panel between the two. */}}
+{{define "admin_top"}}<link rel="stylesheet" href="/static/boards_board.css">
+<link rel="stylesheet" href="/static/auth_pages.css">
+<link rel="stylesheet" href="/static/admin.css">
+<div class="admin-console auth-settings">
+  <header class="bs-head">
+    <div>
+      <p class="bs-crumbs">{{.Crumb}}</p>
+      <h1>Admin console</h1>
+    </div>
+  </header>
+  <div class="bs-layout">
+    <nav class="bs-nav" aria-label="Admin sections">{{$a := .Active}}
+      <a href="/admin"{{if eq $a "overview"}} aria-current="page"{{end}}>Overview</a>
+      <a href="/admin/users"{{if eq $a "users"}} aria-current="page"{{end}}>Users</a>
+      <a href="/admin/groups"{{if eq $a "groups"}} aria-current="page"{{end}}>Groups</a>
+      <a href="/admin/agents"{{if eq $a "agents"}} aria-current="page"{{end}}>AI agents</a>
+      <a href="/admin/sso"{{if eq $a "sso"}} aria-current="page"{{end}}>Single sign-on</a>
+      <a href="/admin/config"{{if eq $a "config"}} aria-current="page"{{end}}>Configuration</a>
+      <a href="/admin/webhooks"{{if eq $a "webhooks"}} aria-current="page"{{end}}>Webhooks</a>
+    </nav>
+    <div class="bs-panels">{{end}}
+{{define "admin_bottom"}}</div>
+  </div>
+</div>
+<script src="/static/boards_settings.js" defer></script>{{end}}
+
+{{/* Error banner inside a panel. */}}
+{{define "adm_error"}}{{if .}}<div class="auth-error" role="alert">{{.}}</div>{{end}}{{end}}
+
+{{/* A "Saved" status in the panel head; Text overrides the default confirmation. */}}
+{{define "adm_status"}}<span class="bs-status" role="status" aria-live="polite">{{if .Done}}<span class="bs-saved">&#10003; {{if .Text}}{{.Text}}{{else}}Saved{{end}}</span>{{end}}</span>{{end}}
+
+{{/* Text/select/textarea/password row. Args: ID, Name, Title, Help, Type (text|password|select|textarea|number), Value, Options, Placeholder, Off, Note, Required. */}}
+{{define "adm_field"}}<div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="{{.ID}}">{{.Title}}</label></b>{{if .Help}}<small>{{.Help}}</small>{{end}}{{if .Note}}<small>{{.Note}}</small>{{end}}</span>
+  {{if eq .Type "select"}}<select id="{{.ID}}" name="{{.Name}}"{{if .Off}} disabled{{end}}>{{$v := .Value}}{{range .Options}}<option{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq .Type "textarea"}}<textarea id="{{.ID}}" name="{{.Name}}" rows="{{if .Rows}}{{.Rows}}{{else}}4{{end}}"{{if .Off}} disabled{{end}}>{{.Value}}</textarea>
+  {{else if eq .Type "password"}}<input id="{{.ID}}" type="password" name="{{.Name}}" value="" autocomplete="new-password" placeholder="{{.Placeholder}}"{{if .Required}} required{{end}}{{if .Off}} disabled{{end}}>
+  {{else}}<input id="{{.ID}}" type="text" name="{{.Name}}" value="{{.Value}}" placeholder="{{.Placeholder}}"{{if .Required}} required{{end}}{{if .Off}} disabled{{end}}>{{end}}</div>{{end}}

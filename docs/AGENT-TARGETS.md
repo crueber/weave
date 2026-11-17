@@ -77,3 +77,15 @@ Used when a tool has no verified skills dir, or on explicit request (OptIn = nev
 - Continue: no official skills docs; only project rules are written. Kilo: docs inconsistent on `~/.kilo/skills`.
 - Env overrides for OpenCode (`OPENCODE_CONFIG_DIR`) and Qwen could not be confirmed and are not honored.
 - Amp, Goose, Droid personal instruction files (`~/.config/amp/AGENTS.md`, `~/.config/goose/.goosehints`, `~/.factory`) are not targeted; their skills are.
+
+## Headless run flags used by the runner prompt
+
+`weave agent prompt --runner` prints a wrapper that runs one coding agent headless per card. Flags were taken from the vendors' documentation and, where
+installed, local `--help`, on **2026-11-17**. Re-check them with `--help` before use; the prompt says so too.
+
+| Tool | Command line used | Result | Notes | Source |
+|---|---|---|---|---|
+| Claude Code | `claude --bare -p "$(cat F)" --permission-prompts none --allowedTools "Read,Edit,Bash(git diff *),..." --output-format json` | `.result` of the JSON | `--bare` needs `ANTHROPIC_API_KEY`/`apiKeyHelper` (no OAuth) and skips CLAUDE.md, hooks, MCP; `--permission-prompts` needs 2.1.259+; errors can appear as text in `.result`, so check the exit status | https://code.claude.com/docs/en/headless |
+| Codex | `codex exec --sandbox workspace-write --skip-git-repo-check -o OUT -  < F` | `-o` file (final message) | `--full-auto` is gone; sandbox values read-only, workspace-write, danger-full-access; exit codes not documented | https://learn.chatgpt.com/docs/non-interactive-mode |
+| Gemini CLI | `gemini -p "$(cat F)" --output-format json` | `.response` | exit 0 ok, 1 error, 42 input error, 53 turn limit (treat as failure); no documented auto-approve flag; the docs say it was replaced by the Antigravity CLI on 2026-06-18 | https://geminicli.com/docs/cli/headless/ |
+| OpenCode | `opencode run "$(cat F)"` | stdout | the docs page lists only `run`; local `--help` showed `--auto` (auto-approve permissions not explicitly denied) and `--format default\|json`: **unverified**, check `opencode run --help` | https://opencode.ai/docs/cli/ |

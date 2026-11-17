@@ -84,6 +84,20 @@ Delete an agent account; its claims are released
 List AI agent accounts with their board access  
 `GET /agents` (auth: admin)
 
+### `weave agent prompt`
+
+Render the copy-paste prompt that connects an AI agent to Weave (scope general, project, board, list, runner or workorder); no key is ever included  
+`GET /agent/prompt` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--scope` | query | string | yes | general \| project \| board \| list \| runner \| workorder |
+| `--id` | query | string |  | project id (scope project), board id (board, runner: optional) or list id (list, workorder) |
+| `--cardId` | query | string |  | workorder only: the card (must be on the list's board) |
+| `--cardFile` | query | string |  | workorder only: path of the card JSON file the runner wrote (single line, max 512 chars) |
+| `--install` | query | bool |  | include the install steps for the CLI and skill (default true) |
+| `--compact` | query | bool |  | shorter etiquette section |
+
 ### `weave agent rotateKey`
 
 Issue a new API key for an agent (the old key stops working); returned once  
@@ -356,14 +370,16 @@ Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (p
 
 ### `weave board instantiate`
 
-Create a board from a template in a project  
+Create a board in a project from a built-in or published template (project manager)  
 `POST /projects/{projectId}/boards/from-template` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--projectId` | path | string | yes | target project |
-| `--templateId` | body | string | yes | template board id |
+| `--templateId` | body | string | yes | a built-in template id (builtin:<slug>, see board.template.list) or the id of a published template board |
 | `--name` | body | string | yes | new board name |
+| `--sampleCards` | body | bool |  | include the template's sample cards (default true). Cards carry their task lists and custom-field values; due dates are relative to now |
+| `--defaultView` | body | string |  | override the template's default view: kanban\|grid\|list\|calendar\|map |
 
 ### `weave board list`
 
@@ -457,24 +473,37 @@ Enable/disable anonymous read-only access (and rotate the public token)
 | `--isPublic` | body | bool |  | enable anonymous read-only access |
 | `--rotate` | body | bool |  | generate a fresh public token |
 
+### `weave board template.get`
+
+Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields  
+`GET /board-templates/{templateId}` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--templateId` | path | string | yes | builtin:<slug> or a published board id |
+
 ### `weave board template.list`
 
-List board templates visible to the caller  
+List the board templates the caller may use: built-in ones (with category and summary) and published boards, searchable with q and category  
 `GET /board-templates` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
-| `--projectId` | query | string |  | limit to a project (optional) |
+| `--projectId` | query | string |  | limit published templates to boards of this project (optional) |
+| `--q` | query | string |  | search words matched against name, summary, tags, category, project and publisher |
+| `--category` | query | string |  | basics\|software\|product\|sales-marketing\|people\|personal\|planning, or published for user-published templates only |
 
 ### `weave board template.publish`
 
-Publish/unpublish a board as a template  
+Publish/unpublish a board as a template and choose who may use it (board manager). Due dates of its cards become offsets from the publish moment; unpublish and publish again to refresh them  
 `POST /boards/{id}/template` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
-| `--isTemplate` | body | bool |  | mark the board as a reusable template |
+| `--isTemplate` | body | bool |  | mark the board as a reusable template (false unpublishes it) |
+| `--visibility` | body | string |  | who may use it: private (you and people with access to the board; the default for a new template) \| group \| public (every signed-in user). Omitted on an already published template keeps its visibility |
+| `--groupId` | body | string |  | the user group, when visibility is group |
 
 ### `weave board tree`
 
@@ -1069,6 +1098,7 @@ Update admin configuration (branding, SMTP, OIDC, registration, terms)
 | `--terms.version` | body | string |  | Bump to force re-acceptance |
 | `--session.hours` | body | string |  | Session lifetime in hours (default 24); when it ends the user is sent back through the identity provider |
 | `--session.maxIdleMinutes` | body | string |  | Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit |
+| `--templates.hidden` | body | string |  | Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all |
 
 ## customfield
 

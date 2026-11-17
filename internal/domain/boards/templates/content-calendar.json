@@ -1,0 +1,142 @@
+{
+ "id": "builtin:content-calendar",
+ "version": 1,
+ "category": "sales-marketing",
+ "name": "Content calendar",
+ "summary": "Plan posts, emails and videos from idea to published; the calendar view shows what goes out when.",
+ "audience": "Marketing and content teams",
+ "tags": [
+  "content",
+  "marketing",
+  "editorial",
+  "social",
+  "blog",
+  "calendar"
+ ],
+ "defaultView": "calendar",
+ "order": 5,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Content calendar",
+   "defaultView": "calendar",
+   "color": "pink",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Ideas",
+    "type": "active",
+    "position": 65536,
+    "description": "Topics worth considering. Add a one-line angle and who it is for."
+   },
+   {
+    "id": "l2",
+    "name": "Drafting",
+    "type": "active",
+    "position": 131072,
+    "description": "Being written or produced. Set a due date to see it on the calendar view."
+   },
+   {
+    "id": "l3",
+    "name": "Review",
+    "type": "active",
+    "position": 196608,
+    "description": "Ready for an editor: check facts, tone, links and images."
+   },
+   {
+    "id": "l4",
+    "name": "Scheduled",
+    "type": "active",
+    "position": 262144,
+    "description": "Approved and queued with a publish date."
+   },
+   {
+    "id": "l5",
+    "name": "Published",
+    "type": "active",
+    "position": 327680,
+    "color": "green",
+    "description": "Live. Add the final link to the card and note how it performed."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Blog",
+    "color": "blue"
+   },
+   {
+    "id": "b2",
+    "name": "Social",
+    "color": "pink"
+   },
+   {
+    "id": "b3",
+    "name": "Email",
+    "color": "amber"
+   },
+   {
+    "id": "b4",
+    "name": "Video",
+    "color": "violet"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l2",
+    "name": "Launch announcement post",
+    "type": "project",
+    "position": 65536,
+    "description": "Due a week from creating the board; change the date as you plan.",
+    "labelIds": [
+     "b1"
+    ],
+    "taskLists": [
+     {
+      "name": "Publish checklist",
+      "tasks": [
+       {
+        "name": "Headline and summary agreed",
+        "isCompleted": false
+       },
+       {
+        "name": "Images have alt text",
+        "isCompleted": false
+       },
+       {
+        "name": "Links checked",
+        "isCompleted": false
+       },
+       {
+        "name": "Preview on mobile",
+        "isCompleted": false
+       },
+       {
+        "name": "Schedule and share on social",
+        "isCompleted": false
+       }
+      ]
+     }
+    ],
+    "dueOffsetDays": 7
+   },
+   {
+    "id": "c2",
+    "listId": "l1",
+    "name": "Behind-the-scenes video",
+    "type": "project",
+    "position": 131072,
+    "description": "Short, honest look at how the team works.",
+    "labelIds": [
+     "b4"
+    ]
+   }
+  ]
+ }
+}

@@ -42,16 +42,18 @@ internal/domain/     auth  projects  boards  cards  cardextras  notify  admin   
 internal/events      durable event envelopes (actions table), CardSnap       internal/realtime  in-process hub, listener registry
 internal/server      mux wiring, security headers, CSP, CSRF, rate limits, SSE (`sse_events.go`), HSTS, authz sweep test
 internal/web         HTMX plumbing (web.Route/RoutePublic, templates/, static/)   internal/cli  schema-driven CLI (never imports internal/ops)
+internal/agentprompt  agent prompt templates (leaf, golden tests); op `agent.prompt` lives in boards/agentprompt_op.go; `weave agent prompt`
 internal/skillgen    hand-written skill sources (src/)   skills/  GENERATED skill + compact instructions (embedded in the CLI)
 internal/imgguard    image decode guard   internal/relsign  release signing   internal/i18n  en.json + template func t
 internal/testutil    Env(t, principal) with a temp SQLite DB
 scripts/             e2e.sh  ui-smoke.sh  csp-smoke.mjs  check-contrast.py  release-local.sh  install.sh/.ps1  update-pins.sh
+scripts/demo/        seed.sh + seed.mjs (fictional data, throwaway instance), record.mjs (README demo), encode.py (webm/webp), shots.mjs (docs/screenshots); see the header comments
 docs/                DESIGN.md (contract)  DESIGN-SYSTEM.md (tokens)  CLI.md  AGENTS.md (agent user guide)  WEBHOOKS.md  MAINTENANCE.md  FEATURES.md  AGENT-TARGETS.md (coding-agent paths + sources)
 .forgejo/workflows/ci.yml   runner/  (Forgejo runner compose + config)
 ```
 
 Domain ownership and **migration number ranges** are in `docs/DESIGN.md`. Existing migrations: `0001_core` (never edit),
-`0100/0101` auth, `0200` projects, `0301/0302/0303` boards (colours, column descriptions, column WIP limit), `0400` cards, `0500` cardextras, `0600` notify, `0800` agents/events,
+`0100/0101` auth, `0200` projects, `0301/0302/0303/0304` boards (colours, column descriptions, column WIP limit, template visibility), `0400` cards, `0500` cardextras, `0600` notify, `0800` agents/events,
 `0900` api-key expiry, `0950` attachment index. Add new files in the owning domain's range (or the next free number); migrations
 run in filename order, once, inside one transaction. **Never edit an applied migration**; add a new one.
 

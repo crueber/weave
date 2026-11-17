@@ -1,0 +1,152 @@
+{
+ "id": "builtin:sprint",
+ "version": 1,
+ "category": "software",
+ "name": "Sprint (Scrum)",
+ "summary": "Backlog, sprint, in progress, review and done, with limits and story cards.",
+ "audience": "Software teams working in sprints",
+ "tags": [
+  "scrum",
+  "agile",
+  "sprint",
+  "stories",
+  "software"
+ ],
+ "defaultView": "kanban",
+ "order": 2,
+ "includesSampleCards": true,
+ "sampleCardsDefault": true,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Sprint board",
+   "defaultView": "kanban",
+   "color": "indigo",
+   "cardColorMode": "pill",
+   "defaultCardType": "story"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Backlog",
+    "type": "active",
+    "position": 65536,
+    "description": "Refined stories waiting for a sprint, most valuable first. Each should have a clear outcome and acceptance criteria before it moves on."
+   },
+   {
+    "id": "l2",
+    "name": "Sprint",
+    "type": "active",
+    "position": 131072,
+    "description": "The commitment for this sprint. Nothing new is added mid-sprint without taking something out."
+   },
+   {
+    "id": "l3",
+    "name": "In progress",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "Being worked on now, at most 4 cards. Agents: claim one card from Sprint, move it here, and tick tasks off as you go.",
+    "wipLimit": 4
+   },
+   {
+    "id": "l4",
+    "name": "Review",
+    "type": "active",
+    "position": 262144,
+    "color": "violet",
+    "description": "Finished, waiting for review or testing. Keep this short: reviewing beats starting.",
+    "wipLimit": 3
+   },
+   {
+    "id": "l5",
+    "name": "Done",
+    "type": "active",
+    "position": 327680,
+    "color": "green",
+    "description": "Meets the acceptance criteria and the team's definition of done."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Bug",
+    "color": "crimson"
+   },
+   {
+    "id": "b2",
+    "name": "Feature",
+    "color": "blue"
+   },
+   {
+    "id": "b3",
+    "name": "Chore",
+    "color": "slate"
+   },
+   {
+    "id": "b4",
+    "name": "Spike",
+    "color": "violet"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l2",
+    "name": "As a user, I can reset my password",
+    "type": "story",
+    "position": 65536,
+    "description": "**As a** registered user\n**I want** to reset my password by e-mail\n**So that** I can get back in when I forget it.",
+    "labelIds": [
+     "b2"
+    ],
+    "taskLists": [
+     {
+      "name": "Acceptance criteria",
+      "tasks": [
+       {
+        "name": "A reset link is e-mailed within a minute",
+        "isCompleted": false
+       },
+       {
+        "name": "The link works once and expires after an hour",
+        "isCompleted": false
+       },
+       {
+        "name": "A weak new password is rejected",
+        "isCompleted": false
+       },
+       {
+        "name": "Other sessions are signed out after a reset",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "c2",
+    "listId": "l1",
+    "name": "Spike: compare two search libraries",
+    "type": "project",
+    "position": 131072,
+    "description": "Time-boxed investigation. Outcome: a short written recommendation, not production code.",
+    "labelIds": [
+     "b4"
+    ]
+   },
+   {
+    "id": "c3",
+    "listId": "l1",
+    "name": "Upgrade the build tooling",
+    "type": "project",
+    "position": 196608,
+    "description": "Keep the toolchain current so upgrades stay small.",
+    "labelIds": [
+     "b3"
+    ]
+   }
+  ]
+ }
+}

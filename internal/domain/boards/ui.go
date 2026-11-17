@@ -235,28 +235,16 @@ func registerUI() {
 		}
 		return c.RenderBlock("boards_list.html", "page", map[string]any{"ProjectID": pid, "Boards": bs, "CanCreate": authz.ProjectLevel(c.Env, pid) >= authz.Manage})
 	})
-	web.Route("GET /ui/projects/{projectId}/boards/new", func(c *web.Ctx) error {
-		pid := c.R.PathValue("projectId")
-		if err := authz.RequireProject(c.Env, pid, authz.Manage); err != nil {
-			return err
-		}
-		ts, err := ops.Typed[[]Board](c.Env, "board.template.list", TemplateListIn{})
-		if err != nil {
-			return err
-		}
-		return c.RenderBlock("boards_list.html", "boards_new", map[string]any{"ProjectID": pid, "Templates": ts})
-	})
-	web.Route(ops.Get("board.template.list").UI, func(c *web.Ctx) error {
-		ts, err := ops.Typed[[]Board](c.Env, "board.template.list", TemplateListIn{ProjectID: c.R.URL.Query().Get("projectId")})
-		if err != nil {
-			return err
-		}
-		return c.RenderBlock("boards_list.html", "boards_templates", map[string]any{"Templates": ts})
-	})
+	registerGalleryUI()
 	gotoBoard := func(c *web.Ctx, out any) error { c.Redirect("/boards/" + out.(Board).ID); return nil }
 	mut("board.create", gotoBoard)
 	mut("board.import", gotoBoard)
-	mut("board.instantiate", gotoBoard)
+	mutPre("board.instantiate", func(r *http.Request) {
+		// the gallery sends the "include sample cards" choice as a checkbox plus a hidden false; an empty view means "the template's own"
+		if r.Form.Get("defaultView") == "" {
+			r.Form.Del("defaultView")
+		}
+	}, gotoBoard)
 	mut("board.update", func(c *web.Ctx, out any) error {
 		// The settings page has several autosaving forms that PATCH the board; each
 		// names the section to re-render in _section.
@@ -306,27 +294,6 @@ func registerUI() {
 			return err
 		}
 		return c.RenderBlock("boards_board.html", "boards_list_options", ls)
-	})
-	// "Agent prompt": the copy-paste brief for one column, shown in the shared modal.
-	web.Route("GET /ui/boards/{boardId}/lists/{listId}/agent-prompt", func(c *web.Ctx) error {
-		boardID, listID := c.R.PathValue("boardId"), c.R.PathValue("listId")
-		if err := authz.RequireBoard(c.Env, boardID, authz.Edit); err != nil {
-			return err
-		}
-		b, err := GetBoard(c.R.Context(), c.Env.DB, boardID)
-		if err != nil {
-			return err
-		}
-		l, err := GetList(c.R.Context(), c.Env.DB, listID)
-		if err != nil || l.BoardID != boardID {
-			return ops.NotFound("list")
-		}
-		lists, err := listsOf(c.Env, boardID, true)
-		if err != nil {
-			return err
-		}
-		return c.RenderBlock("boards_board.html", "boards_agent_prompt", AgentPromptData{
-			Board: b, List: l, Prompt: AgentPrompt(agentBaseURL(c.Env), agentInstallBase(c.Env), b, l, lists)})
 	})
 	toMembers := func(c *web.Ctx, out any) error { return renderSection(c, out.(Member).BoardID, "boards_set_members") }
 	mutPre("board.member.add", normalizeRole, toMembers)
@@ -404,13 +371,6 @@ func renderProjectLabels(c *web.Ctx, projectID string) error {
 	return c.RenderBlock("boards_list.html", "boards_projlabels", map[string]any{"ProjectID": projectID, "Labels": ls, "Groups": gs, "CanEdit": authz.ProjectLevel(c.Env, projectID) >= authz.Manage})
 }
 
-// AgentPromptData feeds the "Agent prompt" dialog opened from a column's menu.
-type AgentPromptData struct {
-	Board  Board
-	List   List
-	Prompt string
-}
-
 // SavedData feeds the saved-filter dropdown fragment.
 type SavedData struct {
 	BoardID string
@@ -439,6 +399,7 @@ type SettingsData struct {
 	Members          []Member
 	Users            []UserOpt
 	Groups           []UserOpt
+	AllGroups        []UserOpt // every user group, for the template visibility picker
 	Labels           []Label
 	LabelGroups      []LabelGroup
 	Saved            []SavedFilter
@@ -450,6 +411,15 @@ type SettingsData struct {
 	Active           string // section shown first (?section=)
 	Done             bool   // render the "Saved" confirmation
 	Sections         []SettingsSection
+	AgentCols        []AgentCol // "Agents" section: one row per column with its live listeners
+	IsAdmin          bool
+}
+
+// AgentCol is one column row of the board settings "Agents" section.
+type AgentCol struct {
+	List      List
+	Name      string
+	Listeners []ListenerOut
 }
 
 // LabelRow is a label with its neighbours, for the keyboard move up/down buttons.
@@ -483,9 +453,21 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 		sd.LabelRows = append(sd.LabelRows, r)
 	}
 	sd.Sections = []SettingsSection{{"general", "General"}, {"members", "Members & access"}, {"labels", "Labels"}, {"views", "Views & cards"}, {"filters", "Filters"},
-		{"sharing", "Sharing & public link"}, {"templates", "Templates & export"}}
+		{"sharing", "Sharing & public link"}, {"templates", "Templates & export"}, {"agents", "Agents"}}
 	if sd.CanManage {
 		sd.Sections = append(sd.Sections, SettingsSection{"notifications", "Notifications"}, SettingsSection{"danger", "Danger zone"})
+	}
+	sd.IsAdmin = c.Env.User != nil && c.Env.User.Role == "admin"
+	if ls, err := listsOf(c.Env, boardID, true); err == nil {
+		for _, l := range ls {
+			ac := AgentCol{List: l, Name: listName(l)}
+			if c.Env.Hub != nil {
+				for _, x := range c.Env.Hub.Listeners.ForList(l.ID) {
+					ac.Listeners = append(ac.Listeners, ListenerOut{UserID: x.UserID, Name: x.Name, IsAgent: x.IsAgent, Label: x.Label, Since: x.Since})
+				}
+			}
+			sd.AgentCols = append(sd.AgentCols, ac)
+		}
 	}
 	sd.Active = "general"
 	if c.R != nil {
@@ -524,6 +506,7 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 			for rows.Next() {
 				var g UserOpt
 				_ = rows.Scan(&g.ID, &g.Name)
+				sd.AllGroups = append(sd.AllGroups, g)
 				if !in[g.ID] {
 					sd.Groups = append(sd.Groups, g)
 				}

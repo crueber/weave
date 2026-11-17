@@ -1,0 +1,143 @@
+{
+ "id": "builtin:hiring-pipeline",
+ "version": 1,
+ "category": "people",
+ "name": "Hiring pipeline",
+ "summary": "Track candidates from application to offer, one card per person.",
+ "audience": "Hiring managers and recruiters",
+ "tags": [
+  "hiring",
+  "recruiting",
+  "candidates",
+  "interview",
+  "hr"
+ ],
+ "defaultView": "kanban",
+ "order": 6,
+ "includesSampleCards": true,
+ "sampleCardsDefault": false,
+ "board": {
+  "format": "weave-board",
+  "version": 1,
+  "board": {
+   "name": "Hiring pipeline",
+   "defaultView": "kanban",
+   "color": "violet",
+   "cardColorMode": "pill"
+  },
+  "lists": [
+   {
+    "id": "l1",
+    "name": "Applied",
+    "type": "active",
+    "position": 65536,
+    "description": "New applications. Respond to every candidate, even with a polite no."
+   },
+   {
+    "id": "l2",
+    "name": "Screen",
+    "type": "active",
+    "position": 131072,
+    "description": "A short call or review of their work to check the basics."
+   },
+   {
+    "id": "l3",
+    "name": "Interview",
+    "type": "active",
+    "position": 196608,
+    "color": "blue",
+    "description": "In the interview loop, at most 5 candidates so each gets a fast, thoughtful process.",
+    "wipLimit": 5
+   },
+   {
+    "id": "l4",
+    "name": "Offer",
+    "type": "active",
+    "position": 262144,
+    "description": "Offer being prepared, made or negotiated."
+   },
+   {
+    "id": "l5",
+    "name": "Hired",
+    "type": "closed",
+    "position": 327680,
+    "color": "green",
+    "description": "Accepted. Start onboarding."
+   },
+   {
+    "id": "l6",
+    "name": "Declined",
+    "type": "closed",
+    "position": 393216,
+    "color": "slate",
+    "description": "Not moving forward, either side. Note the reason for future reference."
+   }
+  ],
+  "labels": [
+   {
+    "id": "b1",
+    "name": "Engineering",
+    "color": "indigo"
+   },
+   {
+    "id": "b2",
+    "name": "Design",
+    "color": "pink"
+   },
+   {
+    "id": "b3",
+    "name": "Sales",
+    "color": "amber"
+   },
+   {
+    "id": "b4",
+    "name": "Operations",
+    "color": "teal"
+   }
+  ],
+  "cards": [
+   {
+    "id": "c1",
+    "listId": "l3",
+    "name": "Alex Example",
+    "type": "project",
+    "position": 65536,
+    "description": "Use one card per candidate and keep notes private to the hiring team.",
+    "labelIds": [
+     "b1"
+    ],
+    "taskLists": [
+     {
+      "name": "Candidate",
+      "tasks": [
+       {
+        "name": "Review resume and portfolio",
+        "isCompleted": false
+       },
+       {
+        "name": "Phone screen",
+        "isCompleted": false
+       },
+       {
+        "name": "Technical interview",
+        "isCompleted": false
+       },
+       {
+        "name": "Culture conversation",
+        "isCompleted": false
+       },
+       {
+        "name": "Check references",
+        "isCompleted": false
+       },
+       {
+        "name": "Decision and feedback sent",
+        "isCompleted": false
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}
