@@ -11,14 +11,15 @@
 :root[data-theme="dark"]{--tint-board:6%;--tint-list:6%;--tint-fill:24%}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--tint-board:6%;--tint-list:6%;--tint-fill:24%}}
 
-/* ---- board colour: tinted canvas (full-bleed inside <main>) + a 4px accent bar under the header ---- */
+/* ---- board colour: tinted canvas (full-bleed inside <main>) + a 4px accent bar under the filter row (the text header on the public page) ---- */
 .boards-shell[data-board-color]{
   background:color-mix(in oklab,var(--board-color) var(--tint-board),var(--bg));
-  margin:calc(-1*var(--space-5)) calc(-1*var(--space-4)) 0;padding:var(--space-4) var(--space-4) var(--space-5);
+  margin:calc(-1*var(--shell-pt,var(--space-5))) calc(-1*var(--space-4)) 0;padding:var(--shell-pt,var(--space-4)) var(--space-4) var(--space-5);
   min-height:calc(100vh - var(--topbar-h));
 }
-@media(max-width:640px){.boards-shell[data-board-color]{margin:calc(-1*var(--space-4)) calc(-1*var(--space-3)) 0;padding:var(--space-3)}}
-.boards-shell[data-board-color] .boards-head{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
+@media(max-width:640px){.boards-shell[data-board-color]{margin:calc(-1*var(--shell-pt,var(--space-4))) calc(-1*var(--space-3)) 0;padding:var(--shell-pt,var(--space-3)) var(--space-3) var(--space-3)}}
+.boards-shell:not(.boards-public)[data-board-color] .boards-filterbar{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
+.boards-public[data-board-color] .boards-head{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
 
 /* ---- column colour: full-colour 3px top bar always; a faint tint of the body in PILL mode only ----
    In FILL mode (data-card-mode="fill") the column body stays neutral: a filled card inside a tinted column would mix two

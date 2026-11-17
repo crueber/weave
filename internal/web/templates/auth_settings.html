@@ -1,61 +1,128 @@
 {{define "title"}}Settings - Weave{{end}}
-{{define "page"}}
+{{define "page"}}{{template "auth_settings_in" .Data}}{{end}}
+
+{{/* Failure banner inside a section (user settings only; boards report errors elsewhere). */}}
+{{define "as_error"}}{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}{{end}}
+
+{{/* Segmented radio group. Args: Label, Name, Current, Options. Saves on change like every other control here. */}}
+{{define "as_seg"}}<div class="bs-row bs-row-stack"><span class="bs-text"><b id="as-{{.Name}}-l">{{.Label}}</b><small>{{.Help}}</small></span>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="as-{{.Name}}-l">{{$cur := .Current}}{{$n := .Name}}{{range .Options}}<label><input type="radio" name="{{$n}}" value="{{.}}"{{if eq . $cur}} checked{{end}}><span>{{.}}</span></label>{{end}}</div></div>{{end}}
+
+{{define "auth_settings_in"}}{{$u := .User}}<link rel="stylesheet" href="/static/boards_board.css">
 <link rel="stylesheet" href="/static/auth_pages.css">
-<script src="/static/auth_presence.js" defer></script>
-<div class="auth-page"><h1>Settings</h1>
-<div id="settings-body">{{template "settings-body" .}}</div></div>
-{{end}}
-
-{{define "settings-body"}}{{with .Data}}{{$u := .User}}
-{{if .Flash}}<div class="auth-flash" role="status">{{.Flash}}</div>{{end}}
-{{if .Error}}<div class="auth-error" role="alert">{{.Error}}</div>{{end}}
-
-<section class="card auth-sec"><h2>Profile</h2>
-  <div class="auth-avatar-row">
-    {{if $u.AvatarURL}}<img class="avatar" src="{{$u.AvatarURL}}" alt="" width="64" height="64">{{else}}<span class="avatar avatar-ph">{{authInitial $u.Name}}</span>{{end}}
-    <form hx-post="/ui/settings/avatar" hx-encoding="multipart/form-data" hx-target="#settings-body" method="post" action="/ui/settings/avatar" enctype="multipart/form-data">
-      <input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required><button type="submit">Upload avatar</button></form>
-    {{if $u.AvatarURL}}<form hx-post="/ui/settings/avatar/delete" hx-target="#settings-body" method="post" action="/ui/settings/avatar/delete"><button type="submit">Remove</button></form>{{end}}
+<div class="boards-settings auth-settings" data-active="{{.Active}}">
+  <header class="bs-head">
+    <div>
+      <p class="bs-crumbs">{{$u.Name}}{{if $u.Username}} (@{{deref $u.Username}}){{end}} &middot; {{$u.Email}}</p>
+      <h1>Settings</h1>
+    </div>
+  </header>
+  <div class="bs-layout">
+    <nav class="bs-nav" aria-label="Settings sections">
+      {{range .Sections}}<a href="?section={{.ID}}#{{.ID}}" data-section="{{.ID}}"{{if eq .ID $.Active}} aria-current="true"{{end}}>{{.Title}}</a>{{end}}
+    </nav>
+    <div class="bs-panels">
+      {{template "auth_set_profile_in" .}}
+      {{template "auth_set_appearance_in" .}}
+      {{template "auth_set_workspace_in" .}}
+      {{template "auth_set_apikey_in" .}}
+      {{template "auth_set_sessions_in" .}}
+    </div>
   </div>
-  <form hx-post="/ui/settings/profile" hx-target="#settings-body" method="post" action="/ui/settings/profile" class="auth-form">
-    <p class="muted"><strong>{{$u.Name}}</strong>{{if $u.Username}} (@{{deref $u.Username}}){{end}} &middot; {{$u.Email}}</p>
-    <label>Phone <input name="phone" value="{{deref $u.Phone}}"></label>
-    <label>Organization <input name="organization" value="{{deref $u.Organization}}"></label>
-    <button class="primary" type="submit">Save profile</button>
+</div>
+<script src="/static/boards_settings.js" defer></script>
+<script src="/static/auth_presence.js" defer></script>{{end}}
+
+{{define "auth_set_profile"}}{{template "auth_set_profile_in" .Data}}{{end}}
+{{define "auth_set_profile_in"}}{{$u := .User}}<section id="set-profile" class="boards-sec bs-panel" data-panel="profile" aria-labelledby="set-profile-h">
+  <div class="bs-sec-head"><h2 id="set-profile-h">Profile</h2>{{template "bs_status" .}}</div>
+  {{template "as_error" .}}
+  <div class="bs-row bs-row-avatar">
+    {{if $u.AvatarURL}}<img class="avatar as-avatar" src="{{$u.AvatarURL}}" alt="" width="56" height="56">{{else}}<span class="avatar avatar-ph as-avatar" aria-hidden="true">{{authInitial $u.Name}}</span>{{end}}
+    <span class="bs-text"><b>{{$u.Name}}</b><small>{{$u.Email}}</small></span>
+    <span class="bs-btns">
+      <form hx-post="/ui/settings/avatar" hx-trigger="change" hx-encoding="multipart/form-data" hx-target="#set-profile" hx-swap="outerHTML" method="post" action="/ui/settings/avatar" enctype="multipart/form-data">
+        <label class="boards-btn as-file">{{if $u.AvatarURL}}Change photo{{else}}Upload photo{{end}}<input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required></label></form>
+      {{if $u.AvatarURL}}<form hx-post="/ui/settings/avatar/delete" hx-target="#set-profile" hx-swap="outerHTML" method="post" action="/ui/settings/avatar/delete"><button type="submit">Remove</button></form>{{end}}
+    </span>
+  </div>
+  <form hx-post="/ui/settings/profile" hx-trigger="change" hx-target="#set-profile" hx-swap="outerHTML" method="post" action="/ui/settings/profile" class="bs-form">
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-phone">Phone</label></b><small>Optional. Shown to people you share boards with.</small></span>
+      <input id="as-phone" name="phone" value="{{deref $u.Phone}}" autocomplete="tel"></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-org">Organization</label></b><small>Optional.</small></span>
+      <input id="as-org" name="organization" value="{{deref $u.Organization}}" autocomplete="organization"></div>
+    <div class="bs-row"><span class="bs-text"><b>Role</b><small>Name, email and role come from your identity provider (OIDC groups) and refresh when you sign in.</small></span><span class="bs-value"><span class="boards-badge">{{$u.Role}}</span></span></div>
   </form>
-  <p class="muted">Role: <strong>{{$u.Role}}</strong>. Name, email and role are managed by your identity provider (OIDC groups) and refresh when you sign in.</p>
-</section>
+  <p class="bs-hint">Changes save automatically.</p>
+</section>{{end}}
 
-<section class="card auth-sec"><h2>Preferences</h2>
-  <form hx-post="/ui/settings/preferences" hx-target="#settings-body" method="post" action="/ui/settings/preferences" class="auth-form">
-    <label>Language <input name="language" value="{{deref $u.Language}}" placeholder="en"></label>
-    <label>Theme <select name="theme">{{range $o := .Themes}}<option value="{{$o}}" {{if eq (deref $u.Theme) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label>Card density <select name="cardDensity">{{range $o := .Densities}}<option value="{{$o}}" {{if eq (deref $u.CardDensity) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label>Colour-blind mode <select name="colourBlindMode">{{range $o := .ColourModes}}<option value="{{$o}}" {{if eq (deref $u.ColourBlindMode) $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label>Auto-logout after idle minutes (0 = never) <input type="number" min="0" name="autoLogoutMinutes" value="{{if $u.AutoLogoutMinutes}}{{$u.AutoLogoutMinutes}}{{else}}0{{end}}"></label>
-    <label>Editor mode <select name="defaultEditorMode">{{range $o := .Editors}}<option value="{{$o}}" {{if eq $u.DefaultEditorMode $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label>Home view <select name="defaultHomeView">{{range $o := .HomeViews}}<option value="{{$o}}" {{if eq $u.DefaultHomeView $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label>Project order <select name="defaultProjectsOrder">{{range $o := .Orders}}<option value="{{$o}}" {{if eq $u.DefaultProjectsOrder $o}}selected{{end}}>{{$o}}</option>{{end}}</select></label>
-    <label class="inline"><input type="checkbox" name="subscribeOwnCards" value="true" {{if $u.SubscribeOwnCards}}checked{{end}}><input type="hidden" name="subscribeOwnCards" value="false"> Subscribe to cards I create</label>
-    <label class="inline"><input type="checkbox" name="subscribeToCardWhenCommenting" value="true" {{if $u.SubscribeToCardWhenCommenting}}checked{{end}}><input type="hidden" name="subscribeToCardWhenCommenting" value="false"> Subscribe to cards when I comment</label>
-    <label class="inline"><input type="checkbox" name="turnOffRecentCardHighlighting" value="true" {{if $u.TurnOffRecentCardHighlighting}}checked{{end}}><input type="hidden" name="turnOffRecentCardHighlighting" value="false"> Turn off recent-card highlighting</label>
-    <label class="inline"><input type="checkbox" name="enableFavoritesByDefault" value="true" {{if $u.EnableFavoritesByDefault}}checked{{end}}><input type="hidden" name="enableFavoritesByDefault" value="false"> Favourite new projects by default</label>
-    <button class="primary" type="submit">Save preferences</button>
+{{define "auth_set_appearance"}}{{template "auth_set_appearance_in" .Data}}{{end}}
+{{define "auth_set_appearance_in"}}{{$u := .User}}<section id="set-appearance" class="boards-sec bs-panel" data-panel="appearance" aria-labelledby="set-appearance-h">
+  <div class="bs-sec-head"><h2 id="set-appearance-h">Appearance</h2>{{template "bs_status" .}}</div>
+  {{template "as_error" .}}
+  <form hx-post="/ui/settings/appearance" hx-trigger="change" hx-target="#set-appearance" hx-swap="outerHTML" method="post" action="/ui/settings/appearance" class="bs-form">
+    {{template "as_seg" dict "Label" "Theme" "Help" "Follow your device, or always use light or dark." "Name" "theme" "Current" (or (deref $u.Theme) "auto") "Options" .Themes}}
+    {{template "as_seg" dict "Label" "Card density" "Help" "How much room cards take on the board." "Name" "cardDensity" "Current" (or (deref $u.CardDensity) "comfortable") "Options" .Densities}}
+    {{template "as_seg" dict "Label" "Colour-blind mode" "Help" "Adjusts label and status colours so they stay distinguishable." "Name" "colourBlindMode" "Current" (or (deref $u.ColourBlindMode) "none") "Options" .ColourModes}}
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-lang">Language</label></b><small>A locale code such as <code>en</code>.</small></span>
+      <input id="as-lang" name="language" value="{{deref $u.Language}}" placeholder="en"></div>
   </form>
-</section>
+  <p class="bs-hint">Changes save automatically.</p>
+</section>{{end}}
 
-<section class="card auth-sec"><h2>API key</h2>
-  {{if .NewAPIKey}}<div class="auth-flash">Copy your new key now, it will not be shown again:<br><code class="auth-secret">{{.NewAPIKey}}</code></div>{{end}}
-  <p class="muted">{{if $u.HasAPIKey}}Active key <code>{{$u.APIKeyPrefix}}...</code>. Send it as <code>X-API-Key</code> or <code>Authorization: Bearer</code>.{{if $u.APIKeyExpired}} <span class="badge badge-warn">expired {{deref $u.APIKeyExpiresAt}}</span> It no longer works; create a new one.{{else if $u.APIKeyExpiresAt}} Expires {{deref $u.APIKeyExpiresAt}}.{{end}}{{else}}No API key yet.{{end}}</p>
-  <p class="muted">For the CLI or an agent: <code>weave config set url {{.BaseURL}}</code> then <code>weave config set token &lt;key&gt;</code> (or set <code>WEAVE_URL</code> / <code>WEAVE_TOKEN</code>). The key acts with your role.</p>
-  <form class="auth-inline" hx-post="/ui/settings/apikey" hx-target="#settings-body" method="post" action="/ui/settings/apikey"><label class="inline">Expires <select name="expiresInDays"><option value="0" selected>never</option><option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in 365 days</option></select></label> <button type="submit">{{if $u.HasAPIKey}}Rotate key{{else}}Create key{{end}}</button></form>
-  {{if $u.HasAPIKey}}<form class="auth-inline" hx-post="/ui/settings/apikey/revoke" hx-target="#settings-body" method="post" action="/ui/settings/apikey/revoke"><button type="submit">Revoke</button></form>{{end}}
-</section>
+{{define "auth_set_workspace"}}{{template "auth_set_workspace_in" .Data}}{{end}}
+{{define "auth_set_workspace_in"}}{{$u := .User}}<section id="set-workspace" class="boards-sec bs-panel" data-panel="workspace" aria-labelledby="set-workspace-h">
+  <div class="bs-sec-head"><h2 id="set-workspace-h">Workspace</h2>{{template "bs_status" .}}</div>
+  {{template "as_error" .}}
+  <form hx-post="/ui/settings/preferences" hx-trigger="change" hx-target="#set-workspace" hx-swap="outerHTML" method="post" action="/ui/settings/preferences" class="bs-form">
+    {{template "as_seg" dict "Label" "Editor mode" "Help" "How descriptions and comments are written." "Name" "defaultEditorMode" "Current" $u.DefaultEditorMode "Options" .Editors}}
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-home">Home view</label></b><small>How projects are arranged on your home page.</small></span>
+      <select id="as-home" name="defaultHomeView">{{range $o := .HomeViews}}<option value="{{$o}}"{{if eq $u.DefaultHomeView $o}} selected{{end}}>{{$o}}</option>{{end}}</select></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-order">Project order</label></b><small>Default sort for the project list.</small></span>
+      <select id="as-order" name="defaultProjectsOrder">{{range $o := .Orders}}<option value="{{$o}}"{{if eq $u.DefaultProjectsOrder $o}} selected{{end}}>{{$o}}</option>{{end}}</select></div>
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-idle">Auto sign-out</label></b><small>Minutes of inactivity before you are signed out. 0 means never.</small></span>
+      <input id="as-idle" type="number" min="0" name="autoLogoutMinutes" value="{{if $u.AutoLogoutMinutes}}{{$u.AutoLogoutMinutes}}{{else}}0{{end}}" class="as-narrow"></div>
+    {{template "bs_toggle" dict "ID" "as-sub-own" "Name" "subscribeOwnCards" "Title" "Subscribe to cards I create" "Help" "Get notified about activity on cards you create." "On" $u.SubscribeOwnCards}}
+    {{template "bs_toggle" dict "ID" "as-sub-com" "Name" "subscribeToCardWhenCommenting" "Title" "Subscribe when I comment" "Help" "Follow a card automatically after you comment on it." "On" $u.SubscribeToCardWhenCommenting}}
+    {{template "bs_toggle" dict "ID" "as-hl" "Name" "turnOffRecentCardHighlighting" "Title" "Turn off recent-card highlighting" "Help" "Stop marking cards that changed since you last looked." "On" $u.TurnOffRecentCardHighlighting}}
+    {{template "bs_toggle" dict "ID" "as-fav" "Name" "enableFavoritesByDefault" "Title" "Favourite new projects" "Help" "Pin every project you join or create to your favourites." "On" $u.EnableFavoritesByDefault}}
+  </form>
+  <p class="bs-hint">Changes save automatically.</p>
+</section>{{end}}
 
-<section class="card auth-sec"><h2>Sessions</h2>
-  <ul class="auth-list">{{range .Sessions}}<li><span>{{if .UserAgent}}{{.UserAgent}}{{else}}Unknown client{{end}} <small class="muted">{{.RemoteAddr}} - since {{.CreatedAt}}</small>{{if .Current}} <strong>(this session)</strong>{{end}}</span>
-    {{if not .Current}}<form hx-post="/ui/settings/sessions/{{.ID}}/revoke" hx-target="#settings-body" method="post" action="/ui/settings/sessions/{{.ID}}/revoke"><button type="submit">Revoke</button></form>{{end}}</li>{{end}}</ul>
-  <form class="auth-inline" hx-post="/ui/settings/sessions/revoke-others" hx-target="#settings-body" method="post" action="/ui/settings/sessions/revoke-others"><button type="submit">Sign out all other sessions</button></form>
-  <form class="auth-inline" method="post" action="/logout"><button type="submit">Sign out</button></form>
-</section>
-{{end}}{{end}}
+{{define "auth_set_apikey"}}{{template "auth_set_apikey_in" .Data}}{{end}}
+{{define "auth_set_apikey_in"}}{{$u := .User}}<section id="set-apikey" class="boards-sec bs-panel" data-panel="apikey" aria-labelledby="set-apikey-h">
+  <div class="bs-sec-head"><h2 id="set-apikey-h">API key</h2>{{template "bs_status" .}}</div>
+  {{template "as_error" .}}
+  <p class="bs-desc">For the CLI or an agent: <code>weave config set url {{.BaseURL}}</code> then <code>weave config set token &lt;key&gt;</code> (or set <code>WEAVE_URL</code> / <code>WEAVE_TOKEN</code>). The key acts with your role. Send it as <code>X-API-Key</code> or <code>Authorization: Bearer</code>.</p>
+  {{if .NewAPIKey}}<div class="bs-link as-newkey">
+    <label class="sr-only" for="as-key-in">New API key</label>
+    <input id="as-key-in" readonly value="{{.NewAPIKey}}" data-secret>
+    <button type="button" class="primary" data-copy="as-key-in">Copy key</button>
+    <p class="bs-hint">Copy your new key now. It will not be shown again.</p>
+  </div>{{end}}
+  <div class="bs-row"><span class="bs-text"><b>Current key</b><small>{{if $u.HasAPIKey}}<code>{{$u.APIKeyPrefix}}...</code>{{if $u.APIKeyExpired}} <span class="boards-badge">expired {{deref $u.APIKeyExpiresAt}}</span> It no longer works; create a new one.{{else if $u.APIKeyExpiresAt}} Expires {{deref $u.APIKeyExpiresAt}}.{{else}} Never expires.{{end}}{{else}}No API key yet.{{end}}</small></span>
+    {{if $u.HasAPIKey}}<form hx-post="/ui/settings/apikey/revoke" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey/revoke" class="bs-btns" hx-confirm="Revoke this key? Anything using it stops working."><button type="submit">Revoke</button></form>{{end}}</div>
+  <form class="bs-row" hx-post="/ui/settings/apikey" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey"{{if $u.HasAPIKey}} hx-confirm="Rotating replaces your current key, which stops working. Continue?"{{end}}>
+    <span class="bs-text"><b>{{if $u.HasAPIKey}}Rotate key{{else}}Create key{{end}}</b><small>Choose how long the new key stays valid.</small></span>
+    <span class="bs-btns"><label class="sr-only" for="as-exp">Expires</label><select id="as-exp" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select>
+    <button type="submit" class="primary">{{if $u.HasAPIKey}}Rotate{{else}}Create{{end}}</button></span>
+  </form>
+</section>{{end}}
+
+{{define "auth_set_sessions"}}{{template "auth_set_sessions_in" .Data}}{{end}}
+{{define "auth_set_sessions_in"}}<section id="set-sessions" class="boards-sec bs-panel" data-panel="sessions" aria-labelledby="set-sessions-h">
+  <div class="bs-sec-head"><h2 id="set-sessions-h">Sessions</h2>{{template "bs_status" .}}</div>
+  {{template "as_error" .}}
+  <p class="bs-desc">Browsers and devices currently signed in to your account.</p>
+  <ul class="bs-members">
+  {{range .Sessions}}<li class="bs-member">
+    <span class="bs-member-t"><b>{{if .UserAgent}}{{.UserAgent}}{{else}}Unknown client{{end}}{{if .Current}} <span class="boards-badge">This session</span>{{end}}</b><small>{{.RemoteAddr}} &middot; since {{.CreatedAt}}</small></span>
+    {{if not .Current}}<form hx-post="/ui/settings/sessions/{{.ID}}/revoke" hx-target="#set-sessions" hx-swap="outerHTML" method="post" action="/ui/settings/sessions/{{.ID}}/revoke"><button type="submit" class="bs-x" aria-label="Sign out this session" title="Sign out this session">&times;</button></form>{{end}}
+  </li>{{else}}<li class="bs-empty-row">No sessions.</li>{{end}}
+  </ul>
+  <div class="bs-row"><span class="bs-text"><b>Sign out other sessions</b><small>Ends every session except this one.</small></span>
+    <form hx-post="/ui/settings/sessions/revoke-others" hx-target="#set-sessions" hx-swap="outerHTML" method="post" action="/ui/settings/sessions/revoke-others" class="bs-btns"><button type="submit">Sign out others</button></form></div>
+  <div class="bs-row"><span class="bs-text"><b>Sign out</b><small>End this session on this device.</small></span>
+    <form method="post" action="/logout" class="bs-btns"><button type="submit">Sign out</button></form></div>
+</section>{{end}}

@@ -95,7 +95,9 @@
   <span class="boards-chips-count">{{.NoCards}} card{{if ne .NoCards 1}}s{{end}}</span>
 </div>{{end}}{{end}}
 
-{{define "boards_filterbar"}}<div class="boards-filterbar"><form id="board-filter" class="boards-filter" role="search" hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML" hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
+{{define "boards_filterbar"}}<div class="boards-filterbar"><div class="boards-filterscroll">
+{{- if not .ReadOnly}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query "Picker" true}}{{end}}
+<form id="board-filter" class="boards-filter" role="search" hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML" hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
   <input type="hidden" name="view" value="{{.View}}">
   <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Filter cards  ( / )" aria-label="Filter cards by text" autocomplete="off" data-filter-input>
   <details class="boards-dd"><summary>Labels{{if .Filter.Labels}} ({{len .Filter.Labels}}){{end}}</summary><div class="boards-dd-pop">
@@ -117,6 +119,12 @@
   <noscript><button class="boards-btn">Apply</button></noscript>
 </form>
   {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}
+</div>
+{{- if not .ReadOnly}}
+<div class="boards-actions">
+  <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+  <a class="boards-btn boards-settings-btn" href="/boards/{{.Board.ID}}/settings" aria-label="Board settings" title="Board settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="boards-btn-label">Settings</span></a>
+</div>{{end}}
 </div>{{end}}
 
 {{define "boards_saved"}}{{template "boards_saved_in" .Data}}{{end}}

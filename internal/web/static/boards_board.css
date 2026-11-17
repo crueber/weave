@@ -6,18 +6,17 @@
 .boards-shell{display:flex;flex-direction:column;gap:var(--space-3,.75rem);min-height:calc(100vh - 6rem)}
 /* kanban: the shell fills the viewport under the top bar so the lists' horizontal scrollbar sits at the screen bottom */
 .boards-shell>:not(.boards-body){flex-shrink:0}
-.boards-shell-kanban{min-height:0;margin-bottom:calc(-1*var(--space-5,1.5rem));height:calc(100vh - var(--topbar-h,56px) - var(--space-5,1.5rem));height:calc(100dvh - var(--topbar-h,56px) - var(--space-5,1.5rem))}
-@media(max-width:640px){.boards-shell-kanban{margin-bottom:calc(-1*var(--space-4,1rem));height:calc(100vh - var(--topbar-h,56px) - var(--space-4,1rem));height:calc(100dvh - var(--topbar-h,56px) - var(--space-4,1rem))}}
-.boards-head{display:flex;align-items:center;gap:var(--space-4,1rem);flex-wrap:wrap}
-.boards-head h1{margin:0;font-size:var(--text-xl,1.25rem)}.boards-head h1 small{color:var(--muted,#6b7280);font-weight:400}
-.boards-title{display:flex;flex-direction:column;gap:.1rem;min-width:0}
-.boards-crumbs{font-size:var(--text-sm,.85rem);color:var(--muted,#6b7280);display:flex;gap:.35rem;align-items:center}
-.boards-crumbs a{color:var(--muted,#6b7280);text-decoration:none;border-radius:var(--radius-sm,4px)}
-.boards-crumbs a:hover{color:var(--fg,#111);text-decoration:underline}
-.boards-views{display:flex;gap:.25rem}
-.boards-views a{padding:.25rem .65rem;border-radius:var(--radius-sm,4px);text-decoration:none;color:var(--fg,#111);border:1px solid transparent}
-.boards-views a.active{background:var(--accent,#4f46e5);color:var(--accent-fg,#fff)}
-.boards-views a:hover:not(.active){border-color:var(--border,#d4d4d8)}
+/* kanban fills the viewport under the top bar. Board pages trim main's top padding (--shell-pt, set below); the public page keeps the default */
+.boards-shell-kanban{min-height:0;margin-bottom:calc(-1*var(--space-5,1.5rem));height:calc(100vh - var(--topbar-h,56px) - var(--shell-pt,var(--space-5,1.5rem)));height:calc(100dvh - var(--topbar-h,56px) - var(--shell-pt,var(--space-5,1.5rem)))}
+main:has(>.boards-shell:not(.boards-public)){--shell-pt:var(--space-3,.75rem);padding-top:var(--shell-pt)}
+@media(max-width:640px){.boards-shell-kanban{margin-bottom:calc(-1*var(--space-4,1rem));height:calc(100vh - var(--topbar-h,56px) - var(--shell-pt,var(--space-4,1rem)));height:calc(100dvh - var(--topbar-h,56px) - var(--shell-pt,var(--space-4,1rem)))}main:has(>.boards-shell:not(.boards-public)){--shell-pt:var(--space-2,.5rem)}}
+/* the public page keeps its own text header (breadcrumbs and view icons live in the top bar on signed-in pages) */
+.boards-public .boards-head{display:flex;align-items:center;gap:var(--space-4,1rem);flex-wrap:wrap}
+.boards-public .boards-head h1{margin:0;font-size:var(--text-xl,1.25rem)}.boards-public .boards-head h1 small{color:var(--muted,#6b7280);font-weight:400}
+.boards-public .boards-views{display:flex;gap:.25rem}
+.boards-public .boards-views a{padding:.25rem .65rem;border-radius:var(--radius-sm,4px);text-decoration:none;color:var(--fg,#111);border:1px solid transparent}
+.boards-public .boards-views a.active{background:var(--accent,#4f46e5);color:var(--accent-fg,#fff)}
+.boards-public .boards-views a:hover:not(.active){border-color:var(--border,#d4d4d8)}
 .boards-btn{padding:.3rem .7rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);text-decoration:none;color:var(--fg,#111);background:var(--surface,#fff);cursor:pointer;font:inherit}
 .boards-btn:hover{background:var(--surface-2,#f4f4f5)}
 .boards-btn-primary{padding:.35rem .8rem;border:1px solid var(--accent,#4f46e5);border-radius:var(--radius-sm,4px);background:var(--accent,#4f46e5);color:var(--accent-fg,#fff);cursor:pointer;font:inherit}
@@ -35,8 +34,13 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 :where(.boards-shell,.boards-pop,.boards-help,.boards-menu-pop) :where(button,a,summary,textarea,input,select,[tabindex]):focus-visible{outline:2px solid var(--focus-ring,#6366f1);outline-offset:2px}
 
 /* filter bar + chips */
-.boards-filterbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+/* ONE row: filters on the left (they wrap on narrow desktops), "?" and Settings pinned at the right end */
+.boards-filterbar{display:flex;gap:.5rem;align-items:flex-start}
+.boards-filterscroll{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;flex:1 1 auto;min-width:0}
 .boards-filter{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.boards-actions{display:flex;gap:.5rem;align-items:center;flex:none;margin-left:auto}
+.boards-filterbar .view-pick{display:none}
+.boards-settings-btn .ico{display:none}
 .boards-filter input[type=search]{min-width:14rem}
 .boards-filter input,.boards-filter select,.boards-saved-save input,.boards-menu-pop input,.boards-menu-pop select{background:var(--surface,#fff);color:var(--fg,#111);border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);padding:.3rem .5rem;font:inherit}
 .boards-filter input:focus,.boards-filter select:focus{border-color:var(--accent,#4f46e5)}
@@ -56,32 +60,50 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 @keyframes boards-shimmer{50%{opacity:.55}}
 .boards-nomatch{padding:2.5rem 1rem;text-align:center;color:var(--muted,#6b7280)}.boards-nomatch strong{display:block;color:var(--fg,#111);font-size:var(--text-lg,1.1rem)}
 
-/* phones: keep the filter controls on one line; scroll sideways instead of wrapping (the dropdown popovers are already position:fixed via boards_colors.css, so the scroller cannot clip them). */
-@media(max-width:640px){
-  .boards-filterbar,.boards-filter{flex-wrap:nowrap}
-  .boards-filterbar{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-  .boards-filterbar::-webkit-scrollbar{display:none}
-  .boards-filterbar>*,.boards-filter>*{flex:none}
-  .boards-filter input[type=search]{min-width:10rem}
+/* narrow screens: the filters stay on one line and scroll sideways inside .boards-filterscroll (the public page only does so on phones) */
+@media(max-width:900px){
+  .boards-shell:not(.boards-public) .boards-filter input[type=search]{min-width:10rem}
+  .boards-shell:not(.boards-public) .boards-filterbar{align-items:center}
+  .boards-shell:not(.boards-public) :is(.boards-filterscroll,.boards-filter){flex-wrap:nowrap}
+  .boards-shell:not(.boards-public) .boards-filterscroll{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .boards-shell:not(.boards-public) .boards-filterscroll::-webkit-scrollbar{display:none}
+  .boards-shell:not(.boards-public) :is(.boards-filterscroll,.boards-filter)>*{flex:none}
 }
-
-/* phones: header is title + icon buttons on row 1, the five view tabs on one line on row 2 (the filter bar is row 3). Desktop is untouched. */
-.boards-settings-btn .ico{display:none}
+/* phones: every filter bar scrolls sideways (the dropdown popovers are position:fixed via boards_colors.css, so the scroller cannot clip them), and the view picker joins the scroller (the top bar has no room for the view switcher). Settings stays pinned at the right; the "?" button is for keyboards (the ? key still works). */
 @media(max-width:640px){
-  .boards-head{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:var(--space-2,.5rem);row-gap:var(--space-2,.5rem)}
-  .boards-head>.spacer{display:none}
-  .boards-head>.boards-title,.boards-head>h1{grid-row:1;grid-column:1;min-width:0}
-  .boards-head>.boards-help-btn{grid-row:1;grid-column:2}
-  .boards-head>.boards-settings-btn{grid-row:1;grid-column:3}
-  .boards-head>.boards-badge{grid-row:1;grid-column:2/-1}
-  .boards-public .boards-head{grid-template-columns:minmax(0,1fr) auto}
-  .boards-head>.boards-btn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;padding:0 .5rem;box-sizing:border-box}
+  .boards-filterbar{align-items:center}
+  .boards-filterscroll,.boards-filter{flex-wrap:nowrap}
+  .boards-filterscroll{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .boards-filterscroll::-webkit-scrollbar{display:none}
+  .boards-filterscroll>*,.boards-filter>*{flex:none}
+  .boards-filter input[type=search]{min-width:10rem}
+  .boards-filterbar .view-pick{display:block}
+  .boards-actions .boards-btn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;padding:0 .5rem;box-sizing:border-box}
   .boards-settings-btn .ico{display:inline-block;width:1.2em;height:1.2em}
   .boards-btn-label{display:none}
-  .boards-head h1,.boards-crumbs{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .boards-head>.boards-views{grid-row:2;grid-column:1/-1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-  .boards-views::-webkit-scrollbar{display:none}
-  .boards-views a{flex:none;white-space:nowrap;padding:.4rem .55rem}
+}
+@media(pointer:coarse),(max-width:640px){.boards-help-btn{display:none!important}}
+
+/* view picker (phone filter row): the current view's icon + a chevron; the popover lists the five views */
+.view-pick>summary{display:flex;align-items:center;gap:.3rem;min-height:2.25rem;box-sizing:border-box;padding:.35rem .5rem}
+.view-pick>summary svg{width:16px;height:16px}
+.view-pick .view-pick-chev{width:12px;height:12px;color:var(--muted)}
+.view-pick-pop{min-width:11rem;padding:.35rem;gap:.1rem}
+.view-pick-pop a{display:flex;align-items:center;gap:.6rem;padding:.5rem .6rem;border-radius:var(--radius-sm,4px);color:var(--fg,#111);text-decoration:none}
+.view-pick-pop a svg{width:16px;height:16px;flex:none;color:var(--muted)}
+.view-pick-pop a:hover{background:var(--surface-2,#f4f4f5)}
+.view-pick-pop a[aria-current=page]{background:var(--surface-3,#e4e4e7);font-weight:600}
+.view-pick-pop a[aria-current=page] svg{color:var(--accent,#4f46e5)}
+
+/* public page, phones: title + badge on row 1, the view tabs on one line on row 2 */
+@media(max-width:640px){
+  .boards-public .boards-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:var(--space-2,.5rem);row-gap:var(--space-2,.5rem)}
+  .boards-public .boards-head>.spacer{display:none}
+  .boards-public .boards-head>h1{grid-row:1;grid-column:1;min-width:0;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .boards-public .boards-head>.boards-badge{grid-row:1;grid-column:2/-1}
+  .boards-public .boards-head>.boards-views{grid-row:2;grid-column:1/-1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .boards-public .boards-views::-webkit-scrollbar{display:none}
+  .boards-public .boards-views a{flex:none;white-space:nowrap;padding:.4rem .55rem}
 }
 
 /* kanban */
@@ -233,7 +255,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 /* ---- board settings (bs-*) ---- */
 .bs-head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap}
 .bs-head h1{margin:0;font-size:var(--text-2xl);font-weight:800;letter-spacing:-.03em}
-.bs-crumbs{margin:0 0 .2rem;font-size:var(--text-sm);color:var(--muted)}.bs-crumbs a{color:var(--muted);text-decoration:none}.bs-crumbs a:hover{color:var(--fg)}
 .bs-layout{display:grid;grid-template-columns:13.5rem minmax(0,1fr);gap:var(--space-6);align-items:start}
 .bs-nav{position:sticky;top:calc(var(--topbar-h,56px) + var(--space-4));display:flex;flex-direction:column;gap:2px}
 .bs-nav a{display:block;padding:.5rem .75rem;border-radius:var(--radius-sm);color:var(--fg-2);text-decoration:none;font-weight:500;font-size:var(--text-md);border-left:2px solid transparent}
@@ -245,6 +266,8 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .js-ready .bs-panel{display:none}
 .boards-settings[data-active=general] #set-general,.boards-settings[data-active=members] #set-members,.boards-settings[data-active=labels] #set-labels,
 .boards-settings[data-active=views] #set-views,.boards-settings[data-active=filters] #set-filters,.boards-settings[data-active=sharing] #set-sharing,
+.boards-settings[data-active=profile] #set-profile,.boards-settings[data-active=appearance] #set-appearance,.boards-settings[data-active=workspace] #set-workspace,
+.boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,
 .boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=danger] #set-danger{display:block}
 .bs-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-2)}
 .bs-sec-head h2{margin:0;font-size:var(--text-lg);font-weight:700;letter-spacing:-.01em}

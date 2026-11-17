@@ -1,0 +1,30 @@
+{{/* Board context for the top bar (the layout's "topbar-page" slot): breadcrumbs and the view switcher.
+   Shared by the board page, calendar, map and board settings. Pages fill the slot with {{define "topbar-page"}}. */}}
+
+{{/* Breadcrumbs: Projects / Project / Board. dict: Board, ProjectName, Plain (the board crumb is a link, not the page's h1: settings). */}}
+{{define "boards_crumbs"}}<nav class="topbar-crumbs" aria-label="Breadcrumb"><ol>
+  <li class="crumb-root"><a href="/">Projects</a></li>
+  {{if .ProjectName}}<li class="crumb-proj"><a href="/projects/{{.Board.ProjectID}}" title="{{.ProjectName}}">{{.ProjectName}}</a></li>{{end}}
+  <li class="crumb-cur">{{if .Plain}}<a href="/boards/{{.Board.ID}}" title="{{.Board.Name}}">{{.Board.Name}}</a>{{else}}<h1 aria-current="page" title="{{.Board.Name}}">{{.Board.Name}}</h1>{{end}}</li>
+</ol></nav>{{end}}
+
+{{/* One stroked 16px icon per view (Lucide style, no gradients); the board sprite lives inside <main>, so these are inline. */}}
+{{define "boards_vicon"}}{{if eq . "kanban"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 5v11M12 5v14M18 5v8"/></svg>
+{{- else if eq . "list"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+{{- else if eq . "grid"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+{{- else if eq . "calendar"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+{{- else if eq . "map"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>{{end}}{{end}}
+
+{{define "boards_vlink"}}<a href="{{.Href}}" data-view="{{.View}}"{{if eq .Cur .View}} aria-current="page"{{end}} aria-label="{{.Label}} view" title="{{.Label}}">{{template "boards_vicon" .View}}{{if .Picker}}<span>{{.Label}}</span>{{end}}</a>{{end}}
+
+{{/* View switcher. dict: Board, View, PageURL, Query, Picker. Picker=false: an icon-only segmented group (top bar). Picker=true: the
+   same links in a <details class="boards-dd"> popover showing the current view (the phone filter row). data-view carries the key (1-5) targets. */}}
+{{define "boards_views"}}{{$b := .Board.ID}}{{$cur := .View}}{{$pk := .Picker}}{{$pu := .PageURL}}{{$q := .Query}}
+{{- if .Picker}}<details class="boards-dd view-pick"><summary aria-label="Board view">{{template "boards_vicon" $cur}}<svg class="view-pick-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><nav class="boards-dd-pop view-pick-pop boards-views" aria-label="Board views">
+{{- else}}<nav class="view-switch boards-views" aria-label="Board views">{{end}}
+  {{template "boards_vlink" dict "Href" (boardsHref $pu "kanban" $q) "View" "kanban" "Cur" $cur "Label" "Kanban" "Picker" $pk}}
+  {{template "boards_vlink" dict "Href" (boardsHref $pu "list" $q) "View" "list" "Cur" $cur "Label" "List" "Picker" $pk}}
+  {{template "boards_vlink" dict "Href" (boardsHref $pu "grid" $q) "View" "grid" "Cur" $cur "Label" "Grid" "Picker" $pk}}
+  {{template "boards_vlink" dict "Href" (print "/boards/" $b "/calendar") "View" "calendar" "Cur" $cur "Label" "Calendar" "Picker" $pk}}
+  {{template "boards_vlink" dict "Href" (print "/boards/" $b "/map") "View" "map" "Cur" $cur "Label" "Map" "Picker" $pk}}
+</nav>{{if .Picker}}</details>{{end}}{{end}}

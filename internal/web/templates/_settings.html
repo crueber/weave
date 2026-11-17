@@ -1,0 +1,9 @@
+{{/* Settings-page building blocks shared by board settings and user settings (bs-* styles in boards_board.css). */}}
+{{/* Toggle switch row. Args: Name, Title, Help, On, Off(disabled), ID */}}
+{{define "bs_toggle"}}<label class="bs-row bs-row-toggle" for="{{.ID}}">
+    <span class="bs-text"><b>{{.Title}}</b><small>{{.Help}}</small></span>
+    <span class="bs-switch"><input id="{{.ID}}" type="checkbox" role="switch" name="{{.Name}}" value="true"{{if .On}} checked{{end}}{{if .Off}} disabled{{end}}><input type="hidden" name="{{.Name}}" value="false"><i aria-hidden="true"></i></span>
+  </label>{{end}}
+
+{{define "bs_status"}}<span class="bs-status" role="status" aria-live="polite">{{if .Done}}<span class="bs-saved">&#10003; Saved</span>{{end}}</span>{{end}}
+

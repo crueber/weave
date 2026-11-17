@@ -43,18 +43,22 @@ func init() {
 		return nil
 	})
 
-	web.Route("GET /settings", func(c *web.Ctx) error { return renderSettings(c, &settingsData{}) })
-	me := func(op, flash string, after func(out any, d *settingsData)) func(*web.Ctx) error {
-		return settingsAction(op, flash, after)
+	web.Route("GET /settings", func(c *web.Ctx) error {
+		return renderSettings(c, &settingsData{Active: c.R.URL.Query().Get("section")})
+	})
+	// me wires one settings action to the section (panel) it re-renders.
+	me := func(op, section string, after func(out any, d *settingsData)) func(*web.Ctx) error {
+		return settingsAction(op, section, after)
 	}
-	web.Route("POST /ui/settings/profile", me("user.update", "Profile saved.", nil))
-	web.Route("POST /ui/settings/avatar", me("user.avatar.update", "Avatar updated.", nil))
-	web.Route("POST /ui/settings/avatar/delete", me("user.avatar.delete", "Avatar removed.", nil))
-	web.Route("POST /ui/settings/preferences", me("user.preferences.update", "Preferences saved.", nil))
-	web.Route("POST /ui/settings/apikey", me("apikey.generate", "", func(out any, d *settingsData) { d.NewAPIKey = out.(APIKeyOut).Key }))
-	web.Route("POST /ui/settings/apikey/revoke", me("apikey.revoke", "API key revoked.", nil))
-	web.Route("POST /ui/settings/sessions/{id}/revoke", me("session.revoke", "Session revoked.", nil))
-	web.Route("POST /ui/settings/sessions/revoke-others", me("session.revoke_others", "Other sessions signed out.", nil))
+	web.Route("POST /ui/settings/profile", me("user.update", "profile", nil))
+	web.Route("POST /ui/settings/avatar", me("user.avatar.update", "profile", nil))
+	web.Route("POST /ui/settings/avatar/delete", me("user.avatar.delete", "profile", nil))
+	web.Route("POST /ui/settings/appearance", me("user.preferences.update", "appearance", nil))
+	web.Route("POST /ui/settings/preferences", me("user.preferences.update", "workspace", nil))
+	web.Route("POST /ui/settings/apikey", me("apikey.generate", "apikey", func(out any, d *settingsData) { d.NewAPIKey = out.(APIKeyOut).Key }))
+	web.Route("POST /ui/settings/apikey/revoke", me("apikey.revoke", "apikey", nil))
+	web.Route("POST /ui/settings/sessions/{id}/revoke", me("session.revoke", "sessions", nil))
+	web.Route("POST /ui/settings/sessions/revoke-others", me("session.revoke_others", "sessions", nil))
 
 	web.Route("GET /admin/users", adminOnly(usersPage))
 	web.Route("POST /ui/admin/users/{id}/deactivate", adminOnly(usersAction("user.deactivate", "User deactivated.")))
@@ -294,10 +298,13 @@ func avatarGet(c *web.Ctx) error {
 type settingsData struct {
 	User        *User
 	Sessions    []SessionInfo
-	Flash       string
+	Done        bool // render the "Saved" confirmation in the section head
 	Error       string
 	NewAPIKey   string
 	BaseURL     string
+	Active      string // section shown on first paint (?section=)
+	Section     string // section re-rendered by an HTMX action
+	Sections    []settingsSection
 	Themes      []string
 	Densities   []string
 	ColourModes []string
@@ -305,6 +312,10 @@ type settingsData struct {
 	HomeViews   []string
 	Orders      []string
 }
+
+type settingsSection struct{ ID, Title string }
+
+var settingsSections = []settingsSection{{"profile", "Profile"}, {"appearance", "Appearance"}, {"workspace", "Workspace"}, {"apikey", "API key"}, {"sessions", "Sessions"}}
 
 func renderSettings(c *web.Ctx, d *settingsData) error {
 	u, err := ops.Typed[*User](c.Env, "auth.me", NoInput{})
@@ -316,19 +327,32 @@ func renderSettings(c *web.Ctx, d *settingsData) error {
 		d.Sessions = s.Items
 	}
 	d.BaseURL = cfgOf(c.Env).BaseURL
+	d.Sections = settingsSections
+	if !validSettingsSection(d.Active) {
+		d.Active = settingsSections[0].ID
+	}
 	d.Themes, d.Densities, d.ColourModes, d.Editors, d.HomeViews, d.Orders = themes, densities, colourMode, editors, homeViews, orders
 	if c.IsHTMX() && c.R.Method != "GET" {
-		return c.RenderBlock("auth_settings.html", "settings-body", d)
+		return c.RenderBlock("auth_settings.html", "auth_set_"+d.Section, d)
 	}
 	return c.Render("auth_settings.html", d)
 }
 
-func settingsAction(op, flash string, after func(out any, d *settingsData)) func(*web.Ctx) error {
+func validSettingsSection(id string) bool {
+	for _, s := range settingsSections {
+		if s.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func settingsAction(op, section string, after func(out any, d *settingsData)) func(*web.Ctx) error {
 	return func(c *web.Ctx) error {
 		if c.R.PathValue("id") == "" {
 			c.R.SetPathValue("id", "me")
 		}
-		d := &settingsData{}
+		d := &settingsData{Section: section, Active: section}
 		out, err := c.Do(op)
 		if err != nil {
 			m, err2 := errMsg(err)
@@ -337,7 +361,7 @@ func settingsAction(op, flash string, after func(out any, d *settingsData)) func
 			}
 			d.Error = m
 		} else {
-			d.Flash = flash
+			d.Done = true
 			if after != nil {
 				after(out, d)
 			}

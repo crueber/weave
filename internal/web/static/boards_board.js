@@ -141,10 +141,11 @@
     var nb = doc.getElementById('board-body'), cur = B.body();
     if (!nb || !cur) return false;
     var curLists = B.lists(), newLists = nb.querySelector('.boards-lists');
-    // keep nav links in sync (they carry the filter query)
-    var nav = doc.querySelector('.boards-views'), curNav = document.querySelector('.boards-views');
-    if (nav && curNav && nav.innerHTML !== curNav.innerHTML) curNav.innerHTML = nav.innerHTML;
-    if (nav && curNav) revealActiveView();
+    // keep the view links in sync (they carry the filter query): hrefs only, so the top-bar switcher and the phone picker both follow
+    doc.querySelectorAll('a[data-view]').forEach(function (a) {
+      var h = a.getAttribute('href');
+      document.querySelectorAll('a[data-view="' + a.dataset.view + '"]').forEach(function (c) { if (c.getAttribute('href') !== h) c.setAttribute('href', h); });
+    });
     // active-filter chips
     var nchips = nb.querySelector('.boards-chips'), cchips = cur.querySelector('.boards-chips');
     if (cchips && nchips) { if (cchips.outerHTML !== nchips.outerHTML) cchips.replaceWith(document.importNode(nchips, true)); }
@@ -190,16 +191,7 @@
 
   var verbs = ['created', 'updated', 'deleted', 'moved', 'claimed', 'released'];
   var nouns = ['board', 'list', 'card', 'label', 'boardMembership', 'cardMembership', 'cardLabel', 'task', 'taskList', 'comment', 'attachment', 'customFieldValue'];
-  // phones: the view tabs scroll sideways on very narrow screens; keep the active one visible
-  function revealActiveView() {
-    var nav = document.querySelector('.boards-views'), on = nav && nav.querySelector('a.active');
-    if (!on || nav.scrollWidth <= nav.clientWidth) return;
-    // move only the tabs' own scroller (scrollIntoView would also scroll the page on a live refresh)
-    var l = on.offsetLeft, r = l + on.offsetWidth;
-    if (l < nav.scrollLeft) nav.scrollLeft = l; else if (r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = r - nav.clientWidth;
-  }
   function setup() {
-    revealActiveView();
     document.querySelectorAll('.boards-col').forEach(function (c) { if (!c.__init) { c.__init = 1; c.__sig = c.outerHTML; B.initCol(c); } });
     var id = B.boardId();
     if (id === esBoard) return;

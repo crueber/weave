@@ -227,7 +227,7 @@ func TestOIDCBrowserFlow(t *testing.T) {
 	if strings.Contains(strings.ToLower(body), "password") || strings.Contains(body, "Two-factor") {
 		t.Fatal("settings must not offer local credentials")
 	}
-	if w := c.do("POST", "/ui/settings/preferences", url.Values{"theme": {"dark"}}, hx); !strings.Contains(w.Body.String(), "Preferences saved") {
+	if w := c.do("POST", "/ui/settings/appearance", url.Values{"theme": {"dark"}}, hx); !strings.Contains(w.Body.String(), "bs-saved") {
 		t.Fatalf("prefs: %s", w.Body.String())
 	}
 

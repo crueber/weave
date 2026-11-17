@@ -5,6 +5,7 @@
 // Exported helpers for other domains:
 //
 //	GetBoard(ctx, q, id) (Board, error)           load a board row (no authz)
+//	BoardCrumb(ctx, q, id) (Crumb, error)         board + project name, for the top-bar breadcrumbs on calendar/map (no authz)
 //	GetList(ctx, q, id) (List, error)             load a list row (no authz)
 //	SystemList(ctx, q, boardID, "archive"|"trash")  id of a board's system list
 //	EnsureSystemLists(ctx, q, boardID)            create archive+trash lists

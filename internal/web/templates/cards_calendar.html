@@ -1,3 +1,4 @@
+{{define "topbar-page"}}{{with .Data}}{{template "boards_crumbs" dict "Board" .Board "ProjectName" .ProjectName}}{{template "boards_views" dict "Board" .Board "View" "calendar" "PageURL" (print "/boards/" .Board.ID) "Query" ""}}{{end}}{{end}}
 {{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script>
 <div id="cards-cal" class="cards-cal" data-board="{{$d.BoardID}}">
   <div class="cards-cal-head">

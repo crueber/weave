@@ -12,6 +12,7 @@ import (
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/config"
+	"github.com/crueber/weave/internal/domain/boards"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -439,8 +440,12 @@ func uiCalendar(c *web.Ctx) error {
 		k := d.Format("2006-01-02")
 		days = append(days, calDay{Date: k, Num: d.Day(), InMonth: d.Month() == first.Month(), Today: k == today, Cards: byDay[k]})
 	}
+	cr, err := boards.BoardCrumb(c.R.Context(), c.Env.DB, board)
+	if err != nil {
+		return err
+	}
 	return c.Render("cards_calendar.html", map[string]any{
-		"BoardID": board, "Title": first.Format("January 2006"), "Prev": first.AddDate(0, -1, 0).Format("2006-01"), "Next": first.AddDate(0, 1, 0).Format("2006-01"),
+		"Board": cr.Board, "ProjectName": cr.ProjectName, "BoardID": board, "Title": first.Format("January 2006"), "Prev": first.AddDate(0, -1, 0).Format("2006-01"), "Next": first.AddDate(0, 1, 0).Format("2006-01"),
 		"Weekdays": []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}, "Days": days, "Unscheduled": out.Unscheduled,
 	})
 }
@@ -458,7 +463,11 @@ func uiMap(c *web.Ctx) error {
 		return err
 	}
 	const W, H = 800.0, 440.0
-	data := map[string]any{"BoardID": board, "W": W, "H": H, "Points": []mapPt{}, "Grid": []mapLine{}}
+	cr, err := boards.BoardCrumb(c.R.Context(), c.Env.DB, board)
+	if err != nil {
+		return err
+	}
+	data := map[string]any{"Board": cr.Board, "ProjectName": cr.ProjectName, "BoardID": board, "W": W, "H": H, "Points": []mapPt{}, "Grid": []mapLine{}}
 	if len(out.Points) > 0 {
 		minLat, maxLat, minLng, maxLng := 90.0, -90.0, 180.0, -180.0
 		for _, p := range out.Points {

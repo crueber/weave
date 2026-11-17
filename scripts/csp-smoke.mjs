@@ -135,7 +135,7 @@ await run('anon: login + terms + healthz', async () => {
 // ---- plain pages ---------------------------------------------------------------------------
 for (const path of ['/', `/projects/${proj.id}`, `/boards/${board.id}`, `/boards/${board.id}/calendar`, `/boards/${board.id}/map`,
   `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, `/lists/${lists[0].id}`, `/ui/lists/${lists[0].id}`, '/dashboard', '/notifications', '/notification-services',
-  '/search?q=card', '/settings', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
+  '/search?q=card', '/settings', '/settings?section=apikey', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
   '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`, `/ui/boards/${board.id}/inbox`]) {
   await run('page ' + path, async () => {
     if (path === '/admin/backup') { await p.request.get(BASE + path); return; } // a download, not a page
@@ -217,10 +217,58 @@ await run('board: list menu, quick edit, tile hover buttons', async () => {
   await p.keyboard.press('?'); await settle(p); await esc(p);
   for (const k of ['j', 'k', 'f', 'n', 'c', 'e', 'Escape', 'Enter', 'Escape']) { await p.keyboard.press(k).catch(() => {}); await p.waitForTimeout(120); }
 });
-await run('board: views / toolbar / filters', async () => {
+await run('board: filter dropdowns', async () => {
   await go(`/boards/${board.id}`);
-  await clickEach('.boards-toolbar button, .boards-toolbar summary, .boards-toolbar a[hx-get], .boards-views button, nav button', { max: 25 });
+  await clickEach('.boards-filterbar summary', { max: 25 });
   await esc(p);
+});
+await run('board: view icons in the top bar, 1-5 keys, switcher stays on calendar/map/settings', async () => {
+  await go(`/boards/${board.id}`);
+  const cur = sel => p.locator(`.topbar .view-switch a[aria-current=page]${sel || ''}`).count();
+  if ((await cur('[data-view=kanban]')) !== 1) throw new Error('kanban icon is not the current view');
+  await p.locator('.topbar .view-switch a[data-view=grid]').click(); await p.waitForURL(/view=grid/); await settle(p);
+  if ((await cur('[data-view=grid]')) !== 1) throw new Error('grid icon not current after click');
+  await p.keyboard.press('1'); await p.waitForURL(/view=kanban/); await settle(p);
+  await p.keyboard.press('2'); await p.waitForURL(/view=list/); await settle(p);
+  await p.keyboard.press('3'); await p.waitForURL(/view=grid/); await settle(p);
+  await p.keyboard.press('4'); await p.waitForURL(/\/calendar/); await settle(p);
+  if ((await cur('[data-view=calendar]')) !== 1) throw new Error('calendar page lost the switcher');
+  await go(`/boards/${board.id}`);                                  // the calendar page has no board shortcuts
+  await p.keyboard.press('5'); await p.waitForURL(/\/map/); await settle(p);
+  if ((await cur('[data-view=map]')) !== 1) throw new Error('map page lost the switcher');
+  await go(`/boards/${board.id}/settings`);
+  if ((await p.locator('.topbar .view-switch a[data-view]').count()) !== 5) throw new Error('settings page has no view switcher');
+  if ((await p.locator('.topbar-crumbs a').count()) < 2) throw new Error('settings page has no breadcrumbs');
+  await go(`/boards/${board.id}`);
+  const h = await p.evaluate(() => ({ crumbs: document.querySelector('.topbar-crumbs h1')?.textContent, h1: document.querySelectorAll('h1').length }));
+  if (h.crumbs !== 'Smoke board' || h.h1 !== 1) throw new Error('board name must be the single h1 in the breadcrumb: ' + JSON.stringify(h));
+});
+
+// ---- phone: one-row top bar, view picker in the filter row, theme switch in the account menu -------------
+await run('board @390px: one-row top bar, view picker, account menu theme, no sideways scroll', async () => {
+  const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + TOKEN, 'X-Requested-With': 'weave' } });
+  const m = await newPage(mctx);
+  try {
+    await m.goto(BASE + `/boards/${board.id}`); await settle(m);
+    const geo = () => m.evaluate(() => { const t = document.querySelector('.topbar'); return { h: Math.round(t.getBoundingClientRect().height), tsw: t.scrollWidth, tcw: t.clientWidth, dsw: document.documentElement.scrollWidth, iw: innerWidth }; });
+    let g = await geo();
+    if (g.h !== 56 || g.tsw > g.tcw || g.dsw > g.iw) throw new Error('top bar wraps or page scrolls sideways: ' + JSON.stringify(g));
+    if (await m.locator('.topbar > .theme-toggle').isVisible()) throw new Error('theme toggle should be hidden in the top bar on phones');
+    if (await m.locator('.topbar .view-switch').isVisible()) throw new Error('the top-bar view switcher should be hidden on phones');
+    if (await m.locator('.boards-help-btn').isVisible()) throw new Error('the ? button should be hidden on phones');
+    await m.locator('.view-pick > summary').click(); await m.waitForTimeout(250);
+    const pop = m.locator('.view-pick-pop, #popover-root .view-pick-pop').first();
+    if (!(await pop.isVisible())) throw new Error('view picker did not open');
+    const bb = await pop.boundingBox(); if (!bb || bb.x < 0 || bb.x + bb.width > 390 || bb.y + bb.height > 800) throw new Error('view picker is clipped: ' + JSON.stringify(bb));
+    await m.keyboard.press('Escape'); await m.waitForTimeout(150);
+    await m.locator('#user-menu > summary').click(); await m.waitForTimeout(250);
+    await m.locator('#user-menu [data-theme-set=dark]').click(); await m.waitForTimeout(250);
+    if ((await m.evaluate(() => document.documentElement.dataset.theme)) !== 'dark') throw new Error('theme switch in the account menu did not apply');
+    await m.locator('#user-menu [data-theme-set=system]').click();
+    await m.keyboard.press('Escape');
+    g = await geo();
+    if (g.h !== 56 || g.tsw > g.tcw || g.dsw > g.iw) throw new Error('after the menus: ' + JSON.stringify(g));
+  } finally { await mctx.close(); }
 });
 
 // ---- column sheet --------------------------------------------------------------------------

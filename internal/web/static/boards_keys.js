@@ -145,6 +145,10 @@
         col = currentCol(); if (col && B.canEdit() && B.openComposer(col, { top: key === 'C' })) e.preventDefault(); break;
       case 'n': case 'N':
         if (B.canEdit() && B.openListComposer()) e.preventDefault(); break;
+      case '1': case '2': case '3': case '4': case '5':
+        // views: Kanban, List, Grid, Calendar, Map (targets come from the data-view links, which carry the filter query)
+        var v = document.querySelector('a[data-view="' + ['kanban', 'list', 'grid', 'calendar', 'map'][+key - 1] + '"]');
+        if (v) { e.preventDefault(); location.href = v.href; } break;
       case '/':
         var f = document.querySelector('[data-filter-input]'); if (f) { e.preventDefault(); f.focus(); f.select(); } break;
       case 'e':

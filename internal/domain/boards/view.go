@@ -1,6 +1,7 @@
 package boards
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"time"
@@ -101,6 +102,24 @@ type Column struct {
 	AddCardURL string
 	Listeners  []ListenerOut // open event streams on this list (agents, integrations)
 	Prompt     string        // copy-paste agent brief for this column (empty when the caller cannot edit)
+}
+
+// Crumb is a board plus its project's name: what the top bar's breadcrumbs and view switcher need (templates _boards_topbar.html).
+type Crumb struct {
+	Board       Board
+	ProjectName string
+}
+
+// BoardCrumb loads a board and its project name for pages other domains render under a board (calendar, map).
+// No permission check: the caller has already authorized the board through an op.
+func BoardCrumb(ctx context.Context, q querier, id string) (Crumb, error) {
+	b, err := GetBoard(ctx, q, id)
+	if err != nil {
+		return Crumb{}, err
+	}
+	c := Crumb{Board: b}
+	_ = q.QueryRowContext(ctx, `SELECT name FROM projects WHERE id=?`, b.ProjectID).Scan(&c.ProjectName)
+	return c, nil
 }
 
 // PageData feeds the board page, the body fragment and the public page.

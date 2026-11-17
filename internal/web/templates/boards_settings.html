@@ -1,20 +1,12 @@
 {{define "title"}}{{.Data.Board.Name}} settings - Weave{{end}}
 {{define "page"}}{{template "boards_settings_in" .Data}}{{end}}
-
-{{/* Toggle switch row. Args: Name, Title, Help, On, Off(disabled), ID */}}
-{{define "bs_toggle"}}<label class="bs-row bs-row-toggle" for="{{.ID}}">
-    <span class="bs-text"><b>{{.Title}}</b><small>{{.Help}}</small></span>
-    <span class="bs-switch"><input id="{{.ID}}" type="checkbox" role="switch" name="{{.Name}}" value="true"{{if .On}} checked{{end}}{{if .Off}} disabled{{end}}><input type="hidden" name="{{.Name}}" value="false"><i aria-hidden="true"></i></span>
-  </label>{{end}}
-
-{{define "bs_status"}}<span class="bs-status" role="status" aria-live="polite">{{if .Done}}<span class="bs-saved">&#10003; Saved</span>{{end}}</span>{{end}}
+{{define "topbar-page"}}{{with .Data}}{{template "boards_crumbs" dict "Board" .Board "ProjectName" .ProjectName "Plain" true}}{{template "boards_views" dict "Board" .Board "View" "" "PageURL" (print "/boards/" .Board.ID) "Query" ""}}{{end}}{{end}}
 
 {{define "boards_settings_in"}}<link rel="stylesheet" href="/static/boards_board.css">
 <link rel="stylesheet" href="/static/boards_colors.css">
 <div class="boards-settings" data-active="{{.Active}}" data-board="{{.Board.ID}}">
   <header class="bs-head">
     <div>
-      <p class="bs-crumbs">{{if .ProjectName}}<a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a> / {{end}}<a href="/boards/{{.Board.ID}}">{{.Board.Name}}</a></p>
       <h1>Board settings</h1>
     </div>
     <a class="boards-btn" href="/boards/{{.Board.ID}}">&larr; Back to board</a>
@@ -48,7 +40,7 @@
       <span class="bs-text"><b><label for="bs-name">Board name</label></b><small>Shown in the project, in the top bar and in notifications.</small></span>
       <input id="bs-name" name="name" value="{{.Board.Name}}" required maxlength="128"{{if not .CanEdit}} disabled{{end}}>
     </div>
-    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-color-l">Board colour</b><small>Tints the board background and adds an accent bar under the header. Shown as a stripe on the project page.</small></span>
+    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-color-l">Board colour</b><small>Tints the board background and adds an accent bar under the filters. Shown as a stripe on the project page.</small></span>
       {{template "boards_color_picker" dict "Name" "color" "Current" .Board.Color "Label" "Board colour" "Off" (not .CanEdit)}}</div>
     <div class="bs-row"><span class="bs-text"><b>Project</b><small>The project this board belongs to.</small></span><span class="bs-value">{{if .ProjectName}}<a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a>{{else}}-{{end}}</span></div>
     <div class="bs-row"><span class="bs-text"><b>Your access</b><small>What you may do on this board.</small></span><span class="bs-value"><span class="boards-badge">{{.Level}}</span></span></div>
