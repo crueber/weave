@@ -217,8 +217,8 @@ func TestColorRendering(t *testing.T) {
 	}
 	m := mux(e)
 
-	// list menu is a floating popover: role=menu, scrollable middle, pinned footer, one-at-a-time expanders, one colour field
-	for _, want := range []string{`class="boards-menu-pop" data-sheet="1" role="menu"`, `boards-menu-scroll`, `boards-menu-foot`, `class="boards-sub"`, `data-colorpick`, `Archive list`, `Delete list`} {
+	// list menu is a floating popover: role=menu, scrollable middle, pinned footer, one colour field
+	for _, want := range []string{`class="boards-menu-pop" data-sheet="1" role="menu"`, `boards-menu-scroll`, `boards-menu-foot`, `data-colorpick`, `Archive list`} {
 		if !strings.Contains(body0(t, m, b.ID), want) {
 			t.Errorf("list menu missing %q", want)
 		}

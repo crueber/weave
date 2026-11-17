@@ -209,8 +209,13 @@ func (a *App) fail(err error) int {
 	if ae.Detail != nil {
 		e["candidates"] = ae.Detail
 	}
-	b, _ := json.Marshal(map[string]any{"error": e})
-	fmt.Fprintln(a.Stderr, string(b))
+	// Do not HTML-escape the message: upstream text (a proxy's HTML page, a path, a quote) reads
+	// much better as-is, and the output is still valid JSON.
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(map[string]any{"error": e})
+	fmt.Fprint(a.Stderr, buf.String())
 	return ae.Exit()
 }
 

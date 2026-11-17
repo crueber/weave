@@ -51,7 +51,7 @@ docs/                DESIGN.md (contract)  DESIGN-SYSTEM.md (tokens)  CLI.md  AG
 ```
 
 Domain ownership and **migration number ranges** are in `docs/DESIGN.md`. Existing migrations: `0001_core` (never edit),
-`0100/0101` auth, `0200` projects, `0301/0302` boards (colours, column descriptions), `0400` cards, `0500` cardextras, `0600` notify, `0800` agents/events,
+`0100/0101` auth, `0200` projects, `0301/0302/0303` boards (colours, column descriptions, column WIP limit), `0400` cards, `0500` cardextras, `0600` notify, `0800` agents/events,
 `0900` api-key expiry, `0950` attachment index. Add new files in the owning domain's range (or the next free number); migrations
 run in filename order, once, inside one transaction. **Never edit an applied migration**; add a new one.
 

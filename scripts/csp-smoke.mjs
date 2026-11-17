@@ -134,7 +134,7 @@ await run('anon: login + terms + healthz', async () => {
 
 // ---- plain pages ---------------------------------------------------------------------------
 for (const path of ['/', `/projects/${proj.id}`, `/boards/${board.id}`, `/boards/${board.id}/calendar`, `/boards/${board.id}/map`,
-  `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, '/dashboard', '/notifications', '/notification-services',
+  `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, `/lists/${lists[0].id}`, `/ui/lists/${lists[0].id}`, '/dashboard', '/notifications', '/notification-services',
   '/search?q=card', '/settings', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
   '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`, `/ui/boards/${board.id}/inbox`]) {
   await run('page ' + path, async () => {
@@ -193,6 +193,21 @@ await run('board: drag and drop a card to another list', async () => {
   await src.dragTo(dst, { timeout: 5000 }).catch(() => {}); await settle(p);
   await p.locator('.boards-list').first().dragTo(p.locator('.boards-list').nth(2), { timeout: 5000 }).catch(() => {}); await settle(p);
 });
+await run('board: drag the empty background to pan sideways (mouse)', async () => {
+  await go(`/boards/${board.id}`);
+  // make the strip overflow with an inert spacer, then drag the bare background (past the last column's right edge)
+  await p.evaluate(() => { const l = document.querySelector('.boards-lists'); const s = document.createElement('div'); s.id = 'pan-spacer'; s.style.cssText = 'flex:none;width:4000px;height:1px'; l.appendChild(s); });
+  const box = await p.evaluate(() => { const l = document.querySelector('.boards-lists').getBoundingClientRect(); const c = document.querySelector('.boards-col').getBoundingClientRect(); return { x: l.left + 8, y: Math.max(c.bottom, l.top) + 20, bottom: l.bottom, hx: c.left + 60, hy: c.top + 14 }; });
+  const left = () => p.evaluate(() => document.querySelector('.boards-lists').scrollLeft);
+  const drag = async (x, y) => { await p.mouse.move(x, y); await p.mouse.down(); await p.mouse.move(x - 250, y, { steps: 10 }); await p.mouse.up(); await settle(p); };
+  const gx = await p.evaluate(() => { const c = document.querySelectorAll('.boards-col'); return (c[0].getBoundingClientRect().right + c[1].getBoundingClientRect().left) / 2; });
+  const gy = await p.evaluate(() => document.querySelector('.boards-col').getBoundingClientRect().top + 40);
+  await drag(gx, gy);
+  if ((await left()) < 100) throw new Error('dragging the gap between columns did not pan the board');
+  await p.evaluate(() => { document.querySelector('.boards-lists').scrollLeft = 0; }); await settle(p);
+  await drag(box.hx, box.hy);                                   // a column header must not pan (it drags the list)
+  if ((await left()) > 5) throw new Error('dragging a column header panned the board');
+});
 await run('board: list menu, quick edit, tile hover buttons', async () => {
   await go(`/boards/${board.id}`);
   await clickEach('.boards-list details.boards-menu > summary, .boards-menu-btn, summary.boards-menu-btn');
@@ -206,6 +221,26 @@ await run('board: views / toolbar / filters', async () => {
   await go(`/boards/${board.id}`);
   await clickEach('.boards-toolbar button, .boards-toolbar summary, .boards-toolbar a[hx-get], .boards-views button, nav button', { max: 25 });
   await esc(p);
+});
+
+// ---- column sheet --------------------------------------------------------------------------
+await run('column sheet: open from header, WIP popover, description editor, sort, menu, prev/next, close', async () => {
+  await api('PATCH', `/lists/${lists[0].id}`, { description: 'Column brief', wipLimit: 1 });
+  await go(`/boards/${board.id}`);
+  await p.locator(`#col-${lists[0].id} button.boards-col-settings`).click(); await p.locator('#list-sheet').waitFor(); await settle(p);
+  if (!/\/lists\//.test(p.url())) throw new Error('sheet did not push /lists/{id}');
+  await p.locator('#list-sheet details[data-pop=wip] > summary').click();
+  await p.locator('#list-sheet [data-ls-wip-input]').fill('2');
+  await p.locator('#list-sheet form[data-ls-form=wip] button.primary').click(); await settle(p);
+  await p.locator('#list-sheet [data-ls-desc-edit]').first().click();
+  await p.locator('#list-sheet [data-ls-desc-input]').fill('Column brief, edited'); await p.keyboard.press('Control+Enter'); await settle(p);
+  await p.locator('#list-sheet [data-ls-form=sort] button').click(); await settle(p);
+  await clickEach('#list-sheet summary', { max: 8 });
+  await p.locator('#list-sheet [data-ls-sec-toggle]').first().click();
+  await p.locator('#list-sheet [data-ls-nav]:not([disabled])').first().click(); await settle(p);
+  await esc(p); await settle(p);
+  if (/\/lists\//.test(p.url())) throw new Error('closing the sheet did not restore the board URL');
+  await go(`/lists/${lists[0].id}`); await p.locator('#list-sheet').waitFor(); await esc(p);
 });
 
 // ---- card sheet ----------------------------------------------------------------------------

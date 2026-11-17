@@ -128,8 +128,9 @@
   if (modal()) modal().addEventListener('close', onClose);
   window.addEventListener('popstate', function (e) {
     var m = modal();
-    if (m && m.open) { st.pushed = false; m.close(); }
+    if (m && m.open) { st.pushed = false; if (window.ListSheet) ListSheet.popped(); m.close(); }
     else if (e.state && e.state.card && window.Boards) CardSheet.open(e.state.card, { fromPop: true });
+    else if (e.state && e.state.list && window.ListSheet) ListSheet.open(e.state.list, { fromPop: true });
   });
 
   // ---- popovers: <details class="cards-pop" data-pop> (rail, list switcher, menu) and <details class="x-pop"> (fragments) ----

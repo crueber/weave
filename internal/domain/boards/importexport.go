@@ -23,6 +23,7 @@ import (
 type impList struct {
 	Key, Name, Type, Color, Desc string
 	Pos                          float64
+	WIP                          int
 }
 type impGroup struct {
 	Key, Name    string
@@ -78,6 +79,7 @@ type exportList struct {
 	Type        string  `json:"type"`
 	Color       string  `json:"color,omitempty"`
 	Description string  `json:"description,omitempty"`
+	WIPLimit    int     `json:"wipLimit,omitempty"`
 	Position    float64 `json:"position"`
 }
 type exportGroup struct {
@@ -274,7 +276,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard)
 		if first == "" {
 			first = id
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, boardID, typ, pos, l.Name, nullStr(l.Color), nullStr(l.Desc), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, boardID, typ, pos, l.Name, nullStr(l.Color), nullStr(l.Desc), importWIP(l.WIP), now); err != nil {
 			return err
 		}
 	}
@@ -394,7 +396,7 @@ func parseWeave(data []byte) (impBoard, error) {
 	}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
-		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position})
+		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position, WIP: l.WIPLimit})
 	}
 	for _, g := range d.Groups {
 		ib.Groups = append(ib.Groups, impGroup{Key: g.ID, Name: g.Name, SingleSelect: g.SingleSelect})
@@ -651,13 +653,13 @@ func buildExport(ctx context.Context, d *db.DB, b Board) (*exportDoc, error) {
 	if b.Color != nil {
 		doc.Board["color"] = *b.Color
 	}
-	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,'') FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
+	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,''),COALESCE(wip_limit,0) FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var l exportList
-		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description)
+		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit)
 		doc.Lists = append(doc.Lists, l)
 	}
 	rows.Close()
@@ -780,4 +782,12 @@ func exportCSV(doc *exportDoc) []byte {
 	w.Flush()
 	_, _ = io.Discard.Write(nil)
 	return buf.Bytes()
+}
+
+// importWIP validates a limit read from a file (untrusted): out-of-range values are dropped.
+func importWIP(n int) any {
+	if n < 1 || n > MaxWIPLimit {
+		return nil
+	}
+	return n
 }

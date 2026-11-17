@@ -595,7 +595,7 @@ func copyBoardContent(ctx context.Context, tx *sql.Tx, srcID, dstID, dstProject 
 			}
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,type,position,name,color,description FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position`, srcID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,type,position,name,color,description,wip_limit FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position`, srcID)
 	if err != nil {
 		return err
 	}
@@ -605,18 +605,19 @@ func copyBoardContent(ctx context.Context, tx *sql.Tx, srcID, dstID, dstProject 
 		name    sql.NullString
 		color   sql.NullString
 		desc    sql.NullString
+		wip     sql.NullInt64
 	}
 	var lists []li
 	for rows.Next() {
 		var x li
-		_ = rows.Scan(&x.id, &x.typ, &x.pos, &x.name, &x.color, &x.desc)
+		_ = rows.Scan(&x.id, &x.typ, &x.pos, &x.name, &x.color, &x.desc, &x.wip)
 		lists = append(lists, x)
 	}
 	rows.Close()
 	for _, x := range lists {
 		nid := db.NewID()
 		listMap[x.id] = nid
-		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,created_at) VALUES(?,?,?,?,?,?,?,?)`, nid, dstID, x.typ, x.pos, x.name, x.color, x.desc, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, nid, dstID, x.typ, x.pos, x.name, x.color, x.desc, x.wip, now); err != nil {
 			return err
 		}
 	}

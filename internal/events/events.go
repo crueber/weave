@@ -238,6 +238,41 @@ func Query(ctx context.Context, d *db.DB, f Filter) ([]Row, error) {
 	return out, rows.Err()
 }
 
+// Recent returns the newest stored events that touch one list (as the list, the source or the
+// target of a move), newest first. before > 0 pages: only events with seq < before. Only the
+// given event types are returned (empty = all). Events past the retention window (see Purge)
+// have no envelope any more and are not returned.
+func Recent(ctx context.Context, d *db.DB, boardID, listID string, types []string, before int64, limit int) ([]Row, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	args := []any{boardID, listID, listID, listID}
+	q := `SELECT seq,board_id,etype,envelope FROM actions WHERE board_id=? AND seq IS NOT NULL AND envelope IS NOT NULL AND (list_id=? OR from_list_id=? OR to_list_id=?) `
+	if len(types) > 0 {
+		q += `AND ` + in("etype", types, &args) + ` `
+	}
+	if before > 0 {
+		q += `AND seq < ? `
+		args = append(args, before)
+	}
+	q += `ORDER BY seq DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := d.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Row
+	for rows.Next() {
+		var r Row
+		if err := rows.Scan(&r.Seq, &r.BoardID, &r.Type, &r.Raw); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // LastSeq is the id of the newest stored event (0 when none).
 func LastSeq(ctx context.Context, d *db.DB) int64 {
 	var n *int64

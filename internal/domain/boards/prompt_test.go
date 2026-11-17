@@ -26,8 +26,12 @@ func TestListDescription(t *testing.T) {
 	if got := tree.Lists[0].Description; got == nil || *got != brief {
 		t.Fatalf("board.tree description: %+v", got)
 	}
-	if code, body := get(t, mux(e), "/boards/"+b.ID, false); code != 200 || !strings.Contains(body, brief) {
-		t.Fatalf("board page missing the column description (%d)", code)
+	// the board header no longer shows the description (it lives in the column sheet)
+	if code, body := get(t, mux(e), "/boards/"+b.ID, false); code != 200 || strings.Contains(body, brief) {
+		t.Fatalf("board page should not carry the column description (%d)", code)
+	}
+	if code, body := get(t, mux(e), "/ui/lists/"+l.ID, true); code != 200 || !strings.Contains(body, brief) {
+		t.Fatalf("column sheet missing the description (%d)", code)
 	}
 
 	long := strings.Repeat("x", 2001)

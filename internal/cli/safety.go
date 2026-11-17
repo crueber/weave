@@ -54,6 +54,31 @@ func (a *App) warnInsecure() {
 	})
 }
 
+var (
+	htmlTitleRe = regexp.MustCompile(`(?is)<title>(.{0,200}?)</title>`)
+	htmlByRe    = regexp.MustCompile(`(?is)<hr>\s*<center>([^<]{0,80})</center>`)
+)
+
+// proxyErrorPage explains an HTML error body. Weave always answers with a JSON error envelope, so
+// markup means something in front of it (reverse proxy, wrong vhost, captive portal) refused the
+// request; echoing the markup as the error message only confuses people.
+func proxyErrorPage(r *Response) (string, bool) {
+	body := strings.TrimSpace(string(r.Body))
+	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "text/html") && !strings.HasPrefix(body, "<") {
+		return "", false
+	}
+	msg := fmt.Sprintf("HTTP %d from a proxy in front of Weave, not a Weave error", r.Status)
+	if server := strings.TrimSpace(r.Header.Get("Server")); server != "" {
+		msg += " (server: " + server + ")"
+	} else if m := htmlByRe.FindStringSubmatch(body); m != nil {
+		msg += " (server: " + strings.TrimSpace(m[1]) + ")"
+	}
+	if m := htmlTitleRe.FindStringSubmatch(body); m != nil {
+		msg += ": " + strings.Join(strings.Fields(m[1]), " ")
+	}
+	return msg + "; check that --url / WEAVE_URL points at the instance and that its proxy forwards it", true
+}
+
 // warnTokenFlag nudges users away from putting the token on the command line.
 func (a *App) warnTokenFlag(tok string) {
 	if tok == "" || tok == "-" {

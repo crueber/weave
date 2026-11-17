@@ -47,14 +47,14 @@ button.cards-label:hover{filter:brightness(.94)}
 .cards-fullpage>p a{display:inline-block;margin-bottom:var(--space-3);font-weight:600;text-decoration:none}
 .cards-fullpage .cards-modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-2)}
 .cards-fullpage .cards-close{display:none}
-dialog#modal:has(.cards-modal){width:min(70rem,96vw);max-width:none;max-height:94vh;margin:3vh auto;padding:0;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);color:var(--fg);box-shadow:var(--shadow-3)}
+dialog#modal:has(.cards-modal),dialog#modal:has(.ls){width:min(70rem,96vw);max-width:none;max-height:94vh;margin:3vh auto;padding:0;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);color:var(--fg);box-shadow:var(--shadow-3)}
 dialog#modal:not([open]){display:none}
-dialog#modal:has(.cards-modal)[open]{animation:cards-sheet .18s var(--ease,ease-out)}
+dialog#modal:has(.cards-modal)[open],dialog#modal:has(.ls)[open]{animation:cards-sheet .18s var(--ease,ease-out)}
 dialog#modal::backdrop{background:var(--overlay)}
 @keyframes cards-sheet{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){dialog#modal:has(.cards-modal)[open],.cards-skel i,.cards-saved:not(:empty){animation:none}}
+@media (prefers-reduced-motion:reduce){dialog#modal:has(.cards-modal)[open],dialog#modal:has(.ls)[open],.cards-skel i,.cards-saved:not(:empty){animation:none}}
 @media (max-width:760px){
-  dialog#modal:has(.cards-modal){width:100vw;height:100dvh;max-height:none;margin:0;border:0;border-radius:0}
+  dialog#modal:has(.cards-modal),dialog#modal:has(.ls){width:100vw;height:100dvh;max-height:none;margin:0;border:0;border-radius:0}
 }
 
 /* ---- the sheet ---- */

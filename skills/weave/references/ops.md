@@ -1499,6 +1499,17 @@ Rename / reorder a label group or toggle single-select
 
 ## list
 
+### `weave list activity`
+
+Activity feed of one column: cards created, moved in or out, archived, and changes to the column itself (newest first; events older than the retention window are gone)  
+`GET /lists/{id}/activity` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | list id |
+| `--before` | query | string |  | Event id cursor: return events older than this one |
+| `--limit` | query | number |  | Page size (default 20, max 100) |
+
 ### `weave list archive`
 
 Archive a list: its cards move to the archive list and the list is removed  
@@ -1529,12 +1540,22 @@ Create a list (column) on a board
 | `--type` | body | string |  | active (default) \| closed |
 | `--color` | body | string |  | column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none |
 | `--description` | body | string |  | brief for this column: what a card that lands here asks for; agents read it |
+| `--wipLimit` | body | number |  | soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none |
 | `--position` | body | number |  |  |
 
 ### `weave list delete`
 
 Delete a list; its cards are moved to the trash list  
 `DELETE /lists/{id}` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+
+### `weave list get`
+
+Get one list (column) of a board  
+`GET /lists/{id}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -1593,7 +1614,7 @@ Sort a list's cards by name, due date or creation time
 
 ### `weave list update`
 
-Rename / recolour a list, set its description (brief for agents), change its type or position  
+Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position  
 `PATCH /lists/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -1603,6 +1624,7 @@ Rename / recolour a list, set its description (brief for agents), change its typ
 | `--color` | body | string |  | column colour: #rrggbb or a preset name; empty string clears the colour |
 | `--type` | body | string |  | switch between active and closed |
 | `--description` | body | string |  | brief for this column: what a card that lands here asks for; empty string clears it |
+| `--wipLimit` | body | number |  | soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit |
 | `--position` | body | number |  |  |
 
 ## notification

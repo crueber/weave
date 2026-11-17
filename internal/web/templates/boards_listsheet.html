@@ -1,0 +1,139 @@
+{{/* The column sheet: configuration view of one column in the shared <dialog id="modal"> (never a card list).
+   Same design language as the card sheet (cards_modal.html): it reuses the card sheet's .cm-* classes; only ids and data-ls-*
+   hooks are its own (the card sheet's script keys off #card-modal, [data-card-nav], #cards-saved ... none of which appear here).
+   Layout: top bar (crumb with a column switcher, saved, prev/next column, actions menu, close) / title / chips, then MAIN
+   (description, agent prompt, listeners, activity) and a RIGHT rail (Properties popovers, Cards actions).
+   Opened by static/boards_listsheet.js from the column header / menu, or on load at /lists/{id}.
+   Forms post to the existing list UI routes (hx-swap="none"); the board behind refreshes by itself. */}}
+{{define "page"}}{{template "boards_list_sheet" .}}{{end}}
+{{define "boards_list_sheet"}}{{$d := .Data}}{{$l := $d.List}}{{$edit := $d.CanEdit}}
+<div id="list-sheet" class="ls cm" data-list="{{$l.ID}}" data-board="{{$d.Board.ID}}" data-total="{{$d.Total}}" data-wip="{{$d.WIP}}" aria-label="Column: {{$d.Name}}">
+  <div class="cm-top">
+    <nav class="cm-crumb" aria-label="Breadcrumb">
+      {{if $d.ProjectName}}<a href="/projects/{{$d.Board.ProjectID}}">{{$d.ProjectName}}</a><span class="cm-sep" aria-hidden="true">/</span>{{end}}<a href="/boards/{{$d.Board.ID}}">{{$d.Board.Name}}</a><span class="cm-sep" aria-hidden="true">/</span>
+      {{if gt (len $d.Columns) 1}}<details class="cm-list cards-pop" data-pop="list"><summary title="Go to another column" aria-label="Column: {{$d.Name}}. Go to another column"><span data-ls-crumb>{{$d.Name}}</span><i class="cm-chev" aria-hidden="true"></i></summary>
+        <div class="cm-popbody cards-popbody cm-lists" role="group" aria-label="Columns of this board">
+          {{range $d.Columns}}<button type="button" class="cm-opt{{if eq .ID $l.ID}} is-on{{end}}" data-ls-goto="{{.ID}}"{{if eq .ID $l.ID}} aria-current="true"{{end}}><span class="cm-tick" aria-hidden="true">{{if eq .ID $l.ID}}&#10003;{{end}}</span>{{deref .Name}}</button>{{end}}
+        </div></details>
+      {{else}}<span class="cm-list-ro" data-ls-crumb>{{$d.Name}}</span>{{end}}
+    </nav>
+    <span class="cards-saved cm-saved" data-ls-saved role="status" aria-live="polite"></span>
+    <span class="cards-nav cm-nav" role="group" aria-label="Column navigation"><button type="button" class="cards-navbtn" data-ls-nav="{{$d.PrevID}}" aria-label="Previous column" title="Previous column"{{if not $d.PrevID}} disabled{{end}}>&#8249;</button><button type="button" class="cards-navbtn" data-ls-nav="{{$d.NextID}}" aria-label="Next column" title="Next column"{{if not $d.NextID}} disabled{{end}}>&#8250;</button></span>
+    {{if $edit}}<details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Column actions" title="Column actions" aria-haspopup="true">&hellip;</summary>
+      <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Column actions">
+        <button type="button" class="cm-mi cm-warn" hx-post="/ui/lists/{{$l.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive." data-ls-archive>Archive column</button>
+        <hr class="cm-sepline">
+        <button type="button" class="cm-mi cards-danger" hx-delete="/ui/lists/{{$l.ID}}" hx-swap="none" hx-confirm="Delete this list? Its cards go to the trash." data-ls-delete>Delete column</button>
+      </div></details>{{end}}
+    <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+  </div>
+
+  <header class="cm-head">
+    <div class="cm-title cards-title" id="ls-title">
+      {{if $edit}}<form hx-patch="/ui/lists/{{$l.ID}}" hx-trigger="change, submit" hx-sync="this:replace" hx-swap="none" data-ls-form="name"><input class="cards-title-input" name="name" value="{{$d.Name}}" maxlength="1024" required aria-label="Column name" placeholder="Column name" data-ls-name></form>
+      {{else}}<h2>{{$d.Name}}</h2>{{end}}
+    </div>
+    <div class="cm-chips" role="group" aria-label="Column status">
+      <span class="cards-badge" data-ls-type>{{if eq $l.Type "closed"}}Closed column{{else}}Active column{{end}}</span>
+      <span class="cards-badge" data-ls-count>{{$d.Total}} {{if eq $d.Total 1}}card{{else}}cards{{end}}</span>
+      <span class="cards-badge ls-wipchip{{if $d.Over}} cards-badge-warn is-over{{end}}" data-ls-wip{{if not $d.WIP}} hidden{{end}}>{{if $d.Over}}<b class="ls-flag" aria-hidden="true">!</b>{{end}}<span data-ls-wip-text>{{if $d.WIP}}WIP {{$d.Total}}/{{$d.WIP}}{{if $d.Over}}, over the limit{{end}}{{end}}</span></span>
+    </div>
+  </header>
+
+  <div class="cm-cols">
+    <main class="cm-main" aria-label="Column content">
+      <section id="ls-desc" class="cm-desc" aria-labelledby="ls-desc-h">
+        <div class="cm-sec-head"><h3 id="ls-desc-h">Description</h3>{{if $edit}}<button type="button" class="cm-ghost" data-ls-desc-edit title="Edit description"{{if not $l.Description}} hidden{{end}}>Edit</button>{{end}}</div>
+        <div id="ls-desc-view">{{template "boards_list_desc_view" .}}</div>
+        {{if $edit}}<form id="ls-desc-form" class="cards-editor cm-editor" hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="desc" hidden>
+          <div class="cards-toolbar cm-toolbar" role="toolbar" aria-label="Formatting">
+            <button type="button" data-md="**|**" title="Bold" aria-label="Bold"><b>B</b></button><button type="button" data-md="_|_" title="Italic" aria-label="Italic"><i>I</i></button>
+            <button type="button" data-md="`|`" title="Code" aria-label="Code">&lt;/&gt;</button>
+            <span class="cm-tbsep" aria-hidden="true"></span>
+            <button type="button" data-md-line="- " title="Bullet list" aria-label="Bullet list">&bull;</button><button type="button" data-md="[|](https://)" title="Link" aria-label="Link">link</button></div>
+          <textarea name="description" rows="5" maxlength="2000" placeholder="What a card in this column asks for. It goes into the agent prompt (markdown supported)" aria-label="Description" data-ls-desc-input>{{deref $l.Description}}</textarea>
+          <div class="cards-actions cm-editor-bar"><button class="primary">Save</button><button type="button" data-ls-desc-cancel>Cancel</button><span class="cm-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves &middot; <kbd>Esc</kbd> cancels</span></div>
+        </form>{{end}}
+      </section>
+
+      {{if $edit}}<section class="cm-sec is-collapsed" data-ls-sec="prompt" aria-label="Agent prompt">
+        <div class="x-head"><h3 class="x-h"><button type="button" class="x-toggle" data-ls-sec-toggle aria-expanded="false" aria-controls="ls-prompt-body"><span class="x-chev" aria-hidden="true"></span>Agent prompt</button></h3></div>
+        <div class="ls-secbody" id="ls-prompt-body">
+          <p class="cm-hint">Give this to an AI agent. Edit the text before copying to paste the API key or add more columns (one <code>--list</code> per column).</p>
+          <label class="boards-sr" for="ls-ap-text">Agent prompt text</label>
+          <textarea id="ls-ap-text" class="ls-ap-text" rows="9" spellcheck="false">{{$d.Prompt}}</textarea>
+          <div class="cards-actions"><button type="button" class="primary" data-copy="#ls-ap-text">Copy to clipboard</button></div>
+        </div>
+      </section>{{end}}
+
+      {{if $d.Listeners}}<section class="cm-sec" aria-label="Agents listening">
+        <div class="cm-sec-head"><h3>Listening now</h3><span class="cm-count">{{len $d.Listeners}}</span></div>
+        <ul class="ls-listeners">{{range $d.Listeners}}<li><span class="x-avatar x-avatar-sm" aria-hidden="true">{{.Initial}}</span><span class="ls-ln">{{.Name}}</span>{{if .IsAgent}}<span class="cards-badge">agent</span>{{end}}{{if .Label}}<span class="cm-hint">{{.Label}}</span>{{end}}</li>{{end}}</ul>
+      </section>{{end}}
+
+      <section class="cm-sec" data-ls-sec="activity" aria-label="Activity">
+        <div class="x-head"><h3 class="x-h"><button type="button" class="x-toggle" data-ls-sec-toggle aria-expanded="true" aria-controls="ls-activity-body"><span class="x-chev" aria-hidden="true"></span>Activity</button></h3></div>
+        <div class="ls-secbody" id="ls-activity-body"><div data-ls-activity hx-get="/ui/lists/{{$l.ID}}/activity" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></div>
+      </section>
+    </main>
+
+    <div class="cm-rail">
+      <aside class="cm-props" aria-label="Properties">
+        {{if $edit}}
+        <div class="cm-prop" data-prop="type"><span class="cm-pl" id="ls-pl-type">Type</span>
+          <details class="cm-pv cards-pop" data-pop="type"><summary class="cm-val" aria-labelledby="ls-pl-type" data-pl="Type"><span class="cm-vtext" data-ls-type-val>{{if eq $l.Type "closed"}}Closed{{else}}Active{{end}}</span></summary>
+            <div class="cm-popbody cards-popbody" role="group" aria-label="Column type">
+              <button type="button" class="cm-opt{{if ne $l.Type "closed"}} is-on{{end}}" hx-patch="/ui/lists/{{$l.ID}}" hx-vals='{"type":"active"}' hx-swap="none" data-ls-form="type" data-type="active"><span class="cm-tick" aria-hidden="true">{{if ne $l.Type "closed"}}&#10003;{{end}}</span>Active</button>
+              <button type="button" class="cm-opt{{if eq $l.Type "closed"}} is-on{{end}}" hx-patch="/ui/lists/{{$l.ID}}" hx-vals='{"type":"closed"}' hx-swap="none" data-ls-form="type" data-type="closed"><span class="cm-tick" aria-hidden="true">{{if eq $l.Type "closed"}}&#10003;{{end}}</span>Closed</button>
+              <p class="cm-hint ls-pophint">Closed columns hold finished work.</p>
+            </div></details></div>
+        <div class="cm-prop" data-prop="wip"><span class="cm-pl" id="ls-pl-wip">WIP limit</span>
+          <details class="cm-pv cards-pop" data-pop="wip"><summary class="cm-val ls-wipval" aria-labelledby="ls-pl-wip" data-pl="WIP limit" title="Soft limit: the header flags the column when it holds more cards than this. Nothing is blocked.">
+            <span class="cm-vtext" data-ls-wip-val{{if not $d.WIP}} hidden{{end}}>{{if $d.WIP}}Max {{$d.WIP}}{{end}}</span><span class="cm-empty" data-ls-wip-empty{{if $d.WIP}} hidden{{end}}><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">WIP limit</span></span></summary>
+            <div class="cm-popbody cards-popbody" role="group" aria-label="WIP limit">
+              <p class="cm-hint">A soft limit: the column header shows <em>cards/limit</em> and flags the column when it holds more. Nothing is blocked.</p>
+              <form hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="wip"><label>Maximum cards<input type="number" name="wipLimit" min="1" max="10000" step="1" inputmode="numeric" required value="{{if $d.WIP}}{{$d.WIP}}{{end}}" placeholder="e.g. 5" data-ls-wip-input></label><button class="primary">Set limit</button></form>
+              <form hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="wip" data-ls-wip-clear{{if not $d.WIP}} hidden{{end}}><input type="hidden" name="wipLimit" value=""><button class="cm-quiet">Remove limit</button></form>
+            </div></details></div>
+        {{else}}
+        <div class="cm-prop" data-prop="type"><span class="cm-pl">Type</span><span class="cm-pv cm-ro" data-pl="Type"><span class="cm-vtext">{{if eq $l.Type "closed"}}Closed{{else}}Active{{end}}</span></span></div>
+        <div class="cm-prop" data-prop="wip"><span class="cm-pl">WIP limit</span><span class="cm-pv cm-ro" data-pl="WIP limit"><span class="cm-vtext">{{if $d.WIP}}Max {{$d.WIP}}{{if $d.Over}} (over){{end}}{{else}}None{{end}}</span></span></div>
+        {{end}}
+        <div class="cm-prop" data-prop="cards"><span class="cm-pl">Cards</span><span class="cm-pv cm-ro" data-pl="Cards"><span class="cm-vtext" data-ls-count-val>{{$d.Total}}</span></span></div>
+        <div class="cm-prop" data-prop="created"><span class="cm-pl">Created</span><span class="cm-pv cm-ro" data-pl="Created"><span class="cm-vtext">{{cards_when $l.CreatedAt}}</span></span></div>
+        {{if $l.UpdatedAt}}<div class="cm-prop" data-prop="updated"><span class="cm-pl">Updated</span><span class="cm-pv cm-ro" data-pl="Updated"><span class="cm-vtext" data-ls-updated>{{cards_when $l.UpdatedAt}}</span></span></div>{{end}}
+      </aside>
+      {{if $edit}}<aside class="cm-extra" aria-label="Card actions">
+        <section class="cm-sec" data-ls-sec="cards" aria-label="Cards">
+          <div class="x-head"><h3 class="x-h"><button type="button" class="x-toggle" data-ls-sec-toggle aria-expanded="true" aria-controls="ls-cards-body"><span class="x-chev" aria-hidden="true"></span>Cards</button></h3></div>
+          <div class="ls-secbody" id="ls-cards-body">
+            <form class="ls-ctlrow" hx-post="/ui/lists/{{$l.ID}}/sort" hx-swap="none" data-ls-form="sort">
+              <span class="ls-rowl" id="ls-sort-l">Sort cards</span>
+              <span class="ls-ctl"><select name="field" aria-labelledby="ls-sort-l"><option value="name">by name</option><option value="dueDate">by due date</option><option value="createdAt">by created</option></select><select name="order" aria-label="Order"><option value="asc">A&ndash;Z</option><option value="desc">Z&ndash;A</option></select><button>Sort</button></span>
+            </form>
+            <form class="ls-ctlrow" hx-post="/ui/lists/{{$l.ID}}/move-cards" hx-swap="none" hx-confirm="Move all cards of this list?" data-ls-form="move">
+              <span class="ls-rowl" id="ls-move-l">Move all cards to</span>
+              <span class="ls-ctl"><select name="listId" required aria-labelledby="ls-move-l">{{range $d.Targets}}<option value="{{.ID}}">{{deref .Name}}</option>{{else}}<option value="" disabled selected>No other column</option>{{end}}</select><button{{if not $d.Targets}} disabled{{end}}>Move</button></span>
+            </form>
+          </div>
+        </section>
+      </aside>{{end}}
+    </div>
+  </div>
+</div>{{end}}
+
+{{/* the description's reading view (also re-fetched after an inline save) */}}
+{{define "boards_list_desc_view"}}{{$d := .Data}}{{$l := $d.List}}
+{{if $l.Description}}<div class="cards-md cm-desc-view{{if $d.CanEdit}} is-editable{{end}}"{{if $d.CanEdit}} data-ls-desc-click{{end}}>{{cards_md $l.Description}}</div>
+{{else if $d.CanEdit}}<button type="button" class="cm-desc-empty" data-ls-desc-edit>Add a description&hellip; <span class="cm-hint">what a card in this column asks for (markdown)</span></button>
+{{else}}<p class="cards-muted">No description yet.</p>{{end}}{{end}}
+
+{{/* the activity feed: who, what, when */}}
+{{define "boards_list_activity"}}{{$d := .Data}}
+<div class="ls-act" hx-target="this" hx-swap="outerHTML">
+  <ul class="x-activity">
+  {{range $a := $d.Items}}<li><span class="x-avatar x-avatar-sm" aria-hidden="true">{{$a.Initial}}</span><span class="x-atext"><strong>{{if $a.Actor}}{{$a.Actor}}{{else}}Someone{{end}}</strong>{{if $a.ActorIsAgent}} <span class="cards-badge">agent</span>{{end}} {{$a.Summary}} <span class="x-muted" title="{{xDate $a.At}}">{{xAgo $a.At}}</span></span></li>
+  {{else}}<li class="x-muted">No activity yet.</li>{{end}}
+  </ul>
+  {{if $d.HasMore}}<button type="button" class="cm-ghost" hx-get="/ui/lists/{{$d.ListID}}/activity?limit={{$d.NextLimit}}">Show more</button>{{end}}
+</div>{{end}}

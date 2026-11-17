@@ -5,9 +5,11 @@
 <link rel="stylesheet" href="/static/boards_board.css">
 <link rel="stylesheet" href="/static/boards_colors.css">
 <link rel="stylesheet" href="/static/cards_modal.css">
+<link rel="stylesheet" href="/static/extras_card.css">
 <link rel="stylesheet" href="/static/agents.css">
+<link rel="stylesheet" href="/static/boards_listsheet.css">
 {{template "boards_sprite"}}
-<div class="boards-shell" id="board-shell"{{boardsBoardAttr .Board}}>
+<div class="boards-shell boards-shell-{{.View}}" id="board-shell"{{boardsBoardAttr .Board}}>
   <header class="boards-head">
     <div class="boards-title">
       {{if .ProjectName}}<nav class="boards-crumbs" aria-label="Breadcrumb"><a href="/">Projects</a> <span aria-hidden="true">/</span> <a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a></nav>{{end}}
@@ -22,7 +24,7 @@
     </nav>
     <span class="spacer"></span>
     <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
-    <a class="boards-btn" href="/boards/{{.Board.ID}}/settings">Settings</a>
+    <a class="boards-btn boards-settings-btn" href="/boards/{{.Board.ID}}/settings" aria-label="Board settings" title="Board settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="boards-btn-label">Settings</span></a>
   </header>
   {{template "boards_filterbar" .}}
   {{template "boards_body_in" .}}
@@ -36,9 +38,11 @@
 <script src="/static/boards_board.js" defer></script>
 <script src="/static/boards_compose.js" defer></script>
 <script src="/static/boards_dnd.js" defer></script>
+<script src="/static/boards_pan.js" defer></script>
 <script src="/static/boards_popover.js" defer></script>
 <script src="/static/boards_keys.js" defer></script>
-<script src="/static/boards_colors.js" defer></script>{{end}}
+<script src="/static/boards_colors.js" defer></script>
+<script src="/static/boards_listsheet.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
 
 {{define "boards_help"}}<dialog id="boards-help" class="boards-help" aria-labelledby="boards-help-h">
   <form method="dialog" class="boards-help-close"><button class="boards-btn" aria-label="Close shortcuts">Close</button></form>
@@ -80,12 +84,13 @@
 <symbol id="i-plus" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 2h1.6v5.2H14v1.6H8.8V14H7.2V8.8H2V7.2h5.2V2z"/></symbol>
 <symbol id="i-more" viewBox="0 0 16 16"><path fill="currentColor" d="M3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></symbol>
 <symbol id="i-robot" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 1h1.6v1.6H11A2.5 2.5 0 0 1 13.5 5v5a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 10V5A2.5 2.5 0 0 1 5 2.6h2.2V1zM5 4.1a.9.9 0 0 0-.9.9v5c0 .5.4.9.9.9h6c.5 0 .9-.4.9-.9V5a.9.9 0 0 0-.9-.9H5zM6 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM1 6.5h1v3H1zm13 0h1v3h-1zM6 14h4v1H6z"/></symbol>
+<symbol id="i-gear" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3.25h12v1.5H2zM2 7.25h12v1.5H2zM2 11.25h12v1.5H2zM10 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM5 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM11 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></symbol>
 <symbol id="i-chev" viewBox="0 0 16 16"><path fill="currentColor" d="M10.5 3.5 9.4 2.4 3.8 8l5.6 5.6 1.1-1.1L6 8z"/></symbol>
 </defs></svg>{{end}}
 
 {{define "boards_list_options"}}{{range .Data}}{{if or (eq .Type "active") (eq .Type "closed")}}<option value="{{.ID}}">{{deref .Name}}</option>{{end}}{{end}}{{end}}
 
-{{/* "Agent prompt" dialog: the copy-paste brief for one column (opened from the column menu). */}}
+{{/* "Agent prompt" dialog: the copy-paste brief for one column (opened from the column sheet). */}}
 {{define "boards_agent_prompt"}}{{$d := .Data}}
 <article class="boards-ap" aria-labelledby="boards-ap-h">
   <header class="boards-ap-head">

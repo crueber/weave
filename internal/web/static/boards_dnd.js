@@ -25,7 +25,7 @@
     if (S || B.grab.active || !lists() || !B.canEdit()) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     var t = e.target; if (!t.closest) return;
-    if (t.closest('.boards-composer, .boards-menu, .boards-pop, input, textarea, select, [data-quick], [data-label-toggle], [data-collapse], [data-add-top], .boards-col-title-input')) return;
+    if (t.closest('.boards-composer, .boards-menu, .boards-pop, input, textarea, select, [data-quick], [data-label-toggle], [data-collapse], [data-list-sheet], .boards-col-title-input')) return;
     var kind = '', el = null;
     var tile = t.closest('.boards-tile');
     if (tile && tile.closest('.boards-cards')) { kind = 'card'; el = tile; }

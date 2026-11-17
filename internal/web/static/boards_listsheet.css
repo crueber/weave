@@ -1,0 +1,36 @@
+/* Column sheet (boards domain; the header badge/button rules live in boards_board.css). The sheet reuses the card sheet's
+   classes (cards_modal.css: .cm, .cm-top, .cm-props, .cm-prop, .cm-val, .cm-editor ... and the dialog sizing, which lists
+   `dialog#modal:has(.ls)` next to the card sheet). Only what is specific to a column lives here. Tokens only, no gradients. */
+.ls-wipchip.is-over{font-weight:700}
+.ls-flag{display:inline-grid;place-items:center;width:.95rem;height:.95rem;margin-right:.3rem;border-radius:var(--radius-pill);background:var(--danger);color:var(--surface);font-size:.7rem;line-height:1}
+.ls-wipchip .ls-flag{flex:none}
+
+/* collapsible sections (state kept by boards_listsheet.js); the chevron rotation comes from cards_modal.css */
+.ls .cm-sec.is-collapsed>.ls-secbody{display:none}
+.ls .cm-main>.cm-sec>.x-head{margin-bottom:var(--space-1)}
+.ls-secbody>*+*{margin-top:var(--space-2)}
+.ls-secbody .cm-hint{margin:0}
+.ls-secbody code{font-family:var(--font-mono)}
+.ls-ap-text{display:block;width:100%;box-sizing:border-box;min-height:9rem;resize:vertical;font:var(--text-sm)/1.5 var(--font-mono);color:var(--fg);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3)}
+.ls-pophint{margin:0;padding:0 .5rem}
+.ls-listeners{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.ls-listeners li{display:inline-flex;align-items:center;gap:.4rem;padding:.2rem .6rem .2rem .25rem;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--surface-2);font-size:var(--text-sm)}
+.ls-ln{font-weight:600}
+
+/* rail: Sort / Move rows (label above, select(s) + button below) */
+.ls-ctlrow{display:flex;flex-direction:column;gap:.25rem;margin:0}
+.ls-ctlrow+.ls-ctlrow{margin-top:var(--space-3)}
+.ls-rowl{font-size:var(--text-sm);font-weight:600;color:var(--muted)}
+.ls-ctl{display:flex;gap:.3rem;align-items:center;min-width:0}
+.ls-ctl select{flex:1 1 0;min-width:0;width:auto;padding:.3rem .4rem;font-size:var(--text-sm)}
+.ls-ctl button{flex:none;padding:.3rem .7rem}
+
+/* the activity feed sits in the main column, below the sections */
+.ls-act .cm-ghost{margin-top:var(--space-1)}
+.ls .cm-desc-view [data-ls-desc-click]{cursor:text}
+
+/* phone: the properties become a chip row without their labels (cards_modal.css); name the read-only ones */
+@media (max-width:760px){
+  .ls .cm-ro[data-pl]::before,.ls .cm-val[data-pl]::before{content:attr(data-pl);color:var(--muted);font-size:var(--text-sm);font-weight:600}
+  .ls .cm-val.ls-wipval:not(:has([data-ls-wip-val]:not([hidden])))::before{content:none}
+}

@@ -26,6 +26,36 @@ func TestInsecureURLWarning(t *testing.T) {
 	}
 }
 
+func TestProxyErrorPageMessage(t *testing.T) {
+	body := []byte("<html>\r\n<head><title>403 Forbidden</title></head>\r\n<body>\r\n<center><h1>403 Forbidden</h1></center>\r\n<hr><center>openresty</center>\r\n</body>\r\n</html>\r\n")
+	r := &Response{Status: 403, Header: http.Header{"Content-Type": {"text/html"}, "Server": {"openresty"}}, Body: body}
+	msg := errorFromResponse(r).Message
+	for _, want := range []string{"HTTP 403", "proxy in front of Weave", "openresty", "403 Forbidden", "WEAVE_URL"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q does not mention %q", msg, want)
+		}
+	}
+	// A JSON error envelope from Weave itself is left alone.
+	weave := &Response{Status: 403, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: []byte(`{"error":{"code":"forbidden","message":"no access to this card"}}`)}
+	if got := errorFromResponse(weave).Message; got != "no access to this card" {
+		t.Errorf("Weave error message rewritten to %q", got)
+	}
+}
+
+func TestFailKeepsHTMLReadable(t *testing.T) {
+	var errb bytes.Buffer
+	a := &App{Stderr: &errb}
+	a.fail(&APIError{Code: "forbidden", Message: "token <wk_x> is not valid"})
+	out := errb.String()
+	if strings.Contains(out, `\u003c`) {
+		t.Errorf("error output is HTML-escaped: %s", out)
+	}
+	if !strings.Contains(out, "token <wk_x> is not valid") || !strings.HasSuffix(out, "\n") {
+		t.Errorf("unexpected error output: %q", out)
+	}
+}
+
 func TestInsecureWarningPrintedOnceToStderr(t *testing.T) {
 	var errb bytes.Buffer
 	a := &App{Stderr: &errb, Cfg: Resolved{URL: "http://weave.example.com"}}

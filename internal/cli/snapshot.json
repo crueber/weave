@@ -3911,6 +3911,38 @@
   ]
  },
  {
+  "name": "list.activity",
+  "tag": "list",
+  "summary": "Activity feed of one column: cards created, moved in or out, archived, and changes to the column itself (newest first; events older than the retention window are gone)",
+  "method": "GET",
+  "path": "/lists/{id}/activity",
+  "auth": "user",
+  "ui": "GET /ui/lists/{id}/activity",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "list id"
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Event id cursor: return events older than this one"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "Page size (default 20, max 100)"
+   }
+  ]
+ },
+ {
   "name": "list.archive",
   "tag": "list",
   "summary": "Archive a list: its cards move to the archive list and the list is removed",
@@ -3987,6 +4019,13 @@
     "desc": "brief for this column: what a card that lands here asks for; agents read it"
    },
    {
+    "name": "wipLimit",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none"
+   },
+   {
     "name": "position",
     "in": "body",
     "type": "number",
@@ -4002,6 +4041,23 @@
   "path": "/lists/{id}",
   "auth": "user",
   "ui": "DELETE /ui/lists/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.get",
+  "tag": "list",
+  "summary": "Get one list (column) of a board",
+  "method": "GET",
+  "path": "/lists/{id}",
+  "auth": "user",
+  "ui": "GET /lists/{id}",
   "fields": [
    {
     "name": "id",
@@ -4141,7 +4197,7 @@
  {
   "name": "list.update",
   "tag": "list",
-  "summary": "Rename / recolour a list, set its description (brief for agents), change its type or position",
+  "summary": "Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position",
   "method": "PATCH",
   "path": "/lists/{id}",
   "auth": "user",
@@ -4179,6 +4235,13 @@
     "type": "string",
     "required": false,
     "desc": "brief for this column: what a card that lands here asks for; empty string clears it"
+   },
+   {
+    "name": "wipLimit",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit"
    },
    {
     "name": "position",

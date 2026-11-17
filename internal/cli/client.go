@@ -268,6 +268,10 @@ func errorFromResponse(r *Response) *APIError {
 		if len(msg) > 300 || msg == "" {
 			msg = fmt.Sprintf("HTTP %d", r.Status)
 		}
+		// A non-JSON error body did not come from Weave; name the proxy instead of dumping markup.
+		if pm, ok := proxyErrorPage(r); ok {
+			msg = pm
+		}
 	}
 	return &APIError{Status: r.Status, Code: code, Message: msg}
 }

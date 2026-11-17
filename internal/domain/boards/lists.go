@@ -21,6 +21,7 @@ type List struct {
 	Name        *string  `json:"name,omitempty"`
 	Color       *string  `json:"color,omitempty"`
 	Description *string  `json:"description,omitempty" desc:"brief for this column: what a card here asks for (agents read it)"`
+	WIPLimit    *int     `json:"wipLimit,omitempty" desc:"soft work-in-progress limit: how many cards this column should hold at most (advisory, nothing is blocked); absent = no limit"`
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   *string  `json:"updatedAt,omitempty"`
 }
@@ -28,11 +29,25 @@ type List struct {
 // maxListDescLen caps a column description (characters; it ends up in agent prompts).
 const maxListDescLen = 2000
 
-const listCols = `id,board_id,type,position,name,color,description,created_at,updated_at`
+// MaxWIPLimit caps a column's soft WIP limit.
+const MaxWIPLimit = 10000
+
+// checkWIP validates a requested limit: 0 clears it (nil), 1..MaxWIPLimit sets it.
+func checkWIP(n int) (*int, error) {
+	if n < 0 || n > MaxWIPLimit {
+		return nil, ops.Invalid(fmt.Sprintf("wipLimit must be between 0 and %d (0 removes the limit)", MaxWIPLimit))
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	return &n, nil
+}
+
+const listCols = `id,board_id,type,position,name,color,description,wip_limit,created_at,updated_at`
 
 func scanList(r interface{ Scan(...any) error }) (List, error) {
 	var l List
-	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.CreatedAt, &l.UpdatedAt)
+	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.CreatedAt, &l.UpdatedAt)
 	return l, err
 }
 
@@ -85,6 +100,7 @@ type ListCreateIn struct {
 	Type        string   `json:"type" desc:"active (default) | closed"`
 	Color       string   `json:"color" desc:"column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"`
 	Description string   `json:"description" desc:"brief for this column: what a card that lands here asks for; agents read it"`
+	WIPLimit    *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none"`
 	Position    *float64 `json:"position"`
 }
 type ListUpdateIn struct {
@@ -93,6 +109,7 @@ type ListUpdateIn struct {
 	Color       *string  `json:"color" desc:"column colour: #rrggbb or a preset name; empty string clears the colour"`
 	Type        *string  `json:"type" desc:"switch between active and closed"`
 	Description *string  `json:"description" desc:"brief for this column: what a card that lands here asks for; empty string clears it"`
+	WIPLimit    *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit"`
 	Position    *float64 `json:"position"`
 }
 type ListMoveIn struct {
@@ -125,6 +142,17 @@ func registerListOps() {
 		}
 		return listsOf(e, in.BoardID, false)
 	})
+	ops.Register(ops.Op{Name: "list.get", Summary: "Get one list (column) of a board", Method: "GET", Path: "/lists/{id}",
+		UI: "GET /lists/{id}"}, func(e *ops.Env, in ListRefIn) (List, error) {
+		l, err := requireList(e, in.ID, authz.View)
+		if err != nil {
+			return l, err
+		}
+		if !isFinite(l.Type) {
+			return List{}, ops.NotFound("list") // archive and trash are system lists, not columns
+		}
+		return l, nil
+	})
 	ops.Register(ops.Op{Name: "list.create", Summary: "Create a list (column) on a board", Method: "POST", Path: "/boards/{boardId}/lists",
 		UI: ui("POST", "/boards/{boardId}/lists")}, func(e *ops.Env, in ListCreateIn) (List, error) {
 		if err := authz.RequireBoard(e, in.BoardID, authz.Edit); err != nil {
@@ -150,19 +178,25 @@ func registerListOps() {
 		if err != nil {
 			return List{}, err
 		}
+		var wip *int
+		if in.WIPLimit != nil {
+			if wip, err = checkWIP(*in.WIPLimit); err != nil {
+				return List{}, err
+			}
+		}
 		pos := appendPos(e.Ctx, e.DB, "lists", "board_id=? AND type IN ('active','closed')", in.BoardID)
 		if in.Position != nil {
 			pos = *in.Position
 		}
 		id := db.NewID()
-		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-			id, in.BoardID, typ, pos, in.Name, nullStr(color), nullStr(in.Description), db.Now()); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			id, in.BoardID, typ, pos, in.Name, nullStr(color), nullStr(in.Description), wip, db.Now()); err != nil {
 			return List{}, err
 		}
 		emit(e, "listCreate", "list.created", in.BoardID, map[string]any{"id": id})
 		return GetList(e.Ctx, e.DB, id)
 	})
-	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, set its description (brief for agents), change its type or position", Method: "PATCH", Path: "/lists/{id}",
+	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position", Method: "PATCH", Path: "/lists/{id}",
 		UI: ui("PATCH", "/lists/{id}")}, func(e *ops.Env, in ListUpdateIn) (List, error) {
 		l, err := requireList(e, in.ID, authz.Edit)
 		if err != nil {
@@ -207,10 +241,15 @@ func registerListOps() {
 				l.Description = in.Description
 			}
 		}
+		if in.WIPLimit != nil {
+			if l.WIPLimit, err = checkWIP(*in.WIPLimit); err != nil {
+				return l, err
+			}
+		}
 		if in.Position != nil {
 			l.Position = in.Position
 		}
-		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, db.Now(), l.ID); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,wip_limit=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, l.WIPLimit, db.Now(), l.ID); err != nil {
 			return l, err
 		}
 		emit(e, "listUpdate", "list.updated", l.BoardID, map[string]any{"id": l.ID})

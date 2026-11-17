@@ -105,6 +105,7 @@ type Column struct {
 
 // PageData feeds the board page, the body fragment and the public page.
 type PageData struct {
+	OpenList    string // list id whose sheet opens on load (GET /lists/{id})
 	Board       Board
 	ProjectName string // empty on the public page (the project is not disclosed)
 	Level       string

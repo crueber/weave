@@ -44,6 +44,9 @@ type ListenerOut struct {
 	ListIDs []string `json:"listIds,omitempty" desc:"board.listeners only: the board's lists it listens to"`
 }
 
+// Initial is the avatar letter (templates).
+func (l ListenerOut) Initial() string { return initialOf(l.Name) }
+
 func init() {
 	ops.Register(ops.Op{Name: "board.tree", Summary: "Board, lists and compact cards (id, name, description, labels, members, claim) in one call",
 		Method: "GET", Path: "/boards/{id}/tree", UI: "exempt:the board page renders the same data as HTML; this is the compact machine read"}, boardTree)

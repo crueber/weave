@@ -130,15 +130,10 @@
 
   // ---- events ----
   document.addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest('[data-open],[data-close],[data-add-top],[data-add-top-btn]');
+    var t = e.target.closest && e.target.closest('[data-open],[data-close]');
     if (!t) return;
     if (t.matches('[data-open]')) { e.preventDefault(); open(compOf(t)); }
-    else if (t.matches('[data-close]')) { e.preventDefault(); closeComposer(compOf(t), { focus: true }); }
-    else { // add to the top of the list
-      e.preventDefault();
-      var col = B.colOf(t); var m = B.menuOf(t); if (m) m.removeAttribute('open');
-      B.openComposer(col, { top: true });
-    }
+    else { e.preventDefault(); closeComposer(compOf(t), { focus: true }); }
   });
   document.addEventListener('keydown', function (e) {
     var ta = e.target.closest && e.target.closest('[data-composer-input]'); if (!ta) return;

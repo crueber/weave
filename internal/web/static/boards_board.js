@@ -82,6 +82,19 @@
   B.recount = function (col) {
     var n = col.querySelectorAll('.boards-tile:not(.is-pending)').length, c = col.querySelector('[data-count]');
     if (c) c.textContent = n;
+    var w = col.querySelector('[data-wip]');
+    if (w) { // soft WIP badge: total = cards in the column (unfiltered); n is the number shown
+      var tot = Math.max(0, (parseInt(w.dataset.total, 10) || 0) + n - (parseInt(w.dataset.visible, 10) || 0));
+      w.dataset.total = tot; w.dataset.visible = n;
+      var lim = parseInt(w.dataset.wip, 10) || 0, over = tot > lim, wn = w.querySelector('[data-wip-n]');
+      if (wn) wn.textContent = tot;
+      var flag = w.querySelector('.boards-wip-flag');
+      if (over && !flag) { flag = document.createElement('b'); flag.className = 'boards-wip-flag'; flag.setAttribute('aria-hidden', 'true'); flag.textContent = '!'; w.insertBefore(flag, w.firstChild); }
+      else if (!over && flag) flag.remove();
+      w.classList.toggle('is-over', over);
+      var txt = tot + ' of ' + lim + ' cards, soft WIP limit' + (over ? ', over the limit' : '');
+      w.setAttribute('aria-label', txt); w.title = txt;
+    }
   };
 
   // ---- applying server state without clobbering the user ----
@@ -131,6 +144,7 @@
     // keep nav links in sync (they carry the filter query)
     var nav = doc.querySelector('.boards-views'), curNav = document.querySelector('.boards-views');
     if (nav && curNav && nav.innerHTML !== curNav.innerHTML) curNav.innerHTML = nav.innerHTML;
+    if (nav && curNav) revealActiveView();
     // active-filter chips
     var nchips = nb.querySelector('.boards-chips'), cchips = cur.querySelector('.boards-chips');
     if (cchips && nchips) { if (cchips.outerHTML !== nchips.outerHTML) cchips.replaceWith(document.importNode(nchips, true)); }
@@ -176,7 +190,16 @@
 
   var verbs = ['created', 'updated', 'deleted', 'moved', 'claimed', 'released'];
   var nouns = ['board', 'list', 'card', 'label', 'boardMembership', 'cardMembership', 'cardLabel', 'task', 'taskList', 'comment', 'attachment', 'customFieldValue'];
+  // phones: the view tabs scroll sideways on very narrow screens; keep the active one visible
+  function revealActiveView() {
+    var nav = document.querySelector('.boards-views'), on = nav && nav.querySelector('a.active');
+    if (!on || nav.scrollWidth <= nav.clientWidth) return;
+    // move only the tabs' own scroller (scrollIntoView would also scroll the page on a live refresh)
+    var l = on.offsetLeft, r = l + on.offsetWidth;
+    if (l < nav.scrollLeft) nav.scrollLeft = l; else if (r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = r - nav.clientWidth;
+  }
   function setup() {
+    revealActiveView();
     document.querySelectorAll('.boards-col').forEach(function (c) { if (!c.__init) { c.__init = 1; c.__sig = c.outerHTML; B.initCol(c); } });
     var id = B.boardId();
     if (id === esBoard) return;
@@ -281,8 +304,5 @@
       }
       return;
     }
-    // a menu item that opens a dialog: close the list menu first, so it cannot sit under the modal
-    var close = e.target.closest && e.target.closest('[data-menu-close-before]');
-    if (close) { var d = B.menuOf(close); if (d) d.removeAttribute('open'); }
   });
 })();

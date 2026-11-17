@@ -54,6 +54,12 @@ func init() {
 		},
 		"boardsColors": func() []string { return Colors },
 		"boardsBool":   func(b *bool) bool { return b != nil && *b },
+		"boardsInt": func(n *int) int {
+			if n == nil {
+				return 0
+			}
+			return *n
+		},
 		"div100": func(a, b int) int {
 			if b <= 0 {
 				return 0
@@ -368,9 +374,16 @@ func registerUI() {
 	}
 
 	// ---- lists: all mutate the board body, which refreshes ----
-	for _, op := range []string{"list.create", "list.update", "list.move", "list.delete", "list.archive", "list.sort", "list.clear", "list.moveCards"} {
+	for _, op := range []string{"list.create", "list.move", "list.delete", "list.archive", "list.sort", "list.clear", "list.moveCards"} {
 		mut(op, func(c *web.Ctx, _ any) error { return refresh(c) })
 	}
+	// the column sheet sends an empty WIP limit when the limit is switched off: that clears it (0 means off)
+	mutPre("list.update", func(r *http.Request) {
+		if r.Form.Has("wipLimit") && strings.TrimSpace(r.Form.Get("wipLimit")) == "" {
+			r.Form.Set("wipLimit", "0")
+		}
+	}, func(c *web.Ctx, _ any) error { return refresh(c) })
+	registerListSheetUI()
 }
 
 func renderProjectLabels(c *web.Ctx, projectID string) error {

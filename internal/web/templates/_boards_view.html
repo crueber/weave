@@ -22,13 +22,13 @@
     {{if eq $c.List.Type "closed"}}<small class="boards-badge">closed</small>{{end}}
     {{if $c.Listeners}}<span class="boards-listeners" tabindex="0" role="note" aria-label="Listening to {{$name}}: {{range $i, $l := $c.Listeners}}{{if $i}}, {{end}}{{$l.Label}}{{end}}"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg>{{if gt (len $c.Listeners) 1}}<span class="boards-listeners-n">{{len $c.Listeners}}</span>{{end}}
       <span class="boards-listeners-pop" role="tooltip"><strong>Listening</strong>{{range $c.Listeners}}<span>{{if .IsAgent}}agent {{end}}{{.Label}}{{if ne .Label .Name}} <small>({{.Name}})</small>{{end}}</span>{{end}}</span></span>{{end}}
-    <span class="boards-count" title="{{len $c.Cards}} cards"><span data-count>{{len $c.Cards}}</span>{{if ne (len $c.Cards) $c.Total}}/{{$c.Total}}{{end}}</span>
-    {{if $c.AddCardURL}}<button type="button" class="boards-iconbtn boards-col-add" data-add-top aria-label="Add card to the top of {{$name}}" title="Add card to top"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg></button>{{end}}
+    {{$wip := boardsInt $c.List.WIPLimit}}{{if $wip}}{{$over := gt $c.Total $wip}}<span class="boards-count boards-wip{{if $over}} is-over{{end}}" data-wip="{{$wip}}" data-total="{{$c.Total}}" data-visible="{{len $c.Cards}}" role="note" title="{{$c.Total}} of {{$wip}} cards (soft WIP limit){{if $over}}, over the limit{{end}}{{if ne (len $c.Cards) $c.Total}}; {{len $c.Cards}} shown{{end}}" aria-label="{{$c.Total}} of {{$wip}} cards, soft WIP limit{{if $over}}, over the limit{{end}}">{{if $over}}<b class="boards-wip-flag" aria-hidden="true">!</b>{{end}}<span data-wip-n>{{$c.Total}}</span>/{{$wip}}</span>
+    {{else}}<span class="boards-count" title="{{len $c.Cards}} cards"><span data-count>{{len $c.Cards}}</span>{{if ne (len $c.Cards) $c.Total}}/{{$c.Total}}{{end}}</span>{{end}}
+    {{if $p.CanEdit}}<button type="button" class="boards-iconbtn boards-col-settings" data-list-sheet="{{$c.List.ID}}" aria-label="Column settings for {{$name}}" title="Column settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg></button>{{end}}
     {{if $p.CanEdit}}<details class="boards-menu"><summary class="boards-iconbtn" aria-label="List actions for {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></summary>
       {{template "boards_list_menu" dict "C" $c "P" $p "Name" $name}}
     </details>{{end}}
   </header>
-  {{with $c.List.Description}}<p class="boards-col-desc" title="{{deref .}}">{{deref .}}</p>{{end}}
   <div class="boards-cards" role="list" aria-label="Cards in {{$name}}" data-list="{{$c.List.ID}}"{{if $p.CanEdit}} data-drop="card"{{end}}>
     {{range $c.Cards}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}
     <p class="boards-empty-list" role="note">{{if and $c.Total (not $c.Cards)}}No cards match the filter.{{else if $c.AddCardURL}}This list is empty &mdash; add the first card.{{else}}No cards.{{end}}</p>

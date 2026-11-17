@@ -33,9 +33,8 @@
     if (q) { e.preventDefault(); e.stopPropagation(); B.openQuick(q.closest('.boards-tile')); return; }
     var title = t.closest('[data-rename]');
     if (title && !e.defaultPrevented) { B.renameList(title.closest('.boards-col')); return; }
-    var col = t.closest('[data-collapse],[data-collapse-btn]');
+    var col = t.closest('[data-collapse]');
     if (col) { var c = B.colOf(col); var d = B.menuOf(col); if (d) d.removeAttribute('open'); if (c) B.setCollapsed(c, !c.classList.contains('is-collapsed')); return; }
-    if (t.closest('[data-rename-btn]')) { var cc = B.colOf(t); var dd = B.menuOf(t); if (dd) dd.removeAttribute('open'); B.renameList(cc); return; }
     if (t.closest('[data-help]')) { B.showHelp(); return; }
     var openLink = t.closest('[data-open-card]');
     if (openLink) {
