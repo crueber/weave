@@ -29,10 +29,10 @@ func (a *App) runGeneric(args []string) int {
 		return 0
 	}
 	verb := args[1]
-	o := cat.Lookup(tag, verb)
+	o := cat.LookupVerb(tag, verb)
 	if o == nil {
-		if c2 := a.catalogNow(true); c2.Lookup(tag, verb) != nil {
-			o = c2.Lookup(tag, verb)
+		if c2 := a.catalogNow(true); c2.LookupVerb(tag, verb) != nil {
+			o = c2.LookupVerb(tag, verb)
 		}
 	}
 	if o == nil {
@@ -55,10 +55,19 @@ func fieldSpecs(o *Op) []FlagSpec {
 		if f.Name == "assigneeUserId" {
 			s.Aliases = append(s.Aliases, "assignee")
 		}
+		for _, al := range fieldAliases[f.Name] {
+			if o.Field(al) == nil {
+				s.Aliases = append(s.Aliases, al)
+			}
+		}
 		specs = append(specs, s)
 	}
 	return append(specs, FlagSpec{Name: "output-file", Aliases: []string{"out"}, Short: "o"})
 }
+
+// fieldAliases are the short flag names the workflow shortcuts use (card create --desc/--due), accepted
+// by every op that has the long field so create and update read the same: card update --desc @notes.md.
+var fieldAliases = map[string][]string{"description": {"desc"}, "dueDate": {"due"}}
 
 func (a *App) cmdOp(o *Op, args []string) int {
 	p, err := a.parse(args, fieldSpecs(o))
@@ -493,13 +502,17 @@ func opHelp(o *Op) string {
 	fmt.Fprintf(&sb, "weave %s %s %s [flags]\n\n%s\n", o.Tag, o.Verb(), strings.Join(pos, " "), o.Summary)
 	fmt.Fprintf(&sb, "\nOp: %s   %s %s   auth: %s\n", o.Name, o.Method, o.Path, o.Auth)
 	if len(o.Fields) > 0 {
-		sb.WriteString("\nFields (flags; path fields may also be positional):\n")
+		sb.WriteString("\nFields (flags; path fields may also be positional; a text value may be @FILE or - for stdin):\n")
 		for _, f := range o.Fields {
 			req := ""
 			if f.Required {
 				req = " (required)"
 			}
-			fmt.Fprintf(&sb, "  --%-18s %-8s%s %s\n", f.Name, f.Type, req, f.Desc)
+			desc := f.Desc
+			if als := fieldAliases[f.Name]; len(als) > 0 {
+				desc = strings.TrimSpace(desc + " (also --" + strings.Join(als, ", --") + ")")
+			}
+			fmt.Fprintf(&sb, "  --%-18s %-8s%s %s\n", f.Name, f.Type, req, desc)
 		}
 	}
 	sb.WriteString("\nExample:\n  " + exampleFor(o) + "\n")
@@ -533,6 +546,11 @@ func tagHelp(cat *Catalog, tag string) string {
 	fmt.Fprintf(&sb, "weave %s <verb> ...\n\n", tag)
 	for _, o := range cat.Tag(tag) {
 		fmt.Fprintf(&sb, "  %-22s %s\n", o.Verb(), o.Summary)
+	}
+	for _, al := range sortedKeys(verbAliases) {
+		if cat.Lookup(tag, al) == nil && cat.Lookup(tag, verbAliases[al]) != nil {
+			fmt.Fprintf(&sb, "  %-22s alias of %s\n", al, verbAliases[al])
+		}
 	}
 	sb.WriteString("\nweave " + tag + " <verb> --help for fields and an example.\n")
 	return sb.String()

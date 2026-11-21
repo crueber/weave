@@ -3,9 +3,14 @@ package projects
 import (
 	"encoding/json"
 	"html/template"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
+	"github.com/crueber/weave/internal/domain/boards"
+	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -24,6 +29,8 @@ type homeData struct {
 type boardRef struct {
 	ID, Name string
 	Style    template.CSS // --board-color from boards.color (validated #rrggbb only)
+	Tile     *boardTile   // statistics; nil when they could not be computed (the tile shows the name only)
+	stats    boards.BoardStats
 }
 
 type pageData struct {
@@ -53,6 +60,16 @@ type settingsData struct {
 	Candidates []candidate
 	Groups     []BaseGroup
 	FieldTypes []string
+	Prompt     promptEdit // "Agents": the project prompt text editor
+	IsAdmin    bool
+}
+
+// promptEdit feeds the shared bs_prompt editor (same shape as boards.PromptEdit).
+type promptEdit struct {
+	Text   string // the project's own text, else the text that applies without one
+	Custom bool
+	From   string
+	Tokens []agentprompt.Token
 }
 
 func init() {
@@ -312,10 +329,32 @@ func projectPage(c *web.Ctx) error {
 		}
 		d.Boards = append(d.Boards, b)
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	// Statistics for every listed board in a constant number of queries, then the order: most recently active
+	// first (no activity: board position), computed once here. Nothing re-sorts the tiles while the page is open.
+	ids := make([]string, len(d.Boards))
+	for i, b := range d.Boards {
+		ids[i] = b.ID
+	}
+	st, err := boards.Stats(c.Env, ids)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for i := range d.Boards {
+		if s, ok := st[d.Boards[i].ID]; ok {
+			d.Boards[i].stats = s
+			d.Boards[i].Tile = newTile(s, now)
+		}
+	}
+	sort.SliceStable(d.Boards, func(i, j int) bool { return boards.ActivityLess(d.Boards[i].stats, d.Boards[j].stats) })
 	return c.Render("projects_project.html", d)
 }
 
-var sections = []settingsSection{{"general", "General"}, {"background", "Background"}, {"managers", "Managers"}, {"fields", "Custom fields"}, {"danger", "Danger zone"}}
+var sections = []settingsSection{{"general", "General"}, {"background", "Background"}, {"managers", "Managers"}, {"fields", "Custom fields"}, {"agents", "Agents"}, {"danger", "Danger zone"}}
 
 // sectionParam is the section a UI mutation came from (_section, or the legacy tab field).
 func sectionParam(c *web.Ctx) string {
@@ -334,7 +373,15 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 	if !p.CanManage {
 		return settingsData{}, ops.Forbidden()
 	}
-	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes}
+	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes, IsAdmin: c.Env.User != nil && c.Env.User.Role == "admin"}
+	def, admin := notify.AgentPromptDefault(c.Env, agentprompt.ScopeProject)
+	d.Prompt = promptEdit{Text: def, From: "Weave's built-in text", Tokens: agentprompt.Tokens(agentprompt.ScopeProject)}
+	if admin {
+		d.Prompt.From = "the admin default"
+	}
+	if p.AgentPrompt != "" {
+		d.Prompt.Text, d.Prompt.Custom = p.AgentPrompt, true
+	}
 	if c.R != nil {
 		q := c.R.URL.Query().Get("section")
 		for _, s := range sections {
@@ -376,7 +423,7 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 // renderSection re-renders one settings section after a change; done shows the "Saved" tick.
 func renderSection(c *web.Ctx, id, section string, done bool) error {
 	switch section {
-	case "background", "managers", "fields":
+	case "background", "managers", "fields", "agents":
 	default:
 		section = "general"
 	}

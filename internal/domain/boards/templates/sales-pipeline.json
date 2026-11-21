@@ -119,7 +119,6 @@
     "id": "c1",
     "listId": "l3",
     "name": "Acme Co: annual plan",
-    "type": "project",
     "position": 65536,
     "description": "Follow up on the proposal within the week.",
     "labelIds": [

@@ -1,0 +1,1 @@
+weave skill install      # writes the Weave skill for this coding agent; `weave skill print` shows it

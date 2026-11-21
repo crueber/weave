@@ -118,7 +118,6 @@
     "id": "c1",
     "listId": "l1",
     "name": "Saving a draft sometimes loses the last paragraph",
-    "type": "project",
     "position": 65536,
     "description": "**Repro steps**\n1. Open a draft and type for a few seconds\n2. Switch tabs and come back\n3. Click Save\n\n**Expected**\nAll the text is saved.\n\n**Actual**\nThe last paragraph is missing.\n\n**Environment**\nBrowser, version, account.",
     "labelIds": [
@@ -129,7 +128,6 @@
     "id": "c2",
     "listId": "l2",
     "name": "Checkout fails for large orders",
-    "type": "project",
     "position": 131072,
     "description": "**Repro steps**\n1. \n\n**Expected**\n\n**Actual**\n\n**Notes**\nSeverity *Critical* means customers cannot pay or data is lost.",
     "labelIds": [

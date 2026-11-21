@@ -30,6 +30,8 @@ type agentTarget struct {
 	Detect   func(e *skillEnv) []string
 	Bins     []string
 	Note     string
+	MCP      *mcpSpec // optional MCP server config writer (`weave skill install --mcp`, `weave mcp --print-config`)
+	MCPOnly  bool     // no skill format: only the MCP config is written (explicit --target with --mcp)
 }
 
 func (t *agentTarget) kind() string {
@@ -115,9 +117,11 @@ const weaveDesc = "Weave kanban CLI: use when a task involves Weave boards, list
 var agentTargets = []*agentTarget{
 	{ID: "claude", Aliases: []string{"claude-code"}, Name: "Claude Code", Fmt: fmtSkillDir, Verified: true,
 		User: func(e *skillEnv) string { return filepath.Join(e.claudeDir(), "skills") }, Project: ".claude/skills",
-		Detect: one(func(e *skillEnv) string { return e.claudeDir() }), Bins: []string{"claude"}},
+		Detect: one(func(e *skillEnv) string { return e.claudeDir() }), Bins: []string{"claude"},
+		MCP: &mcpSpec{Verified: true, Project: ".mcp.json", ProjectKey: "mcpServers", Type: "stdio", CLI: "claude mcp add --transport stdio --scope user weave -- %s mcp"}},
 	{ID: "codex", Name: "OpenAI Codex CLI", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
-		Detect: one(func(e *skillEnv) string { return e.codexHome() }), Bins: []string{"codex"}},
+		Detect: one(func(e *skillEnv) string { return e.codexHome() }), Bins: []string{"codex"},
+		MCP: &mcpSpec{Verified: true, TOML: true, User: func(e *skillEnv) string { return filepath.Join(e.codexHome(), "config.toml") }, Project: ".codex/config.toml", CLI: "codex mcp add weave -- %s mcp"}},
 	{ID: "opencode", Name: "OpenCode", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
 		Detect: one(xdgJoin("opencode")), Bins: []string{"opencode"}},
 	{ID: "pi", Name: "pi (pi-mono coding agent)", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
@@ -131,7 +135,8 @@ var agentTargets = []*agentTarget{
 		Detect:  one(func(e *skillEnv) string { return e.envOr("PI_CONFIG_DIR", e.hp(".omp")) }), Bins: []string{"omp"},
 		Note: "native paths read from omp's discovery source (builtin.ts), not prose docs"},
 	{ID: "gemini", Aliases: []string{"gemini-cli"}, Name: "Gemini CLI", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
-		Detect: one(func(e *skillEnv) string { return e.geminiDir() }), Bins: []string{"gemini"}},
+		Detect: one(func(e *skillEnv) string { return e.geminiDir() }), Bins: []string{"gemini"},
+		MCP: &mcpSpec{Verified: true, User: func(e *skillEnv) string { return filepath.Join(e.geminiDir(), "settings.json") }, UserKey: "mcpServers", Project: ".gemini/settings.json", ProjectKey: "mcpServers"}},
 	{ID: "antigravity", Name: "Google Antigravity", Fmt: fmtSkillDir, Verified: true,
 		User:    func(e *skillEnv) string { return filepath.Join(e.geminiDir(), "config", "skills") },
 		Project: ".agents/skills",
@@ -139,20 +144,30 @@ var agentTargets = []*agentTarget{
 			return []string{filepath.Join(e.geminiDir(), "config"), filepath.Join(e.geminiDir(), "antigravity-cli")}
 		}},
 	{ID: "amp", Name: "Amp", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
-		Detect: one(xdgJoin("amp")), Bins: []string{"amp"}},
+		Detect: one(xdgJoin("amp")), Bins: []string{"amp"},
+		MCP: &mcpSpec{Verified: true, User: xdgJoin("amp", "settings.json"), UserKey: "amp.mcpServers", Project: ".amp/settings.json", ProjectKey: "amp.mcpServers"}},
 	{ID: "goose", Name: "Goose", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
 		Detect: func(e *skillEnv) []string {
 			return []string{filepath.Join(e.xdgConfig(), "goose"), filepath.Join(e.appData(), "Block", "goose")}
 		}, Bins: []string{"goose"}},
 	{ID: "cursor", Name: "Cursor", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
-		Detect: homeDot(".cursor"), Bins: []string{"cursor"}},
+		Detect: homeDot(".cursor"), Bins: []string{"cursor"},
+		MCP: &mcpSpec{Verified: true, User: homeJoin(".cursor", "mcp.json"), UserKey: "mcpServers", Project: ".cursor/mcp.json", ProjectKey: "mcpServers", Type: "stdio"}},
 	{ID: "windsurf", Aliases: []string{"devin"}, Name: "Windsurf (Devin Desktop)", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
 		Detect: func(e *skillEnv) []string {
 			return []string{e.hp(".codeium", "windsurf"), filepath.Join(e.xdgConfig(), "devin")}
-		}, Bins: []string{"windsurf"}},
-	{ID: "copilot", Aliases: []string{"github-copilot"}, Name: "GitHub Copilot (CLI, VS Code)", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
-		Detect: one(func(e *skillEnv) string { return e.copilotDir() })},
-	{ID: "roo", Aliases: []string{"roo-code"}, Name: "Roo Code", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills", Detect: homeDot(".roo")},
+		}, Bins: []string{"windsurf"},
+		MCP: &mcpSpec{User: func(e *skillEnv) string {
+			if e.GOOS == "windows" {
+				return filepath.Join(e.appData(), "devin", "mcp_config.json")
+			}
+			return filepath.Join(e.xdgConfig(), "devin", "mcp_config.json")
+		}, UserKey: "mcpServers", Project: ".devin/mcp_config.json", ProjectKey: "mcpServers"}},
+	{ID: "copilot", Aliases: []string{"github-copilot", "vscode"}, Name: "GitHub Copilot (CLI, VS Code)", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
+		Detect: one(func(e *skillEnv) string { return e.copilotDir() }),
+		MCP:    &mcpSpec{Verified: true, User: func(e *skillEnv) string { return filepath.Join(e.copilotDir(), "mcp-config.json") }, UserKey: "mcpServers", Project: ".vscode/mcp.json", ProjectKey: "servers", Type: "stdio"}},
+	{ID: "roo", Aliases: []string{"roo-code"}, Name: "Roo Code", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills", Detect: homeDot(".roo"),
+		MCP: &mcpSpec{Verified: true, Project: ".roo/mcp.json", ProjectKey: "mcpServers"}},
 	{ID: "augment", Aliases: []string{"auggie"}, Name: "Augment", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
 		Detect: homeDot(".augment"), Bins: []string{"auggie"}},
 	{ID: "qwen", Aliases: []string{"qwen-code"}, Name: "Qwen Code", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
@@ -163,14 +178,19 @@ var agentTargets = []*agentTarget{
 	{ID: "zed", Name: "Zed", Fmt: fmtSkillDir, Verified: true, User: universalUser, Project: ".agents/skills",
 		Detect: func(e *skillEnv) []string {
 			return []string{filepath.Join(e.xdgConfig(), "zed"), filepath.Join(e.appData(), "Zed")}
-		}, Bins: []string{"zed"}},
+		}, Bins: []string{"zed"},
+		MCP: &mcpSpec{User: xdgJoin("zed", "settings.json"), UserKey: "context_servers"}},
 	{ID: "cline", Name: "Cline", Fmt: fmtSkillDir, Verified: true,
-		User: homeJoin(".cline", "skills"), Project: ".cline/skills", Detect: homeDot(".cline", "Documents/Cline")},
+		User: homeJoin(".cline", "skills"), Project: ".cline/skills", Detect: homeDot(".cline", "Documents/Cline"),
+		MCP: &mcpSpec{Verified: true, User: func(e *skillEnv) string {
+			return e.envOr("CLINE_MCP_SETTINGS_PATH", e.hp(".cline", "data", "settings", "cline_mcp_settings.json"))
+		}, UserKey: "mcpServers"}},
 	{ID: "kilo", Aliases: []string{"kilocode", "kilo-code"}, Name: "Kilo Code", Fmt: fmtSkillDir, Verified: true, Note: "docs disagree on ~/.kilo/skills; ~/.agents/skills is confirmed",
 		User: universalUser, Project: ".agents/skills",
 		Detect: func(e *skillEnv) []string { return []string{e.hp(".kilo"), filepath.Join(e.xdgConfig(), "kilo")} }, Bins: []string{"kilo"}},
 	{ID: "kiro", Name: "Kiro", Fmt: fmtSkillDir, Verified: true,
-		User: homeJoin(".kiro", "skills"), Project: ".kiro/skills", Detect: homeDot(".kiro"), Bins: []string{"kiro-cli"}},
+		User: homeJoin(".kiro", "skills"), Project: ".kiro/skills", Detect: homeDot(".kiro"), Bins: []string{"kiro-cli"},
+		MCP: &mcpSpec{Verified: true, User: homeJoin(".kiro", "settings", "mcp.json"), UserKey: "mcpServers", Project: ".kiro/settings/mcp.json", ProjectKey: "mcpServers"}},
 	{ID: "junie", Name: "JetBrains Junie", Fmt: fmtSkillDir, Verified: true,
 		User: universalUser, Project: ".agents/skills", Detect: homeDot(".junie")},
 	{ID: "droid", Aliases: []string{"factory"}, Name: "Droid (Factory)", Fmt: fmtSkillDir, Verified: true,
@@ -178,6 +198,10 @@ var agentTargets = []*agentTarget{
 	// Cross-tool location last: it is the fallback when nothing is detected.
 	{ID: "agents", Aliases: []string{"agent", "universal"}, Name: "Cross-tool Agent Skills (~/.agents/skills)", Fmt: fmtSkillDir, Verified: true,
 		User: universalUser, Project: ".agents/skills", Detect: homeDot(".agents")},
+
+	// MCP-only clients (no skill format): written only with an explicit --target and --mcp.
+	{ID: "claude-desktop", Name: "Claude Desktop (MCP only)", Fmt: fmtSkillDir, Verified: true, OptIn: true, MCPOnly: true,
+		MCP: &mcpSpec{Verified: true, User: claudeDesktopConfig, UserKey: "mcpServers"}},
 
 	// Tools without a verified skills directory: a managed block or rules file.
 	{ID: "zed-agents-md", Name: "Zed AGENTS.md", Fmt: fmtSharedMD, Verified: true, OptIn: true,

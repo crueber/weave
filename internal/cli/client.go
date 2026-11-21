@@ -109,6 +109,34 @@ type Params map[string]any
 // query string for GET and the JSON body otherwise, so newer server fields work with an older
 // schema. Non-GET calls honour --dry-run (nothing is sent).
 func (a *App) Call(ctx context.Context, o *Op, params Params, files map[string]string) (*Response, error) {
+	return a.call(ctx, o, params, callOpts{files: files})
+}
+
+// Upload is one multipart file part streamed from an already opened reader (the MCP server opens
+// and checks the file itself; nothing here touches the filesystem).
+type Upload struct {
+	Field string    // the op's file field (in:"file")
+	Name  string    // filename sent in the part header
+	R     io.Reader // content; read once, to EOF
+}
+
+// callOpts selects how a request body is built and how a successful response is consumed.
+type callOpts struct {
+	files   map[string]string // CLI: field -> local path ("-" = stdin), buffered
+	uploads []Upload          // streamed multipart parts (no buffering, no path handling)
+	// stream, when set, receives a successful (< 400) response instead of it being buffered, so
+	// downloads are not bound by the 64 MiB response cap. The returned Response has no Body.
+	stream func(*http.Response) error
+	noDry  bool // ignore --dry-run (the MCP server never runs in dry-run mode)
+}
+
+// CallStream runs an op with streamed uploads and/or a streamed response body.
+func (a *App) CallStream(ctx context.Context, o *Op, params Params, uploads []Upload, stream func(*http.Response) error) (*Response, error) {
+	return a.call(ctx, o, params, callOpts{uploads: uploads, stream: stream, noDry: true})
+}
+
+func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*Response, error) {
+	files := opts.files
 	path := o.Path
 	q := url.Values{}
 	body := map[string]any{}
@@ -153,7 +181,21 @@ func (a *App) Call(ctx context.Context, o *Op, params Params, files map[string]s
 	}
 	var rdr io.Reader
 	ct := ""
-	if len(files) > 0 {
+	if len(opts.uploads) > 0 {
+		// stream the multipart body through a pipe: an upload may be hundreds of MiB
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		ct = mw.FormDataContentType()
+		go func() {
+			err := writeMultipart(mw, body, opts.uploads)
+			if err == nil {
+				err = mw.Close()
+			}
+			pw.CloseWithError(err)
+		}()
+		defer pr.Close() // unblocks the writer if the request fails before draining the body
+		rdr = pr
+	} else if len(files) > 0 {
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
 		for k, v := range body {
@@ -195,7 +237,7 @@ func (a *App) Call(ctx context.Context, o *Op, params Params, files map[string]s
 		bb, _ := json.Marshal(body)
 		rdr, ct = bytes.NewReader(bb), "application/json"
 	}
-	if a.DryRun && o.Method != "GET" {
+	if a.DryRun && o.Method != "GET" && !opts.noDry {
 		dr := map[string]any{"dryRun": true, "op": o.Name, "method": o.Method, "url": u}
 		if len(files) > 0 {
 			dr["files"] = files
@@ -219,11 +261,21 @@ func (a *App) Call(ctx context.Context, o *Op, params Params, files map[string]s
 	req.Header.Set("User-Agent", "weave-cli/"+version.Version)
 	req.Header.Set("Accept", "application/json")
 	a.warnInsecure()
-	resp, err := a.httpClient(a.Timeout).Do(req)
+	timeout := a.Timeout
+	if opts.stream != nil || len(opts.uploads) > 0 {
+		timeout = 0 // large transfers are bounded by the caller's context and byte caps instead
+	}
+	resp, err := a.httpClient(timeout).Do(req)
 	if err != nil {
 		return nil, &APIError{Code: "network", Message: err.Error()}
 	}
 	defer resp.Body.Close()
+	if opts.stream != nil && resp.StatusCode < 400 {
+		if err := opts.stream(resp); err != nil {
+			return nil, err
+		}
+		return &Response{Status: resp.StatusCode, Header: resp.Header}, nil
+	}
 	b, rerr := readLimited(resp.Body)
 	if rerr != nil && b == nil {
 		return nil, &APIError{Code: "network", Message: rerr.Error()}
@@ -233,6 +285,36 @@ func (a *App) Call(ctx context.Context, o *Op, params Params, files map[string]s
 		return r, errorFromResponse(r)
 	}
 	return r, nil
+}
+
+// writeMultipart writes the non-file body fields (sorted, JSON for non-strings) and then each
+// upload part, copying from its reader.
+func writeMultipart(mw *multipart.Writer, body map[string]any, ups []Upload) error {
+	keys := make([]string, 0, len(body))
+	for k := range body {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		s, isStr := body[k].(string)
+		if !isStr {
+			bb, _ := json.Marshal(body[k])
+			s = string(bb)
+		}
+		if err := mw.WriteField(k, s); err != nil {
+			return err
+		}
+	}
+	for _, u := range ups {
+		fw, err := mw.CreateFormFile(u.Field, u.Name)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fw, u.R); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func queryString(v any) string {

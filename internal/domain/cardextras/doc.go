@@ -10,6 +10,8 @@
 //	CardBadges(e *ops.Env, cardIDs []string) (map[string]Badges, error)
 //	    Face-of-card summary: task/attachment/comment counts, tracked time, task lists
 //	    and custom-field values flagged "show on front of card". No permission check.
+//	events.TaskCounts (installed in init)
+//	    {total, completed} checklist tasks per card for the shared card snapshot (one aggregate query).
 //	ActionText(a ActionItem) string
 //	    Human sentence for an activity row (shared with notification text).
 //

@@ -12,7 +12,7 @@ feature list from planka.app/pro). Single binary, one data directory, **one repl
 Humans sign in with **OIDC only** (no local passwords). Machines (the `weave` CLI, AI agents) use **API keys**.
 Every capability is one registered *op*, so the browser UI, REST API (`/api/v1`) and CLI always have the same features.
 
-- Repo: `https://github.com/crueber/weave.git` (GitHub mirror - development happens upstream), branch `main`. Releases: `v0.2.0` is the latest.
+- Repo: `https://github.com/crueber/weave.git` (GitHub mirror - development happens upstream), branch `main`. Releases: `v0.2.1` is the latest tag; `main` is ahead of it (header consolidation, board template library, agent prompt family with admin/project/board-editable texts and blocks, admin/project/user settings redesign, new demo).
 - Planka licensing: this is **clean-room**. Never copy code, templates, CSS or assets from Planka. Behaviour/field names only.
 - Avatars: DiceBear "Landscape" (CC0), generated in-process in `internal/domain/auth/identicon.go`. Never call the DiceBear API.
 
@@ -27,6 +27,7 @@ Every capability is one registered *op*, so the browser UI, REST API (`/api/v1`)
   no functional impact can just be done. Keep Weave readily usable; limits are generous and env-tunable. Use the advisor
   tool for security and beauty reviews.
 - **Do not reuse anything from the maintainer's `roundtable` repo** (its CI and tooling "doesn't work well").
+- Code of Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) (same as Spindle's): no political advocacy in project spaces, from anyone. Keep demo data, seed text, sample templates and docs free of it.
 - Commit/push/tag only when asked. Releases are tagged by the maintainer's request. Commit messages end with the
   `Co-Authored-By: Claude ...` trailer given in the session.
 
@@ -41,19 +42,20 @@ internal/db          SQLite (modernc, WAL), embedded migrations, NewID/Now/Posit
 internal/domain/     auth  projects  boards  cards  cardextras  notify  admin      (vertical slices: ops + UI + tests)
 internal/events      durable event envelopes (actions table), CardSnap       internal/realtime  in-process hub, listener registry
 internal/server      mux wiring, security headers, CSP, CSRF, rate limits, SSE (`sse_events.go`), HSTS, authz sweep test
-internal/web         HTMX plumbing (web.Route/RoutePublic, templates/, static/)   internal/cli  schema-driven CLI (never imports internal/ops)
-internal/agentprompt  agent prompt templates (leaf, golden tests); op `agent.prompt` lives in boards/agentprompt_op.go; `weave agent prompt`
+internal/web         HTMX plumbing (web.Route/RoutePublic, templates/, static/)   internal/cli  schema-driven CLI (never imports internal/ops); `weave mcp` = mcp_*.go (MCP connector over stdio)
+internal/agentprompt  agent prompts (leaf, golden tests): editable token texts in defaults/*.txt + editable shared blocks in blocks/*.txt (blocks.go); op `agent.prompt` lives in boards/agentprompt_op.go; `weave agent prompt`
 internal/skillgen    hand-written skill sources (src/)   skills/  GENERATED skill + compact instructions (embedded in the CLI)
 internal/imgguard    image decode guard   internal/relsign  release signing   internal/i18n  en.json + template func t
-internal/testutil    Env(t, principal) with a temp SQLite DB
+internal/testutil    Env(t, principal) with a temp SQLite DB   internal/all  blank-imports every domain (tests that render templates)   internal/version  build version
 scripts/             e2e.sh  ui-smoke.sh  csp-smoke.mjs  check-contrast.py  release-local.sh  install.sh/.ps1  update-pins.sh
+scripts/publish/    workflow/CI files shipped to the GitHub mirror (used by publish-to-github.sh)   scripts/gen-badges.py  docs/badges/*.svg
 scripts/demo/        seed.sh + seed.mjs (fictional data, throwaway instance), record.mjs (README demo), encode.py (webm/webp), shots.mjs (docs/screenshots); see the header comments
 docs/                DESIGN.md (contract)  DESIGN-SYSTEM.md (tokens)  CLI.md  AGENTS.md (agent user guide)  WEBHOOKS.md  MAINTENANCE.md  FEATURES.md  AGENT-TARGETS.md (coding-agent paths + sources)
 .forgejo/workflows/ci.yml   runner/  (Forgejo runner compose + config)
 ```
 
 Domain ownership and **migration number ranges** are in `docs/DESIGN.md`. Existing migrations: `0001_core` (never edit),
-`0100/0101` auth, `0200` projects, `0301/0302/0303/0304` boards (colours, column descriptions, column WIP limit, template visibility), `0400` cards, `0500` cardextras, `0600` notify, `0800` agents/events,
+`0100/0101` auth, `0200/0201` projects (0201 project agent prompt text), `0301/0302/0303/0304/0305` boards (colours, column descriptions, column WIP limit, template visibility, board agent prompt text; `0306` drops the board card-type settings, `0307` indexes `lists(board_id)` for board statistics), `0400/0401` cards (`0401` drops `cards.type`), `0500` cardextras, `0600` notify, `0800` agents/events,
 `0900` api-key expiry, `0950` attachment index. Add new files in the owning domain's range (or the next free number); migrations
 run in filename order, once, inside one transaction. **Never edit an applied migration**; add a new one.
 
@@ -125,6 +127,8 @@ board templates if the data should travel; add tests that run through `db.Open` 
 **Add a setting**: env var in `internal/config` or a `config` table key (admin UI: `notify/config.go` + `ui.go`); document it in the README
 config table and `.env.example`/compose files; secrets are write-only.
 
+**Change an agent prompt**: the wording is plain text with `{tokens}` (never `text/template` on user text). Prompts are `internal/agentprompt/defaults/*.txt`, shared blocks `blocks/*.txt`; a new token needs `Tokens(scope)`/`blocks.go` entries and a docs/AGENTS.md table row. Admin overrides are config keys `agentprompt.<scope>` and `agentblock.<name>` (env `WEAVE_AGENTPROMPT_*`/`WEAVE_AGENTBLOCK_*`); projects and boards carry `agent_prompt`. With no overrides the goldens in `testdata/` must stay byte-identical (`go test ./internal/agentprompt`).
+
 **Touch realtime/agents**: see `docs/DESIGN.md` "Agents and the event stream". Event ids are zero-padded `seq`; replay and live
 share one path (`events.Query`); `lists=` registers a listener; claims are leases (`card.claim|release|renew|next`).
 
@@ -134,6 +138,11 @@ share one path (`events.Query`); `lists=` registers a listener; claims are lease
 Unverified targets are opt-in (never auto, never in `all`). If the tool reads `~/.agents/skills`, reuse `universalUser` (it is written
 once). Add a row to the path table in `internal/cli/skillinstall_test.go`. Content is never hand-written per tool: the full skill is
 `skills/weave/**`, the compact form is `internal/skillgen/src/INSTRUCTIONS.md` -> `skills/instructions.md`; run `make skill`.
+
+**Add a curated MCP tool**: append the op *name* to `mcpCurated` in `internal/cli/mcp_tools.go` (keep it to ~30 agent-grain ops; everything
+else is reachable through `weave_ops`/`weave_call`). Name, schema, description and annotations are derived from the op schema; do not hand-write
+them. Then `go test ./internal/cli -run Golden -update` only if annotations changed on purpose, and `make skill` (the tool table in
+`skills/weave/references/mcp.md` is generated). File inputs/outputs are detected from `in:"file"` fields and the schema's `binary`.
 
 **Touch the CLI**: it is schema-driven from `GET /api/v1/_ops` and must not import `internal/ops` (a test checks the slim binary does
 not link SQLite/server). Shortcuts (`next`, `listen`, `agent run`, `card claim`...) live in `internal/cli`; exit code 10 = nothing to do.

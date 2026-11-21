@@ -1,6 +1,7 @@
 package notify_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -62,6 +63,26 @@ func TestWebhookValidationAndUIForms(t *testing.T) {
 	post("/ui/admin/config", url.Values{"terms.enabled": {"false"}, "branding.appName": {"Form App"}})
 	if notify.ConfigBool(w.admin, "terms.enabled") || notify.Config(w.admin, "branding.appName") != "Form App" {
 		t.Fatal("config form not applied")
+	}
+	// agent prompt defaults page: one key per form; empty resets
+	post("/ui/admin/agent-prompts", url.Values{"agentprompt.board": {"Board {board_name}\r\n"}})
+	if notify.Config(w.admin, "agentprompt.board") != "Board {board_name}" {
+		t.Fatalf("agent prompt default not saved: %q", notify.Config(w.admin, "agentprompt.board"))
+	}
+	if r, err := http.Get(srv.URL + "/admin/agent-prompts"); err != nil || r.StatusCode != 200 {
+		t.Fatalf("agent prompts page: %v", err)
+	} else {
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		for _, want := range []string{`name="agentprompt.general"`, `name="agentprompt.project"`, `name="agentprompt.runner"`, "Board {board_name}</textarea>", "Customised", "{questionnaire}", `aria-current="page">Agent prompts`} {
+			if !strings.Contains(string(b), want) {
+				t.Errorf("agent prompts page lacks %q", want)
+			}
+		}
+	}
+	post("/ui/admin/agent-prompts", url.Values{"agentprompt.board": {""}})
+	if notify.Config(w.admin, "agentprompt.board") != "" {
+		t.Fatal("agent prompt default not reset")
 	}
 	// dashboard form
 	post("/ui/dashboard", url.Values{"panels": {"myCards", "overdue"}, "limit": {"5"}})

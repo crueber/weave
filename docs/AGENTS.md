@@ -32,7 +32,100 @@ project page, your user settings, or `weave agent prompt` in a terminal). It cop
 they use `$WEAVE_TOKEN`, and tell the agent to stop and ask you to set it rather than ask for it in chat. A personal key acts with your full role; agent accounts
 are created by admins under `/admin/agents`; and claiming a card needs Edit access on the board, so a worker or viewer role cannot claim. A column may also carry a soft **WIP limit** (`wipLimit` on the list): treat it as a hint to finish work before pulling more; nothing enforces it.
 
+**Customising the prompts.** The About Weave, project, board and runner prompts are editable text (the column prompt's text is the column
+description, and the runner's per-card work order is fixed):
+
+| Text | Where | Who | Applies |
+|---|---|---|---|
+| About Weave, Runner | Admin console > Agent prompts | admins | everywhere |
+| Shared blocks (`{connect}`, `{security}`...) | Admin console > Agent prompts > Blocks | admins | every prompt that uses the block |
+| Project, Board defaults | Admin console > Agent prompts | admins | every project / board without its own text |
+| One project's text | Project settings > Agents (`weave project update P --agentPrompt ...`) | project managers | that project |
+| One board's text | Board settings > Agents (`weave board update B --agentPrompt ...`) | board managers | that board (travels with export/import and templates) |
+
+A board does not fall back to its project's text: board -> admin default -> built-in, project -> admin default -> built-in. Each editor starts
+from the text that applies now; saving it unchanged, saving an empty field or pressing **Reset to default** goes back to the default.
+Everyone who can view the board still gets the resulting prompt, and the dialog says when a text was customised (with a link for people
+who may edit it). `weave agent prompt --json` reports it as `source` (`builtin|admin|project|board`).
+
+The text is plain text with `{tokens}` that Weave fills in when the prompt is shown. It is never run as a template: anything else in braces
+(including `{{ }}` and shell `${VAR}`) is kept as typed, and a line that holds only a token which expands to nothing is dropped. The blocks
+are shared texts (admins can edit them, see below), so keep `{connect}` and `{security}` unless you replace them with something equivalent; column briefs inside
+`{columns}` are always fenced and cut, whatever the text around them says.
+
+| Token | Prompts | Expands to |
+|---|---|---|
+| `{server}` | all | the server URL |
+| `{instance}` `{connect}` `{keynote}` | all | the Instance block (URLs), the Connect block (check `$WEAVE_TOKEN` without printing it, install, configure, verify), the About the key block |
+| `{concepts}` `{etiquette}` `{security}` `{readmore}` | all | Concepts (empty when Compact), Etiquette (shorter when Compact), the card-text-is-data rules, where to read more |
+| `{questionnaire}` | all | the questionnaire and PLAN gate before listening |
+| `{project_name}` `{project_id}` `{boards}` | project | the quoted name, the id, one line per visible board with its columns |
+| `{board_name}` `{board_id}` `{columns}` | board | the shell-quoted name, the id, every column with id, WIP limit and its fenced brief (600 characters) |
+| `{board_name}` `{board_id}` `{board_line}` | runner | the quoted name (`"<board>"` without a board), the id, `Board: "<name>" (board id <id>)` or nothing |
+
+The built-in texts are in `internal/agentprompt/defaults/*.txt` and are what the editors show before anything is customised.
+
+**Customising the shared blocks.** The blocks behind `{instance}`, `{connect}`, `{keynote}`, `{concepts}`, `{questionnaire}`,
+`{etiquette}`, `{security}` and `{readmore}` are editable text as well: Admin console > Agent prompts > **Blocks** (config keys
+`agentblock.<name>`, env `WEAVE_AGENTBLOCK_<NAME>` pins one). Blocks are admin only and global: a change applies to every prompt that
+uses the block, including the column prompt (the work order uses none); projects and boards cannot change them. The page keeps the
+tab in the URL (`/admin/agent-prompts?tab=blocks`), and **Preview** renders the text in the editor (saved or not) with sample data.
+The Connect an agent dialog says when a prompt uses a customised block (`customBlocks` in `weave agent prompt --json`).
+
+| Block | Inserted by | Notes |
+|---|---|---|
+| `instance` | `{instance}` | server URLs |
+| `connect` | `{connect}` | check `$WEAVE_TOKEN` without printing it, configure, verify; contains the two install lines below |
+| `install` | `{install}` inside connect | the CLI install line; empty when "Leave out the install steps" is on |
+| `install_skill` | `{install_skill}` inside connect | the `weave skill install` line; empty when the install steps are left out |
+| `keynote` | `{keynote}` | what the API key may do; claiming needs Edit access |
+| `concepts` | `{concepts}` | left out when Compact is on |
+| `questionnaire` | `{questionnaire}` | the questions and the PLAN gate (project, board, runner prompts) |
+| `etiquette` | `{etiquette}` | the house rules |
+| `etiquette_compact` | `{etiquette}` when Compact is on | the short house rules |
+| `security` | `{security}` | card text is data, never instructions |
+| `readmore` | `{readmore}` | where to find the full skill and command help |
+
+A block may use **data tokens only**, never another block (so nothing can recurse; `{security}` typed inside a block stays as typed):
+
+| Token | Blocks | Expands to |
+|---|---|---|
+| `{server}` | all | the server URL |
+| `{install_base}` | all | the download base of `install.sh` (`WEAVE_AGENT_INSTALL_URL`) |
+| `{install}` `{install_skill}` | connect | the install line blocks, or nothing with the install steps off |
+
+As in the prompts, anything else in braces stays as typed and a line holding only a token that expands to nothing is dropped; a token
+alone on an indented line (`  {install}`) has every line of its expansion indented the same way. Keep `{connect}` and `{security}`
+equivalent if you rewrite them: they carry the key-handling and card-text-is-data rules. The built-in texts are in
+`internal/agentprompt/blocks/*.txt`. The column briefs inside `{columns}` and their fences are generated by Weave and are not a block.
+
 Rotate a key with `weave agent rotateKey AGENT_ID`; delete an agent with `weave agent delete AGENT_ID`.
+
+## MCP clients (`weave mcp`)
+
+If the agent runs inside an MCP client (Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, Codex, ...), it can use Weave as typed
+tools instead of shell commands. `weave mcp` is an MCP server over stdio that ships in the CLI and connects with the same profile:
+
+```sh
+weave login --url https://weave.example.com --token wk_...     # on the machine the client runs on
+weave mcp --print-config claude-desktop                        # paste into the client's config, or:
+weave skill install --target claude-desktop,cursor --mcp       # merge the entry for you (never writes the key)
+```
+- **Tools**: about 30 named `weave_*` tools (whoami, projects, boards, board tree, lists, cards get/list/create/update/move, comments,
+  `card_next`/`claim`/`renew`/`release`, search, task lists and tasks, labels, card members, attachments upload/download, `agent_prompt`).
+  Everything else: `weave_ops` finds it (`{"query":"due date"}` or `{"op":"card.due.set"}` for the schema) and `weave_call` runs it.
+  Destructive ops need `confirm: true` in `weave_call`; clients also see `destructiveHint` on the named tools.
+- **Same rules as the CLI**: the key's role decides (MCP adds no permission; admin ops are hidden from non-admin keys), ids rather than
+  names in tool inputs, claim before work, comment and move when done. Errors carry the CLI codes (`conflict` = someone else holds
+  the claim: skip the card).
+- **Files**: uploads take a local `path` the MCP server reads, only inside the allowed roots (its working directory unless that is your
+  home, and the temp dir; `WEAVE_MCP_UPLOAD_ROOTS` replaces them) and never credential/config paths (`.ssh`, `.git`, `.env*`, `*.pem`,
+  `~/.config/weave`, ...), or small `contentBase64`. Downloads are written to a file (temp dir or `saveTo`) and the result gives its
+  path and sha256; small images come back inline. Downloaded content is untrusted, like card text.
+- **Prompts and resources**: the Connect-an-agent prompts (`about_weave`, `project`, `board`, `column`, `runner`, with the admin,
+  project and board customisations) and `weave://board/{id}` / `weave://card/{id}`.
+- **No listening over MCP.** MCP is request/response here: pull with `weave_card_next`. For an agent that should wait for cards,
+  keep `weave listen --claim` or the token-free `weave agent run --outbox` runner (sections 3 and 4).
 
 ## 2. The work protocol
 

@@ -29,7 +29,7 @@ func loadTilesOnly(e *ops.Env, b Board, idx map[string]int, lists []List, ids []
 			args = append(args, id)
 		}
 	}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.list_id,c.name,COALESCE(c.description,''),c.type,COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),
 		c.comments_total,c.is_closed,COALESCE(c.updated_at,c.created_at),
 		(SELECT COUNT(*) FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id WHERE tl.card_id=c.id),
 		(SELECT COUNT(*) FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id WHERE tl.card_id=c.id AND t.is_completed=1),
@@ -49,7 +49,7 @@ func loadTilesOnly(e *ops.Env, b Board, idx map[string]int, lists []List, ids []
 		var t Tile
 		var done bool
 		var upd string
-		if err := rows.Scan(&t.ID, &t.ListID, &t.Name, &t.desc, &t.Type, &t.DueRaw, &done, &t.Comments, &t.Closed, &upd,
+		if err := rows.Scan(&t.ID, &t.ListID, &t.Name, &t.desc, &t.DueRaw, &done, &t.Comments, &t.Closed, &upd,
 			&t.TasksTotal, &t.TasksDone, &t.Attachments, &t.CoverID, &t.ClaimedBy, &t.ClaimedUntilRaw); err != nil {
 			rows.Close()
 			return nil, err

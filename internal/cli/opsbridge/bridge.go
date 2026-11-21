@@ -14,7 +14,7 @@ func FromRegistry() []cli.Op {
 	out := make([]cli.Op, 0, len(all))
 	for _, o := range all {
 		s := o.Schema()
-		c := cli.Op{Name: s.Name, Tag: s.Tag, Summary: s.Summary, Method: s.Method, Path: s.Path, Auth: s.Auth, UI: s.UI}
+		c := cli.Op{Name: s.Name, Tag: s.Tag, Summary: s.Summary, Method: s.Method, Path: s.Path, Auth: s.Auth, UI: s.UI, Binary: s.Binary, MaxBytes: s.MaxBytes}
 		for _, f := range s.Fields {
 			c.Fields = append(c.Fields, cli.Field{Name: f.Name, In: f.In, Type: f.Type, Required: f.Required, Desc: f.Desc})
 		}

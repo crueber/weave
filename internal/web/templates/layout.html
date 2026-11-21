@@ -24,7 +24,7 @@
     <span id="notif-badge" class="notif-badge" hx-get="/ui/notifications/badge" hx-trigger="load, sse:notification" hx-swap="innerHTML"></span>
   </a>
   {{end}}
-  {{template "theme-toggle" .}}
+  {{if not .User}}{{template "theme-toggle" .}}{{end}}
   {{if .User}}
   <details class="menu" id="user-menu">
     <summary aria-label="Account menu"><img class="avatar avatar-img" src="/avatars/{{.User.UserID}}" alt="" width="32" height="32" decoding="async"></summary>

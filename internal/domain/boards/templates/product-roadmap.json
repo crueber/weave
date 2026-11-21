@@ -78,7 +78,6 @@
     "id": "c1",
     "listId": "l1",
     "name": "Self-serve onboarding",
-    "type": "project",
     "position": 65536,
     "description": "**Goal**\nNew customers reach their first success without talking to us.\n\n**Why now**\nSupport time spent on setup is our biggest drag on growth.",
     "labelIds": [
@@ -112,7 +111,6 @@
     "id": "c2",
     "listId": "l2",
     "name": "Usage-based billing",
-    "type": "project",
     "position": 131072,
     "description": "Replace flat tiers with metered usage once metering is reliable.",
     "labelIds": [
@@ -123,7 +121,6 @@
     "id": "c3",
     "listId": "l3",
     "name": "Dark mode polish",
-    "type": "project",
     "position": 196608,
     "description": "Small touches that make the product feel cared for.",
     "labelIds": [

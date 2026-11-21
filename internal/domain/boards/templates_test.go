@@ -94,8 +94,8 @@ func TestInstantiateEveryBuiltin(t *testing.T) {
 func TestBuiltinDetailsAndErrors(t *testing.T) {
 	e := fixture(t)
 	b := call[boards.Board](t, e, "board.instantiate", boards.InstantiateIn{ProjectID: "p1", TemplateID: "builtin:sprint", Name: "S"})
-	if b.DefaultCardType != "story" && count(t, e, `SELECT COUNT(*) FROM cards WHERE board_id=? AND type='story'`, b.ID) != 1 {
-		t.Fatal("sprint story card lost its type")
+	if count(t, e, `SELECT COUNT(*) FROM cards WHERE board_id=? AND name='As a user, I can reset my password'`, b.ID) != 1 {
+		t.Fatal("sprint sample card missing")
 	}
 	d := call[boards.BoardDetail](t, e, "board.get", boards.BoardGetIn{ID: b.ID})
 	wip := map[string]int{}

@@ -33,6 +33,20 @@ type Op struct {
 	Auth    string  `json:"auth"`
 	UI      string  `json:"ui"`
 	Fields  []Field `json:"fields"`
+	// Binary: the response is a file stream (download). MaxBytes: request body cap of upload/import
+	// ops (0 = the server default of 2 MiB). Both are absent from older servers' schemas.
+	Binary   bool  `json:"binary,omitempty"`
+	MaxBytes int64 `json:"maxBytes,omitempty"`
+}
+
+// HasFile reports whether the op takes a multipart file upload (a field with in:"file").
+func (o *Op) HasFile() bool {
+	for _, f := range o.Fields {
+		if f.In == "file" || f.Type == "file" {
+			return true
+		}
+	}
+	return false
 }
 
 // Verb is the op name after the tag ("card.label.add" -> "label.add").
@@ -152,6 +166,20 @@ func (c *Catalog) Tag(tag string) []*Op {
 
 // Lookup finds "<tag> <verb...>".
 func (c *Catalog) Lookup(tag, verb string) *Op { return c.byName[tag+"."+verb] }
+
+// verbAliases are extra verbs the generic command path accepts for every tag (weave card edit = card update).
+var verbAliases = map[string]string{"edit": "update"}
+
+// LookupVerb is Lookup that also accepts the verbAliases.
+func (c *Catalog) LookupVerb(tag, verb string) *Op {
+	if o := c.Lookup(tag, verb); o != nil {
+		return o
+	}
+	if v, ok := verbAliases[verb]; ok {
+		return c.Lookup(tag, v)
+	}
+	return nil
+}
 
 // MergedOps returns the full op list as the CLI sees it offline (given ops + contract overlay);
 // used by the skill generator.

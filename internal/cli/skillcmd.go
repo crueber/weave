@@ -16,10 +16,10 @@ import (
 
 var skillFlags = []FlagSpec{
 	{Name: "target", Multi: true}, {Name: "scope"}, {Name: "dir"},
-	{Name: "force", Bool: true}, {Name: "file"}, {Name: "compact", Bool: true},
+	{Name: "force", Bool: true}, {Name: "file"}, {Name: "compact", Bool: true}, {Name: "mcp", Bool: true},
 }
 
-const skillUsage = "weave skill print [--file references/commands.md|list] [--compact] | install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] | targets | check [--target ..] | uninstall [--target ..]"
+const skillUsage = "weave skill print [--file references/commands.md|list] [--compact] | install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] [--mcp] | targets | check [--target ..] | uninstall [--target ..]"
 
 func init() {
 	registerSpec("skill", skillFlags, cmdSkill)
@@ -53,12 +53,13 @@ type skillEnv struct {
 	Cwd      string
 	Getenv   func(string) string
 	LookPath func(string) (string, error)
+	Exe      string // the weave binary written into MCP client configs ("" = "weave")
 }
 
 func realSkillEnv() *skillEnv {
 	h, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
-	return &skillEnv{GOOS: goos(), Home: h, Cwd: cwd, Getenv: os.Getenv, LookPath: exec.LookPath}
+	return &skillEnv{GOOS: goos(), Home: h, Cwd: cwd, Getenv: os.Getenv, LookPath: exec.LookPath, Exe: realExe()}
 }
 
 func (a *App) skillEnv() *skillEnv {
@@ -315,6 +316,7 @@ type skillRow struct {
 	Detected   bool     `json:"detected"`
 	Verified   bool     `json:"verified"`
 	SharedWith string   `json:"sharedWith,omitempty"`
+	MCP        string   `json:"mcp,omitempty"` // MCP config writer: verified | unverified
 	Note       string   `json:"note,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
 	Detail     string   `json:"detail,omitempty"` // one-line human summary for the table
@@ -432,6 +434,16 @@ func (a *App) skillTargets(p *Parsed) int {
 		if t.Note != "" {
 			row.Note = strings.TrimSpace(row.Note + " " + t.Note)
 		}
+		if t.MCP != nil {
+			row.MCP = "unverified"
+			if t.MCP.Verified {
+				row.MCP = "verified"
+			}
+		}
+		if t.MCPOnly {
+			row.Kind, row.State, row.Reason = "mcp", "n/a", ""
+			row.Note = "MCP only: weave skill install --target " + t.ID + " --mcp"
+		}
 		rows = append(rows, row)
 	}
 	return a.emitRows(rows, "target", "name", "kind", "detected", "state", "path", "detail")
@@ -454,8 +466,16 @@ func (a *App) skillInstall(p *Parsed) int {
 	var rows []skillRow
 	exit := 0
 	done := map[string]string{}
+	wantMCP := p.Bool("mcp")
 	for _, r := range sel {
 		row := rowOf(r)
+		if r.T.MCPOnly {
+			if !wantMCP {
+				row.Kind, row.Action, row.Reason = "mcp", "skipped", "MCP-only client: add --mcp"
+				rows = append(rows, row)
+			}
+			continue
+		}
 		if r.Skip != "" {
 			row.Action, row.Reason = "skipped", r.Skip
 			if !explicit && !strings.HasPrefix(r.Skip, "detected") {
@@ -491,7 +511,14 @@ func (a *App) skillInstall(p *Parsed) int {
 		}
 		rows = append(rows, row)
 	}
-	if code := a.emitRows(rows, "target", "action", "path", "detail"); code != 0 {
+	if wantMCP {
+		mrows, mexit := a.mcpRows(sel, e, scope, explicit, force, false)
+		rows = append(rows, mrows...)
+		if exit == 0 {
+			exit = mexit
+		}
+	}
+	if code := a.emitRows(rows, "target", "kind", "action", "path", "detail"); code != 0 {
 		return code
 	}
 	return exit
@@ -597,7 +624,7 @@ func (a *App) skillUninstall(p *Parsed) int {
 	exit := 0
 	for _, r := range sel {
 		row := rowOf(r)
-		if r.Skip != "" {
+		if r.Skip != "" || r.T.MCPOnly {
 			continue
 		}
 		if r.Shared != "" {
@@ -637,7 +664,14 @@ func (a *App) skillUninstall(p *Parsed) int {
 		}
 		rows = append(rows, row)
 	}
-	if code := a.emitRows(rows, "target", "action", "path", "detail"); code != 0 {
+	if p.Bool("mcp") {
+		mrows, mexit := a.mcpRows(sel, e, scope, explicit, force, true)
+		rows = append(rows, mrows...)
+		if exit == 0 {
+			exit = mexit
+		}
+	}
+	if code := a.emitRows(rows, "target", "kind", "action", "path", "detail"); code != 0 {
 		return code
 	}
 	return exit

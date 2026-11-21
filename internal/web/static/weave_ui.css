@@ -46,7 +46,8 @@
 .topbar-crumbs .crumb-cur a{font-weight:600;color:var(--fg)}
 .topbar>.view-switch{margin-left:var(--space-2)}
 .topbar-search-link{display:none}
-.menu-theme{display:none}
+.menu-theme{display:flex}
+.menu-theme .theme-toggle{border-color:var(--border-strong)}
 
 /* menus / dropdowns */
 .menu{position:relative}
@@ -158,17 +159,15 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:blur(3px)}
   .topbar-search input{width:36vw}.topbar-search input:focus{width:48vw}
   .theme-toggle button{width:26px}
 }
-/* narrow: search collapses to an icon, the crumbs lose their root, then the board name is all that is left (phones also move the theme switch into the account menu and the view switcher into the filter row) */
+/* narrow: search collapses to an icon, the crumbs lose their root, then the board name is all that is left (phones also move the view switcher into the filter row; the theme switch lives in the account menu, and only signed-out pages show it in the top bar) */
 @media(max-width:900px){
   .topbar-search{display:none}
   .topbar .topbar-search-link{display:inline-grid}
   .topbar-crumbs .crumb-root{display:none}
 }
 @media(max-width:640px){
-  .topbar:has(#user-menu)>.theme-toggle,.topbar>.view-switch,.topbar-crumbs .crumb-proj{display:none}  /* signed-out pages have no account menu to move the theme switch into */
+  .topbar>.view-switch,.topbar-crumbs .crumb-proj{display:none}
   .topbar-crumbs{margin-left:0;max-width:calc(100vw - 190px)}
-  .menu-theme{display:flex}
-  .menu-theme .theme-toggle{border-color:var(--border-strong)}
 }
 
 /* ---- admin console ---- */

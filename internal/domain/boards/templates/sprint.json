@@ -3,7 +3,7 @@
  "version": 1,
  "category": "software",
  "name": "Sprint (Scrum)",
- "summary": "Backlog, sprint, in progress, review and done, with limits and story cards.",
+ "summary": "Backlog, sprint, in progress, review and done, with limits and sample user stories.",
  "audience": "Software teams working in sprints",
  "tags": [
   "scrum",
@@ -23,8 +23,7 @@
    "name": "Sprint board",
    "defaultView": "kanban",
    "color": "indigo",
-   "cardColorMode": "pill",
-   "defaultCardType": "story"
+   "cardColorMode": "pill"
   },
   "lists": [
    {
@@ -95,7 +94,6 @@
     "id": "c1",
     "listId": "l2",
     "name": "As a user, I can reset my password",
-    "type": "story",
     "position": 65536,
     "description": "**As a** registered user\n**I want** to reset my password by e-mail\n**So that** I can get back in when I forget it.",
     "labelIds": [
@@ -129,7 +127,6 @@
     "id": "c2",
     "listId": "l1",
     "name": "Spike: compare two search libraries",
-    "type": "project",
     "position": 131072,
     "description": "Time-boxed investigation. Outcome: a short written recommendation, not production code.",
     "labelIds": [
@@ -140,7 +137,6 @@
     "id": "c3",
     "listId": "l1",
     "name": "Upgrade the build tooling",
-    "type": "project",
     "position": 196608,
     "description": "Keep the toolchain current so upgrades stay small.",
     "labelIds": [

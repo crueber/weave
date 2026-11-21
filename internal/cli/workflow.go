@@ -15,7 +15,7 @@ import (
 func init() {
 	registerSpec("next", nextFlags, cmdNext)
 	registerSpec("inbox", []FlagSpec{{Name: "assigned", Bool: true}, {Name: "claimed", Bool: true}}, cmdInbox)
-	registerSpec("board tree", nil, cmdBoardTree)
+	registerSpec("board tree", boardTreeFlags, cmdBoardTree)
 	registerSpec("list stats", []FlagSpec{{Name: "list"}}, cmdListStats)
 	registerSpec("card show", []FlagSpec{{Name: "full", Bool: true}}, cmdCardShow)
 	registerSpec("card move", []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}}, cmdCardMove)
@@ -294,8 +294,10 @@ func cardHasMember(c map[string]any, uid string) bool {
 
 // ---- board tree / list stats ----
 
+var boardTreeFlags = []FlagSpec{{Name: "include-closed", Aliases: []string{"includeClosed"}, Bool: true}, {Name: "list", Aliases: []string{"listIds"}, Multi: true}}
+
 func cmdBoardTree(a *App, args []string) int {
-	p, err := a.parse(args, nil)
+	p, err := a.parse(args, boardTreeFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -308,7 +310,22 @@ func cmdBoardTree(a *App, args []string) int {
 	if err != nil {
 		return a.fail(err)
 	}
-	tree, err := a.boardTree(ctx, bid)
+	extra := Params{}
+	if p.Bool("include-closed") {
+		extra["includeClosed"] = true
+	}
+	var ids []string
+	for _, l := range splitMulti(p.All("list")) {
+		id, err := a.Resolve(ctx, "list", l, Scope{BoardID: bid})
+		if err != nil {
+			return a.fail(err)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) > 0 {
+		extra["listIds"] = strings.Join(ids, ",")
+	}
+	tree, err := a.boardTree(ctx, bid, extra)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -316,7 +333,32 @@ func cmdBoardTree(a *App, args []string) int {
 		printTree(a, tree)
 		return 0
 	}
+	a.Out.Fields = treeFields(a.Out.Fields)
 	return a.emitItem(tree)
+}
+
+// treeFields rewrites --fields for board tree, whose records are the cards of a nested tree: a bare
+// path (name, labels.name) selects card fields, board.X selects the board's own field X, and a path
+// that starts with lists is taken literally. The board, its lists and their cards always keep id and
+// name, so a projection can never flatten the tree into an empty-looking board.
+func treeFields(fields []string) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := []string{"id", "name", "lists.id", "lists.name", "lists.cards.id", "lists.cards.name"}
+	for _, f := range fields {
+		f = strings.TrimPrefix(strings.TrimSpace(f), ".")
+		switch segs := splitPath(f); {
+		case len(segs) == 0:
+		case segs[0] == "lists":
+			out = append(out, f)
+		case segs[0] == "board" && len(segs) > 1:
+			out = append(out, strings.TrimPrefix(strings.TrimPrefix(f, "board"), "."))
+		default:
+			out = append(out, "lists.cards."+f)
+		}
+	}
+	return out
 }
 
 func firstOr(xs []string) string {
@@ -327,8 +369,14 @@ func firstOr(xs []string) string {
 }
 
 // boardTree uses board.tree, or assembles the same shape from board.get + list.list + card.list.
-func (a *App) boardTree(ctx context.Context, boardID string) (map[string]any, error) {
-	r, err := a.Do(ctx, "board.tree", Params{"id": boardID})
+func (a *App) boardTree(ctx context.Context, boardID string, extra ...Params) (map[string]any, error) {
+	pr := Params{"id": boardID}
+	for _, e := range extra {
+		for k, v := range e {
+			pr[k] = v
+		}
+	}
+	r, err := a.Do(ctx, "board.tree", pr)
 	if err == nil {
 		t := itemOf(r.JSON())
 		if b, ok := t["board"].(map[string]any); ok { // server shape {board, lists[]}: flatten
@@ -389,8 +437,21 @@ func printTree(a *App, tree map[string]any) {
 		for _, c := range cards {
 			cm, _ := c.(map[string]any)
 			extra := ""
+			if tt, ok := cm["tasksTotal"].(float64); ok && tt > 0 {
+				done, _ := cm["tasksCompleted"].(float64)
+				extra += fmt.Sprintf("  [%d/%d tasks]", int(done), int(tt))
+			}
+			if ms, ok := cm["members"].([]any); ok && len(ms) > 0 {
+				var names []string
+				for _, m := range ms {
+					if mm, ok := m.(map[string]any); ok {
+						names = append(names, cleanText(str(mm, "name"), false))
+					}
+				}
+				extra += "  @" + strings.Join(names, ", @")
+			}
 			if cb := str(cm, "claimedBy"); cb != "" {
-				extra = "  [claimed]"
+				extra += "  [claimed]"
 			}
 			fmt.Fprintf(a.Stdout, "    - %s  (%s)%s\n", cleanText(str(cm, "name"), false), cleanText(str(cm, "id"), false), extra)
 		}
@@ -767,12 +828,12 @@ func cmdCardDone(a *App, args []string) int {
 
 var cardCreateFlags = []FlagSpec{{Name: "list", Aliases: []string{"list-id"}}, {Name: "name"}, {Name: "desc", Aliases: []string{"description"}},
 	{Name: "label", Multi: true}, {Name: "assign", Aliases: []string{"assignee", "member"}, Multi: true}, {Name: "due"},
-	{Name: "type"}, {Name: "position"}, {Name: "from-stdin", Bool: true}, {Name: "claim", Bool: true}}
+	{Name: "position"}, {Name: "from-stdin", Bool: true}, {Name: "claim", Bool: true}}
 
 type cardSpec struct {
-	Name, Desc, List, Due, Type string
-	Labels, Assign              []string
-	Position                    any
+	Name, Desc, List, Due string
+	Labels, Assign        []string
+	Position              any
 }
 
 func cmdCardCreate(a *App, args []string) int {
@@ -785,7 +846,7 @@ func cmdCardCreate(a *App, args []string) int {
 	if err != nil {
 		return a.fail(err)
 	}
-	base := cardSpec{Name: p.Str("name"), List: p.Str("list"), Due: p.Str("due"), Type: p.Str("type"),
+	base := cardSpec{Name: p.Str("name"), List: p.Str("list"), Due: p.Str("due"),
 		Labels: splitMulti(p.All("label")), Assign: splitMulti(p.All("assign"))}
 	if d := p.Str("desc"); d != "" {
 		if base.Desc, err = a.readValueMaybe(d); err != nil {
@@ -813,7 +874,6 @@ func cmdCardCreate(a *App, args []string) int {
 				Desc2     string   `json:"desc"`
 				List      string   `json:"list"`
 				Due       string   `json:"dueDate"`
-				Type      string   `json:"type"`
 				Labels    []string `json:"labels"`
 				Assign    []string `json:"assign"`
 				Assignees []string `json:"assignees"`
@@ -840,9 +900,6 @@ func cmdCardCreate(a *App, args []string) int {
 			}
 			if in.Due != "" {
 				s.Due = in.Due
-			}
-			if in.Type != "" {
-				s.Type = in.Type
 			}
 			if in.Position != nil {
 				s.Position = in.Position
@@ -897,9 +954,6 @@ func (a *App) createCard(ctx context.Context, boardID string, s cardSpec, claim 
 	}
 	if s.Due != "" {
 		params["dueDate"] = s.Due
-	}
-	if s.Type != "" {
-		params["type"] = s.Type
 	}
 	if s.Position != nil {
 		params["position"] = s.Position

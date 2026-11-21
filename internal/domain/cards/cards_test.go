@@ -88,7 +88,7 @@ func call[T any](t *testing.T, e *ops.Env, op string, in any) T {
 func TestCRUDAndAuthz(t *testing.T) {
 	f := seed(t)
 	c := f.card(t, f.todo, "  First  ")
-	if c.Name != "First" || c.Type != "project" || c.Position == nil || *c.Position != db.PositionGap {
+	if c.Name != "First" || c.Position == nil || *c.Position != db.PositionGap {
 		t.Fatalf("bad card %+v", c)
 	}
 	c2 := f.card(t, f.todo, "Second")
@@ -99,14 +99,9 @@ func TestCRUDAndAuthz(t *testing.T) {
 		t.Fatal("create in archive list must fail")
 	}
 	d := "desc"
-	typ := "story"
-	u := call[Card](t, f.e, "card.update", UpdateIn{ID: c.ID, Description: &d, Type: &typ})
-	if *u.Description != "desc" || u.Type != "story" {
+	u := call[Card](t, f.e, "card.update", UpdateIn{ID: c.ID, Description: &d})
+	if *u.Description != "desc" {
 		t.Fatalf("update %+v", u)
-	}
-	bad := "epic"
-	if _, err := ops.Typed[Card](f.e, "card.update", UpdateIn{ID: c.ID, Type: &bad}); err == nil {
-		t.Fatal("bad type")
 	}
 	// viewer can read but not write; stranger sees nothing
 	if _, err := ops.Typed[Card](f.viewer, "card.get", GetIn{ID: c.ID}); err != nil {

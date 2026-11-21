@@ -12,8 +12,8 @@ The complete op list with every field is in `ops.md`.
 |---|---|
 | `--profile NAME`, `--url U`, `--token K` | choose server/credentials (`WEAVE_PROFILE`, `WEAVE_URL`, `WEAVE_TOKEN`); `--url/--token` go before the command |
 | `--output json\|ndjson\|table\|ids\|quiet` | output format (default json envelope, indented on a terminal) |
-| `--fields a,b.c` | keep only these dotted paths of each item |
-| `--jq '.items[].id'` | tiny jq-like projection (`.a.b`, `[n]`, `[]`, `\|`); strings print raw |
+| `--fields a,b.c` | keep only these dotted paths of each item; arrays on the way stay arrays (`labels.name`) |
+| `--jq '.items[].id'` | tiny jq-like projection (`.a.b`, `[n]`, `[]`, `\|`); strings print raw; an unknown key fails (exit 2, lists the keys) |
 | `--limit N --cursor C --all` | pagination; `--all` follows the cursor and merges pages |
 | `--dry-run` | show the request, do not send writes |
 | `--yes` | skip the delete/clear confirmation (only prompts on a terminal) |
@@ -23,6 +23,12 @@ The complete op list with every field is in `ops.md`.
 | `--no-color` | disable colour (also `NO_COLOR`) |
 
 Any string value may be `-` (read stdin) or `@path` (read a file): `weave card comment CARD --text @notes.md`.
+Put long text (PR bodies, specs) in a file and pass `@file`; a double-quoted shell string runs backticks and `$(...)`.
+Aliases on every op: `--desc` = `--description`, `--due` = `--dueDate`, verb `edit` = `update` (`weave card edit CARD --desc @f`).
+
+`--fields` on `weave board tree`: a bare path is a card path (`--fields name,tasksTotal`), `board.X` is a board field,
+`lists...` is literal; board, lists and cards always keep `id` and `name`. `--jq` on it starts at `.item`
+(`.item.lists[].cards[].name`); `.items` is an error there.
 
 ## Names instead of ids
 
@@ -38,14 +44,16 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 | `weave login --url U --token K [--profile P]` | verify with whoami and save a profile |
 | `weave whoami` / `weave doctor` / `weave version [--check]` | identity, health checks, version skew |
 | `weave config list\|use NAME\|set url\|token V\|get K\|remove NAME\|path` | profiles |
-| `weave board tree --board B` | lists with their cards |
+| `weave board tree --board B [--list L]... [--include-closed]` | `{"item":{board..., "lists":[{..., "cards":[card + members, tasksTotal, tasksCompleted]}]}}` |
 | `weave board template.list [--q WORDS] [--category C]` / `weave board template.get --templateId ID` | ready-made board templates (`builtin:<slug>` ids such as `builtin:sprint`, plus published boards): list or preview their columns, limits, labels and sample cards |
 | `weave board instantiate --projectId P --templateId ID --name N [--sampleCards=false]` | create a board from a template; due dates in templates are relative to now |
-| `weave inbox [--assigned\|--claimed]` | my cards across boards |
+| `weave inbox [--assigned\|--claimed]` | my cards across boards (not the board Inbox: `card inbox.list`, `card draft.create\|publish`) |
 | `weave list stats --board B [--list L]` | per-list counts: cards, claimed, unclaimed, overdue |
+| `weave board stats --project P [--boardId B]` | at-a-glance numbers per board (open, done, overdue, due this week, claimed, agents listening, members, last activity, 7-day activity, cards per column), most recently active first; counts only |
 | `weave next --board B --list L [--list L2] [--claim] [--move-to L] [--ttl 15m] [--wait 60s]` | pull the next card; exit 10 if none |
 | `weave card create --board B --list L --name N [--desc T\|@f] [--label X]... [--assign U]... [--due T] [--from-stdin]` | create; `--from-stdin` reads NDJSON/lines for bulk |
-| `weave card show CARD [--full]` | card, optionally with comments, checklists, attachments |
+| `weave card show CARD [--full]` | card, optionally with comments, checklists (`.item.tasks[]`), attachments |
+| `weave card edit CARD [--name N] [--desc T\|@f\|-] [--due T]` | alias of `card update` |
 | `weave card move CARD --to-list L [--position N]` | move |
 | `weave card comment CARD "text"` / `--stdin` | comment |
 | `weave card attach CARD FILE...` | upload attachments |

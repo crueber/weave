@@ -43,6 +43,8 @@ type CardSnap struct {
 	ClaimedBy            *string  `json:"claimedBy"`
 	ClaimedByName        *string  `json:"claimedByName,omitempty"`
 	ClaimedUntil         *string  `json:"claimedUntil"`
+	TasksTotal           int      `json:"tasksTotal"`
+	TasksCompleted       int      `json:"tasksCompleted"`
 }
 
 // Actor is who caused an event.
@@ -73,6 +75,10 @@ var Snapshot func(e *ops.Env, cardID string) *CardSnap
 
 // Snapshots is the batch form of Snapshot (same order as ids, missing cards skipped).
 var Snapshots func(e *ops.Env, ids []string) []CardSnap
+
+// TaskCounts returns {total, completed} checklist task counts per card id (cards without tasks
+// may be absent) in one aggregate query; installed by the cardextras domain, which owns tasks.
+var TaskCounts func(e *ops.Env, cardIDs []string) map[string][2]int
 
 // FormatID renders an event sequence as the public id (zero padded so string and
 // numeric order agree). ParseID accepts padded and plain decimals.

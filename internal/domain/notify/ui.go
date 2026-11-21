@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -62,6 +63,9 @@ func init() {
 	web.Route("POST /ui/admin/config/logo/delete", uiLogoDelete)
 	web.Route("POST /ui/admin/config/smtp-test", uiSMTPTest)
 	web.Route("POST /ui/admin/search/reindex", uiReindex)
+	web.Route("GET /admin/agent-prompts", pageAgentPrompts)
+	web.Route("POST /ui/admin/agent-prompts", uiAgentPromptsSave)
+	web.Route("POST /ui/admin/agent-prompts/preview", uiAgentPromptsPreview)
 	web.RoutePublic("GET /branding/logo", serveLogo)
 
 	web.Route("GET /search", pageSearch)
@@ -398,6 +402,172 @@ func serveLogo(c *web.Ctx) error {
 	c.W.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = c.W.Write(st.Data)
 	return nil
+}
+
+// ---- default agent prompts ---------------------------------------------------
+
+// apItem is one editor on the admin Agent prompts page: a prompt (tab "prompts") or a shared block (tab "blocks").
+type apItem struct {
+	ID, Tab, Kind, Name, Key, Title, Desc, Text, Note, Err string
+	Custom, Locked, Open, Done                             bool
+	Tokens                                                 []agentprompt.Token
+}
+
+var apInfo = map[string][2]string{
+	agentprompt.ScopeGeneral: {"About Weave", "What Weave is, how to connect and the house rules. Used everywhere; projects and boards cannot change it."},
+	agentprompt.ScopeProject: {"Project", "The default for every project; a project manager can override it in Project settings > Agents."},
+	agentprompt.ScopeBoard:   {"Board", "The default for every board; a board manager can override it in Board settings > Agents. Boards do not inherit the project text."},
+	agentprompt.ScopeRunner:  {"Unattended runner", "Sets up weave agent run as a service around a coding agent. Used everywhere; projects and boards cannot change it."},
+}
+
+// Tabs of the Agent prompts page (?tab=).
+const (
+	apTabPrompts = "prompts"
+	apTabBlocks  = "blocks"
+)
+
+func apNewItem(v SettingsView, tab, name string) apItem {
+	it := apItem{Tab: tab, Name: name}
+	if tab == apTabBlocks {
+		b, _ := agentprompt.Block(name)
+		it.ID, it.Kind, it.Key, it.Title, it.Desc, it.Tokens = "ab-"+name, "block", AgentBlockKey(name), b.Title, b.Desc, agentprompt.BlockTokens(name)
+	} else {
+		it.ID, it.Kind, it.Key, it.Title, it.Desc, it.Tokens = "ap-"+name, "prompt", AgentPromptKey(name), apInfo[name][0], apInfo[name][1], agentprompt.Tokens(name)
+	}
+	it.Text = v.Values[it.Key]
+	it.Custom = strings.TrimSpace(it.Text) != ""
+	if !it.Custom {
+		if tab == apTabBlocks {
+			it.Text = agentprompt.BlockDefault(name)
+		} else {
+			it.Text = agentprompt.Default(name)
+		}
+	}
+	for _, k := range v.EnvLocked {
+		if k == it.Key {
+			it.Locked, it.Note = true, "Set by the environment ("+envName(it.Key)+"); change it there."
+		}
+	}
+	return it
+}
+
+// apNames lists the editors of a tab.
+func apNames(tab string) []string {
+	if tab == apTabBlocks {
+		return agentprompt.BlockNames()
+	}
+	return agentprompt.EditableScopes
+}
+
+// apTab reads the tab from ?tab= or the form's _section ("prompts" unless it says "blocks").
+func apTab(c *web.Ctx) string {
+	t := c.R.URL.Query().Get("tab")
+	if c.R.Method != "GET" {
+		t = c.R.FormValue("_section")
+	}
+	if t == apTabBlocks {
+		return apTabBlocks
+	}
+	return apTabPrompts
+}
+
+// renderAgentPrompts draws the Agent prompts page: two tabs (the four prompts, the shared blocks) of expandable editors.
+// After a save over htmx only the edited editor is redrawn (open, with its status), so other open editors keep their state.
+func renderAgentPrompts(c *web.Ctx, tab, open string, done bool, errm, posted string) error {
+	v, err := ops.Typed[SettingsView](c.Env, "config.get", NoInput{})
+	if err != nil {
+		return err
+	}
+	var items []apItem
+	count := map[string]int{}
+	for _, t := range []string{apTabPrompts, apTabBlocks} {
+		for _, n := range apNames(t) {
+			it := apNewItem(v, t, n)
+			if it.Custom {
+				count[t]++
+			}
+			if t != tab {
+				continue
+			}
+			if n == open {
+				it.Open, it.Done, it.Err = true, done, errm
+				if errm != "" {
+					it.Text = posted
+				}
+				if c.IsHTMX() && c.R.Method != "GET" {
+					return c.RenderBlock("notify_agentprompts.html", "agentprompts-item-frag", it)
+				}
+			}
+			items = append(items, it)
+		}
+	}
+	d := map[string]any{"Tab": tab, "Items": items, "Prompts": count[apTabPrompts], "Blocks": count[apTabBlocks]}
+	return c.Render("notify_agentprompts.html", d)
+}
+
+func pageAgentPrompts(c *web.Ctx) error {
+	return renderAgentPrompts(c, apTab(c), c.R.URL.Query().Get("open"), false, "", "")
+}
+
+// apPosted finds the one prompt or block key a save form carries.
+func apPosted(c *web.Ctx, tab string) (name, key string, ok bool) {
+	_ = c.R.ParseForm()
+	for _, n := range apNames(tab) {
+		k := AgentPromptKey(n)
+		if tab == apTabBlocks {
+			k = AgentBlockKey(n)
+		}
+		if _, has := c.R.PostForm[k]; has {
+			return n, k, true
+		}
+	}
+	return "", "", false
+}
+
+// uiAgentPromptsSave writes one prompt default or block through config.update (the form carries only its own key).
+func uiAgentPromptsSave(c *web.Ctx) error {
+	tab := apTab(c)
+	name, key, ok := apPosted(c, tab)
+	if !ok {
+		return ops.Invalid("nothing to save")
+	}
+	if _, err := c.Do("config.update"); err != nil {
+		if oe, ok := err.(*ops.Error); ok {
+			return renderAgentPrompts(c, tab, name, false, oe.Msg, c.R.PostForm.Get(key))
+		}
+		return err
+	}
+	return renderAgentPrompts(c, tab, name, true, "", "")
+}
+
+// apPreview is the agent.prompt.preview result as the page shows it.
+type apPreview struct {
+	Text   string `json:"text"`
+	Sample string `json:"sample"`
+	Title  string `json:"-"`
+}
+
+// uiAgentPromptsPreview renders the editor's current (unsaved) text with sample data via agent.prompt.preview.
+func uiAgentPromptsPreview(c *web.Ctx) error {
+	tab := apTab(c)
+	name, key, ok := apPosted(c, tab)
+	if !ok {
+		return ops.Invalid("nothing to preview")
+	}
+	kind := "prompt"
+	if tab == apTabBlocks {
+		kind = "block"
+	}
+	res, err := ops.CallMap(c.Env, "agent.prompt.preview", map[string]any{"kind": kind, "name": name, "text": c.R.PostForm.Get(key)})
+	if err != nil {
+		return err
+	}
+	var p apPreview
+	raw, _ := json.Marshal(res)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	return c.RenderBlock("notify_agentprompts.html", "agentprompts-preview", p)
 }
 
 // ---- search / dashboard / export --------------------------------------------

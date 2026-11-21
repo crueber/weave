@@ -91,7 +91,6 @@
     "id": "c1",
     "listId": "l2",
     "name": "Launch announcement post",
-    "type": "project",
     "position": 65536,
     "description": "Due a week from creating the board; change the date as you plan.",
     "labelIds": [
@@ -130,7 +129,6 @@
     "id": "c2",
     "listId": "l1",
     "name": "Behind-the-scenes video",
-    "type": "project",
     "position": 131072,
     "description": "Short, honest look at how the team works.",
     "labelIds": [

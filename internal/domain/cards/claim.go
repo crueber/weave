@@ -450,6 +450,13 @@ func snapshotMany(e *ops.Env, ids []string) []events.CardSnap {
 			}
 			mr.Close()
 		}
+		if events.TaskCounts != nil {
+			for cid, n := range events.TaskCounts(e, chunk) {
+				if s := byID[cid]; s != nil {
+					s.TasksTotal, s.TasksCompleted = n[0], n[1]
+				}
+			}
+		}
 	}
 	for _, id := range ids {
 		if s := byID[id]; s != nil {

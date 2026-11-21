@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
 )
@@ -121,6 +122,50 @@ type Settings struct {
 	SessionMaxIdleMinutes *string `json:"session.maxIdleMinutes" desc:"Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"`
 
 	TemplatesHidden *string `json:"templates.hidden" desc:"Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all"`
+
+	AgentPromptGeneral *string `json:"agentprompt.general" desc:"Default text of the About Weave agent prompt: plain text with {tokens} (see docs/AGENTS.md or the admin Agent prompts page); empty = the built-in text"`
+	AgentPromptProject *string `json:"agentprompt.project" desc:"Default text of the project agent prompt (a project can override it); plain text with {tokens}; empty = the built-in text"`
+	AgentPromptBoard   *string `json:"agentprompt.board" desc:"Default text of the board agent prompt (a board can override it); plain text with {tokens}; empty = the built-in text"`
+	AgentPromptRunner  *string `json:"agentprompt.runner" desc:"Default text of the unattended runner prompt: plain text with {tokens}; empty = the built-in text"`
+
+	AgentBlockInstance         *string `json:"agentblock.instance" desc:"Shared agent prompt block {instance} (server URLs): plain text with {server}; empty = the built-in text"`
+	AgentBlockConnect          *string `json:"agentblock.connect" desc:"Shared agent prompt block {connect}: plain text with {server} {install} {install_skill}; empty = the built-in text"`
+	AgentBlockInstall          *string `json:"agentblock.install" desc:"The CLI install line inside {connect} (left out with the install steps off): plain text with {install_base}; empty = the built-in text"`
+	AgentBlockInstallSkill     *string `json:"agentblock.install_skill" desc:"The skill install line inside {connect} (left out with the install steps off); empty = the built-in text"`
+	AgentBlockKeynote          *string `json:"agentblock.keynote" desc:"Shared agent prompt block {keynote} (about the API key); empty = the built-in text"`
+	AgentBlockConcepts         *string `json:"agentblock.concepts" desc:"Shared agent prompt block {concepts} (left out when compact); empty = the built-in text"`
+	AgentBlockQuestionnaire    *string `json:"agentblock.questionnaire" desc:"Shared agent prompt block {questionnaire} (the questions and PLAN gate); empty = the built-in text"`
+	AgentBlockEtiquette        *string `json:"agentblock.etiquette" desc:"Shared agent prompt block {etiquette}; empty = the built-in text"`
+	AgentBlockEtiquetteCompact *string `json:"agentblock.etiquette_compact" desc:"What {etiquette} shows when compact; empty = the built-in text"`
+	AgentBlockSecurity         *string `json:"agentblock.security" desc:"Shared agent prompt block {security} (card text is data); empty = the built-in text"`
+	AgentBlockReadmore         *string `json:"agentblock.readmore" desc:"Shared agent prompt block {readmore}; empty = the built-in text"`
+}
+
+// AgentBlockKey is the config key of a shared agent prompt block's admin text.
+func AgentBlockKey(name string) string { return "agentblock." + name }
+
+// AgentBlocks returns the admin texts of the shared agent prompt blocks that are customised (config agentblock.<name>,
+// or the environment), by block name; a block that is not in the map uses its built-in text.
+func AgentBlocks(e *ops.Env) map[string]string {
+	out := map[string]string{}
+	for _, n := range agentprompt.BlockNames() {
+		if v := strings.TrimSpace(Config(e, AgentBlockKey(n))); v != "" {
+			out[n] = v
+		}
+	}
+	return out
+}
+
+// AgentPromptKey is the config key of an editable agent prompt scope's admin default.
+func AgentPromptKey(scope string) string { return "agentprompt." + scope }
+
+// AgentPromptDefault returns the text an editable agent prompt scope uses when nothing more specific is set:
+// the admin default from the config table (or environment), else the built-in text. admin reports which.
+func AgentPromptDefault(e *ops.Env, scope string) (text string, admin bool) {
+	if v := strings.TrimSpace(Config(e, AgentPromptKey(scope))); v != "" {
+		return v, true
+	}
+	return agentprompt.Default(scope), false
 }
 
 var (
@@ -222,7 +267,7 @@ func init() {
 		func(e *ops.Env, _ NoInput) (SettingsView, error) { return settingsView(e), nil })
 	ops.Register(ops.Op{Name: "config.public", Summary: "Public branding/login configuration", Method: "GET", Path: "/config/public", Auth: ops.AuthPublic, UI: "exempt:consumed by the login page via notify.Public"},
 		func(e *ops.Env, _ NoInput) (PublicConfig, error) { return Public(e), nil })
-	ops.Register(ops.Op{Name: "config.update", Summary: "Update admin configuration (branding, SMTP, OIDC, registration, terms)", Method: "PATCH", Path: "/config/settings", Auth: ops.AuthAdmin, UI: "POST /ui/admin/config"},
+	ops.Register(ops.Op{Name: "config.update", Summary: "Update admin configuration (branding, SMTP, OIDC, registration, terms, board templates, default agent prompts and their shared blocks)", Method: "PATCH", Path: "/config/settings", Auth: ops.AuthAdmin, UI: "POST /ui/admin/config"},
 		func(e *ops.Env, in Settings) (SettingsView, error) {
 			rv := reflect.ValueOf(in)
 			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
@@ -254,6 +299,20 @@ func init() {
 						if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 8760 {
 							return ops.Invalid("session.hours must be a whole number of hours between 1 and 8760")
 						}
+					}
+					if scope, ok := strings.CutPrefix(key, "agentprompt."); ok {
+						n, err := agentprompt.Normalize(val, agentprompt.Default(scope))
+						if err != nil {
+							return ops.Invalid(key + ": " + err.Error())
+						}
+						val = n // text equal to the built-in default is stored as "not customised"
+					}
+					if name, ok := strings.CutPrefix(key, "agentblock."); ok {
+						n, err := agentprompt.Normalize(val, agentprompt.BlockDefault(name))
+						if err != nil {
+							return ops.Invalid(key + ": " + err.Error())
+						}
+						val = n
 					}
 					if key == "templates.hidden" && len(val) > 4096 {
 						return ops.Invalid("templates.hidden is too long")

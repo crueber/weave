@@ -20,3 +20,27 @@
         <li class="bs-empty" role="presentation" hidden>No matches</li>
       </ul>
     </div>{{end}}
+
+{{/* Agent prompt text editor (admin defaults, project and board overrides): a sub-heading that labels the textarea, a
+   line on what applies, the textarea (saves on change, i.e. when the field is left, through the form's hx-post or
+   hx-patch (Patch) to URL, swapping Target), the token legend, Preview and Reset (sends the field empty). Args: ID,
+   Name, Title, Help, Text, Custom (a custom text is stored), From (what applies without it), Tokens, URL, Patch,
+   Target, Section (_section or ""), Off (read only), Note, Preview (URL of the Connect an agent fragment, or ""). */}}
+{{define "bs_prompt"}}<div class="bs-prompt">
+  <h3 class="bs-sub"><label for="{{.ID}}">{{.Title}}</label>{{if .Custom}} <span class="boards-badge bs-prompt-badge">Customised</span>{{end}}</h3>
+  <p class="bs-desc">{{.Help}} {{if .Custom}}Reset goes back to {{.From}}.{{else}}Showing {{.From}}; edit it to customise. Saves when you leave the field.{{end}}</p>
+  {{if .Note}}<p class="bs-desc">{{.Note}}</p>{{end}}
+  <form class="bs-prompt-form" {{if .Patch}}hx-patch{{else}}hx-post{{end}}="{{.URL}}" hx-trigger="change" hx-target="{{.Target}}" hx-swap="outerHTML">
+    {{if .Section}}<input type="hidden" name="_section" value="{{.Section}}">{{end}}
+    <textarea id="{{.ID}}" name="{{.Name}}" rows="14" class="bs-mono bs-prompt-text" spellcheck="false" maxlength="20000"{{if .Off}} disabled{{end}}>{{.Text}}</textarea>
+  </form>
+  <div class="bs-prompt-foot">
+    {{template "bs_prompt_tokens" .Tokens}}
+    <span class="bs-btns">{{if .Preview}}<button type="button" hx-get="{{.Preview}}" hx-target="#modal" hx-swap="innerHTML">Preview</button>{{end}}{{if and .Custom (not .Off)}}<button type="button" {{if .Patch}}hx-patch{{else}}hx-post{{end}}="{{.URL}}" hx-vals='{"{{.Name}}":"","_section":"{{.Section}}"}' hx-target="{{.Target}}" hx-swap="outerHTML" hx-confirm="Remove the custom text and go back to {{.From}}?">Reset to default</button>{{end}}</span>
+  </div>
+</div>{{end}}
+
+{{/* The {token} legend of an editable agent prompt (agentprompt.Tokens). */}}
+{{define "bs_prompt_tokens"}}<details class="bs-tokens"><summary>Tokens you can use</summary>
+  <dl>{{range .}}<div><dt><code>{{.Name}}</code></dt><dd>{{.Desc}}</dd></div>{{end}}</dl>
+  <p>Anything else in braces is kept as typed. The blocks are shared texts that admins edit under Admin console &gt; Agent prompts &gt; Blocks; column briefs are always fenced as data.</p></details>{{end}}

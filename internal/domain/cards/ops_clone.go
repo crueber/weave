@@ -38,9 +38,9 @@ func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, error) {
 	} else if src.CreatorUserID != nil {
 		creator = *src.CreatorUserID
 	}
-	_, err = tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,due_date,is_closed,is_draft,is_template,
-		lat,lng,location_name,recurrence,list_changed_at,created_at,template_project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, boardID, o.ListID, creator, src.Type, o.Position, o.Name, src.Description, o.DueDate, ltype == "closed", o.IsDraft, o.IsTemplate,
+	_, err = tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_closed,is_draft,is_template,
+		lat,lng,location_name,recurrence,list_changed_at,created_at,template_project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, boardID, o.ListID, creator, o.Position, o.Name, src.Description, o.DueDate, ltype == "closed", o.IsDraft, o.IsTemplate,
 		src.Lat, src.Lng, src.LocationName, o.Recurrence, now, now, o.TemplateOf)
 	if err != nil {
 		return "", err
@@ -302,15 +302,14 @@ func draftCreate(e *ops.Env, in DraftCreateIn) (Card, error) {
 	if list == "" {
 		return Card{}, ops.Invalid("board has no active list")
 	}
-	typ := "project"
 	var desc any
 	if in.Description != "" {
 		desc = in.Description
 	}
 	id, now := db.NewID(), db.Now()
 	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,is_draft,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,1,?,?)`, id, in.BoardID, list, e.User.UserID, typ, endPos(e.Ctx, tx, list), name, desc, now, now)
+		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,is_draft,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,1,?,?)`, id, in.BoardID, list, e.User.UserID, endPos(e.Ctx, tx, list), name, desc, now, now)
 		return err
 	})
 	if err != nil {
@@ -384,7 +383,6 @@ type SharedLabel struct {
 type SharedCard struct {
 	Name           string        `json:"name"`
 	Description    string        `json:"description"`
-	Type           string        `json:"type"`
 	BoardName      string        `json:"boardName"`
 	ListName       string        `json:"listName"`
 	DueDate        *string       `json:"dueDate"`
@@ -431,9 +429,9 @@ func shareView(e *ops.Env, in ShareViewIn) (SharedCard, error) {
 	var desc *string
 	var done *bool
 	var err error
-	err = e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.name,c.description,c.type,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.lat,c.lng,COALESCE(c.location_name,'')
+	err = e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.name,c.description,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.lat,c.lng,COALESCE(c.location_name,'')
 		FROM cards c JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id WHERE c.share_token=? AND c.is_template=0`, in.Token).
-		Scan(&id, &out.Name, &desc, &out.Type, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.Lat, &out.Lng, &out.LocationName)
+		Scan(&id, &out.Name, &desc, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.Lat, &out.Lng, &out.LocationName)
 	if err == sql.ErrNoRows || in.Token == "" {
 		return out, ops.NotFound("shared card")
 	}

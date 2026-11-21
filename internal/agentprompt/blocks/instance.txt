@@ -1,0 +1,4 @@
+Instance
+  Web UI:   {server}
+  REST API: {server}/api/v1
+  Events:   {server}/events   (Server-Sent Events; `weave listen` and `weave agent run` handle the stream for you)

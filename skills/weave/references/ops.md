@@ -98,6 +98,18 @@ Render the copy-paste prompt that connects an AI agent to Weave (scope general, 
 | `--install` | query | bool |  | include the install steps for the CLI and skill (default true) |
 | `--compact` | query | bool |  | shorter etiquette section |
 
+### `weave agent prompt.preview`
+
+Admin: render an editable agent prompt or a shared block with sample data (the saved text, or text you pass), to check a customisation before or after saving it  
+`POST /agent/prompt/preview` (auth: admin)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--kind` | body | string | yes | prompt \| block |
+| `--name` | body | string | yes | the prompt scope (general, project, board, runner) or the block name (instance, connect, install, install_skill, keynote, concepts, questionnaire, etiquette, etiquette_compact, security, readmore) |
+| `--text` | body | string |  | text to preview instead of the saved one (plain text with {tokens}, max 20000 characters); absent or empty = the text that applies now |
+| `--compact` | body | bool |  | prompt previews: render the compact variant |
+
 ### `weave agent rotateKey`
 
 Issue a new API key for an agent (the old key stops working); returned once  
@@ -473,6 +485,16 @@ Enable/disable anonymous read-only access (and rotate the public token)
 | `--isPublic` | body | bool |  | enable anonymous read-only access |
 | `--rotate` | body | bool |  | generate a fresh public token |
 
+### `weave board stats`
+
+At-a-glance numbers for the boards of a project (or one board), most recently active first, as on the project page tiles. Cards count as on the board view (no drafts or Inbox cards, templates, archive or trash). Counts only, never card names; boards you cannot open are left out  
+`GET /projects/{projectId}/boards/stats` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--projectId` | path | string | yes | project id |
+| `--boardId` | query | string |  | only this board of the project (default: every board of the project you can open) |
+
 ### `weave board template.get`
 
 Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields  
@@ -527,8 +549,6 @@ Update board name and settings
 | `--name` | body | string |  |  |
 | `--position` | body | number |  | project managers only |
 | `--defaultView` | body | string |  | kanban\|grid\|list\|calendar\|map |
-| `--defaultCardType` | body | string |  | project\|story |
-| `--limitCardTypesToDefault` | body | bool |  |  |
 | `--alwaysDisplayCardCreator` | body | bool |  |  |
 | `--expandTaskListsByDefault` | body | bool |  |  |
 | `--showCardCounter` | body | bool |  |  |
@@ -536,6 +556,7 @@ Update board name and settings
 | `--hasInbox` | body | bool |  |  |
 | `--color` | body | string |  | board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it |
 | `--cardColorMode` | body | string |  | pill (label pills, default) \| fill (the card's first label by label order colours the whole card; colours are never mixed) |
+| `--agentPrompt` | body | string |  | board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default |
 
 ## card
 
@@ -600,7 +621,6 @@ Create a card at the end (or given position) of a list
 |---|---|---|---|---|
 | `--listId` | path | string | yes | list to create the card in (active or closed list) |
 | `--name` | body | string | yes | card title |
-| `--type` | body | string |  | project \| story (default: board default card type) |
 | `--description` | body | string |  |  |
 | `--dueDate` | body | string |  | RFC3339, YYYY-MM-DD or YYYY-MM-DDTHH:MM |
 | `--position` | body | number |  | explicit position; default end of list |
@@ -973,7 +993,7 @@ Unsubscribe from card notifications
 
 ### `weave card update`
 
-Update card title, description, type, due date or completion  
+Update card title, description, due date or completion  
 `PATCH /cards/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -981,7 +1001,6 @@ Update card title, description, type, due date or completion
 | `--id` | path | string | yes |  |
 | `--name` | body | string |  |  |
 | `--description` | body | string |  | markdown-lite; empty string clears |
-| `--type` | body | string |  | project \| story |
 | `--dueDate` | body | string |  | empty string clears |
 | `--isDueCompleted` | body | bool |  |  |
 
@@ -1060,7 +1079,7 @@ Public branding/login configuration
 
 ### `weave config update`
 
-Update admin configuration (branding, SMTP, OIDC, registration, terms)  
+Update admin configuration (branding, SMTP, OIDC, registration, terms, board templates, default agent prompts and their shared blocks)  
 `PATCH /config/settings` (auth: admin)
 
 | flag | in | type | required | description |
@@ -1099,6 +1118,21 @@ Update admin configuration (branding, SMTP, OIDC, registration, terms)
 | `--session.hours` | body | string |  | Session lifetime in hours (default 24); when it ends the user is sent back through the identity provider |
 | `--session.maxIdleMinutes` | body | string |  | Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit |
 | `--templates.hidden` | body | string |  | Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all |
+| `--agentprompt.general` | body | string |  | Default text of the About Weave agent prompt: plain text with {tokens} (see docs/AGENTS.md or the admin Agent prompts page); empty = the built-in text |
+| `--agentprompt.project` | body | string |  | Default text of the project agent prompt (a project can override it); plain text with {tokens}; empty = the built-in text |
+| `--agentprompt.board` | body | string |  | Default text of the board agent prompt (a board can override it); plain text with {tokens}; empty = the built-in text |
+| `--agentprompt.runner` | body | string |  | Default text of the unattended runner prompt: plain text with {tokens}; empty = the built-in text |
+| `--agentblock.instance` | body | string |  | Shared agent prompt block {instance} (server URLs): plain text with {server}; empty = the built-in text |
+| `--agentblock.connect` | body | string |  | Shared agent prompt block {connect}: plain text with {server} {install} {install_skill}; empty = the built-in text |
+| `--agentblock.install` | body | string |  | The CLI install line inside {connect} (left out with the install steps off): plain text with {install_base}; empty = the built-in text |
+| `--agentblock.install_skill` | body | string |  | The skill install line inside {connect} (left out with the install steps off); empty = the built-in text |
+| `--agentblock.keynote` | body | string |  | Shared agent prompt block {keynote} (about the API key); empty = the built-in text |
+| `--agentblock.concepts` | body | string |  | Shared agent prompt block {concepts} (left out when compact); empty = the built-in text |
+| `--agentblock.questionnaire` | body | string |  | Shared agent prompt block {questionnaire} (the questions and PLAN gate); empty = the built-in text |
+| `--agentblock.etiquette` | body | string |  | Shared agent prompt block {etiquette}; empty = the built-in text |
+| `--agentblock.etiquette_compact` | body | string |  | What {etiquette} shows when compact; empty = the built-in text |
+| `--agentblock.security` | body | string |  | Shared agent prompt block {security} (card text is data); empty = the built-in text |
+| `--agentblock.readmore` | body | string |  | Shared agent prompt block {readmore}; empty = the built-in text |
 
 ## customfield
 
@@ -1962,7 +1996,7 @@ Remove a project from your favorites
 
 ### `weave project update`
 
-Update a project (name, description, hidden, labels toggle, background)  
+Update a project (name, description, hidden, labels toggle, background, agent prompt text)  
 `PATCH /projects/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -1976,6 +2010,7 @@ Update a project (name, description, hidden, labels toggle, background)
 | `--backgroundColor` | body | string |  | Hex colour like #1d6fa5 (type color) |
 | `--backgroundGradient` | body | string |  | Named gradient (type gradient), e.g. ocean-dive |
 | `--backgroundImageId` | body | string |  | Uploaded background image id (type image) |
+| `--agentPrompt` | body | string |  | This project's text for the project agent prompt, plain text with {tokens} such as {project_name} {boards} {connect} {questionnaire} (max 20000 characters); empty string, or text equal to the default, goes back to the admin default |
 
 ## search
 

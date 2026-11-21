@@ -12,7 +12,7 @@ import (
 )
 
 // Env returns an Env on a fresh temp SQLite DB, with the given principal (nil = anonymous).
-func Env(t *testing.T, u *ops.Principal) *ops.Env {
+func Env(t testing.TB, u *ops.Principal) *ops.Env {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {

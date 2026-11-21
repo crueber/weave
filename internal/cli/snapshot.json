@@ -69,7 +69,8 @@
   "path": "/admin/backup",
   "auth": "admin",
   "ui": "GET /admin/backup",
-  "fields": null
+  "fields": null,
+  "binary": true
  },
  {
   "name": "admin.stats",
@@ -247,6 +248,45 @@
   ]
  },
  {
+  "name": "agent.prompt.preview",
+  "tag": "agent",
+  "summary": "Admin: render an editable agent prompt or a shared block with sample data (the saved text, or text you pass), to check a customisation before or after saving it",
+  "method": "POST",
+  "path": "/agent/prompt/preview",
+  "auth": "admin",
+  "ui": "POST /ui/admin/agent-prompts/preview",
+  "fields": [
+   {
+    "name": "kind",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "prompt | block"
+   },
+   {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "the prompt scope (general, project, board, runner) or the block name (instance, connect, install, install_skill, keynote, concepts, questionnaire, etiquette, etiquette_compact, security, readmore)"
+   },
+   {
+    "name": "text",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "text to preview instead of the saved one (plain text with {tokens}, max 20000 characters); absent or empty = the text that applies now"
+   },
+   {
+    "name": "compact",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "prompt previews: render the compact variant"
+   }
+  ]
+ },
+ {
   "name": "agent.rotateKey",
   "tag": "agent",
   "summary": "Issue a new API key for an agent (the old key stops working); returned once",
@@ -411,7 +451,8 @@
     "required": false,
     "desc": "Display name (defaults to the file name or URL host)"
    }
-  ]
+  ],
+  "maxBytes": 269484032
  },
  {
   "name": "attachment.delete",
@@ -452,7 +493,8 @@
     "required": true,
     "desc": "File name (cosmetic; the id decides)"
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "attachment.list",
@@ -510,7 +552,8 @@
     "type": "string",
     "required": true
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "attachment.update",
@@ -866,7 +909,8 @@
     "required": false,
     "desc": "json (default) | csv"
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "board.get",
@@ -929,7 +973,8 @@
     "required": false,
     "desc": "uploaded export file"
    }
-  ]
+  ],
+  "maxBytes": 67108864
  },
  {
   "name": "board.instantiate",
@@ -1211,6 +1256,31 @@
   ]
  },
  {
+  "name": "board.stats",
+  "tag": "board",
+  "summary": "At-a-glance numbers for the boards of a project (or one board), most recently active first, as on the project page tiles. Cards count as on the board view (no drafts or Inbox cards, templates, archive or trash). Counts only, never card names; boards you cannot open are left out",
+  "method": "GET",
+  "path": "/projects/{projectId}/boards/stats",
+  "auth": "user",
+  "ui": "GET /projects/{id}",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "project id"
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only this board of the project (default: every board of the project you can open)"
+   }
+  ]
+ },
+ {
   "name": "board.template.get",
   "tag": "board",
   "summary": "Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields",
@@ -1366,19 +1436,6 @@
     "desc": "kanban|grid|list|calendar|map"
    },
    {
-    "name": "defaultCardType",
-    "in": "body",
-    "type": "string",
-    "required": false,
-    "desc": "project|story"
-   },
-   {
-    "name": "limitCardTypesToDefault",
-    "in": "body",
-    "type": "bool",
-    "required": false
-   },
-   {
     "name": "alwaysDisplayCardCreator",
     "in": "body",
     "type": "bool",
@@ -1421,6 +1478,13 @@
     "type": "string",
     "required": false,
     "desc": "pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"
+   },
+   {
+    "name": "agentPrompt",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default"
    }
   ]
  },
@@ -1580,13 +1644,6 @@
     "type": "string",
     "required": true,
     "desc": "card title"
-   },
-   {
-    "name": "type",
-    "in": "body",
-    "type": "string",
-    "required": false,
-    "desc": "project | story (default: board default card type)"
    },
    {
     "name": "description",
@@ -2520,7 +2577,7 @@
  {
   "name": "card.update",
   "tag": "card",
-  "summary": "Update card title, description, type, due date or completion",
+  "summary": "Update card title, description, due date or completion",
   "method": "PATCH",
   "path": "/cards/{id}",
   "auth": "user",
@@ -2544,13 +2601,6 @@
     "type": "string",
     "required": false,
     "desc": "markdown-lite; empty string clears"
-   },
-   {
-    "name": "type",
-    "in": "body",
-    "type": "string",
-    "required": false,
-    "desc": "project | story"
    },
    {
     "name": "dueDate",
@@ -2690,7 +2740,8 @@
   "path": "/config/logo",
   "auth": "public",
   "ui": "GET /branding/logo",
-  "fields": null
+  "fields": null,
+  "binary": true
  },
  {
   "name": "config.logo.upload",
@@ -2708,7 +2759,8 @@
     "required": false,
     "desc": "PNG, JPEG, GIF, WebP or SVG image, max 1 MiB"
    }
-  ]
+  ],
+  "maxBytes": 2097152
  },
  {
   "name": "config.public",
@@ -2723,7 +2775,7 @@
  {
   "name": "config.update",
   "tag": "config",
-  "summary": "Update admin configuration (branding, SMTP, OIDC, registration, terms)",
+  "summary": "Update admin configuration (branding, SMTP, OIDC, registration, terms, board templates, default agent prompts and their shared blocks)",
   "method": "PATCH",
   "path": "/config/settings",
   "auth": "admin",
@@ -2966,6 +3018,111 @@
     "type": "string",
     "required": false,
     "desc": "Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all"
+   },
+   {
+    "name": "agentprompt.general",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Default text of the About Weave agent prompt: plain text with {tokens} (see docs/AGENTS.md or the admin Agent prompts page); empty = the built-in text"
+   },
+   {
+    "name": "agentprompt.project",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Default text of the project agent prompt (a project can override it); plain text with {tokens}; empty = the built-in text"
+   },
+   {
+    "name": "agentprompt.board",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Default text of the board agent prompt (a board can override it); plain text with {tokens}; empty = the built-in text"
+   },
+   {
+    "name": "agentprompt.runner",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Default text of the unattended runner prompt: plain text with {tokens}; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.instance",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {instance} (server URLs): plain text with {server}; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.connect",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {connect}: plain text with {server} {install} {install_skill}; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.install",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "The CLI install line inside {connect} (left out with the install steps off): plain text with {install_base}; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.install_skill",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "The skill install line inside {connect} (left out with the install steps off); empty = the built-in text"
+   },
+   {
+    "name": "agentblock.keynote",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {keynote} (about the API key); empty = the built-in text"
+   },
+   {
+    "name": "agentblock.concepts",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {concepts} (left out when compact); empty = the built-in text"
+   },
+   {
+    "name": "agentblock.questionnaire",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {questionnaire} (the questions and PLAN gate); empty = the built-in text"
+   },
+   {
+    "name": "agentblock.etiquette",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {etiquette}; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.etiquette_compact",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "What {etiquette} shows when compact; empty = the built-in text"
+   },
+   {
+    "name": "agentblock.security",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {security} (card text is data); empty = the built-in text"
+   },
+   {
+    "name": "agentblock.readmore",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Shared agent prompt block {readmore}; empty = the built-in text"
    }
   ]
  },
@@ -3436,7 +3593,8 @@
     "required": false,
     "desc": "html (standalone page, default) | pdf (see description)"
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "export.card",
@@ -3461,7 +3619,8 @@
     "required": false,
     "desc": "html (standalone page, default) | pdf (see description)"
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "filter.create",
@@ -4648,7 +4807,8 @@
     "required": true,
     "desc": "original | thumbnail"
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "project.background.list",
@@ -4698,7 +4858,8 @@
     "required": false,
     "desc": "Also set it as the project's background"
    }
-  ]
+  ],
+  "maxBytes": 22020096
  },
  {
   "name": "project.create",
@@ -5103,7 +5264,7 @@
  {
   "name": "project.update",
   "tag": "project",
-  "summary": "Update a project (name, description, hidden, labels toggle, background)",
+  "summary": "Update a project (name, description, hidden, labels toggle, background, agent prompt text)",
   "method": "PATCH",
   "path": "/projects/{id}",
   "auth": "user",
@@ -5171,6 +5332,13 @@
     "type": "string",
     "required": false,
     "desc": "Uploaded background image id (type image)"
+   },
+   {
+    "name": "agentPrompt",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "This project's text for the project agent prompt, plain text with {tokens} such as {project_name} {boards} {connect} {questionnaire} (max 20000 characters); empty string, or text equal to the default, goes back to the admin default"
    }
   ]
  },
@@ -5803,7 +5971,8 @@
     "required": true,
     "desc": "user id, or \"me\""
    }
-  ]
+  ],
+  "binary": true
  },
  {
   "name": "user.avatar.update",
@@ -5828,7 +5997,8 @@
     "required": false,
     "desc": "png, jpeg, gif or webp image (max 5 MB)"
    }
-  ]
+  ],
+  "maxBytes": 6291456
  },
  {
   "name": "user.deactivate",

@@ -136,7 +136,7 @@ await run('anon: login + terms + healthz', async () => {
 for (const path of ['/', `/projects/${proj.id}`, `/boards/${board.id}`, `/boards/${board.id}/calendar`, `/boards/${board.id}/map`,
   `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, `/lists/${lists[0].id}`, `/ui/lists/${lists[0].id}`, '/dashboard', '/notifications', '/notification-services',
   '/search?q=card', '/settings', '/settings?section=apikey', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
-  '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`, `/ui/boards/${board.id}/inbox`]) {
+  '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', `/projects/${proj.id}/settings?section=agents`, '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`, `/ui/boards/${board.id}/inbox`]) {
   await run('page ' + path, async () => {
     if (path === '/admin/backup') { await p.request.get(BASE + path); return; } // a download, not a page
     await go(path);
@@ -188,7 +188,7 @@ await run('project: template gallery (search, preview, create from a built-in, b
   await p.locator(`a[href="/projects/${proj.id}/settings"]`).first().click(); await settle(p);
   await p.waitForSelector('.projects-settings .bs-nav');
   await clickEach('.projects-settings .bs-nav a[data-section]'); await settle(p);
-  for (const sec of ['general', 'background', 'managers', 'fields']) { await go(`/projects/${proj.id}/settings?section=${sec}`); await clickEach(`#set-${sec} [data-add], #set-${sec} .ps-swatch`, { max: 3 }); await settle(p); }
+  for (const sec of ['general', 'background', 'managers', 'fields', 'agents']) { await go(`/projects/${proj.id}/settings?section=${sec}`); await clickEach(`#set-${sec} [data-add], #set-${sec} .ps-swatch`, { max: 3 }); await settle(p); }
   await p.locator('.bs-nav a[data-section=danger]').click();
   await p.fill('#ps-del-in', 'x'); if (!(await p.locator('#set-danger [data-del]').isDisabled())) throw new Error('project delete enabled without the typed name');
 });
@@ -363,6 +363,50 @@ await run('connect an agent: open from the board, tabs, toggles refetch, edit + 
   await go(`/boards/${board.id}/settings?section=agents`);
   await p.locator('#set-agents button:has-text("Runner prompt")').click(); await p.locator('#ap[data-scope=runner]').waitFor(); await esc(p); await settle(p);
 });
+await run('agent prompt texts: board override autosaves, the dialog notes it, reset; admin Prompts and Blocks tabs save, preview and reset', async () => {
+  await go(`/boards/${board.id}/settings?section=agents`);
+  const ta = p.locator('#bs-ap');
+  if (!/\{questionnaire\}/.test(await ta.inputValue())) throw new Error('board prompt editor does not show the default text');
+  await ta.fill('Smoke prompt for {board_name}\n{columns}'); await ta.blur();
+  await p.locator('#set-agents .bs-prompt-badge').waitFor(); await settle(p);
+  await p.locator('#set-agents details.bs-tokens summary').click(); await p.locator('#set-agents details.bs-tokens[open]').waitFor();
+  await p.locator('#set-agents button:has-text("Preview")').click(); await p.locator('#ap[data-scope=board] .ap-custom').waitFor();
+  if (!/^Smoke prompt for "Smoke board"/.test(await p.locator('#ap-text').inputValue())) throw new Error('dialog does not use the board text');
+  await esc(p); await settle(p);
+  p.once('dialog', d => d.accept());
+  await p.locator('#set-agents button:has-text("Reset to default")').click();
+  await p.waitForFunction(() => !document.querySelector('#set-agents .bs-prompt-badge')); await settle(p);
+  // admin: Prompts tab (expand, edit, autosave, preview, reset)
+  await go('/admin/agent-prompts');
+  if (!(await p.locator('.adm-tabs a[aria-current]').textContent()).startsWith('Prompts')) throw new Error('prompts is not the default tab');
+  await p.locator('#ap-general > summary').click();
+  const g = p.locator('#ap-general-text');
+  await g.fill('Smoke general {server}'); await g.blur(); await p.locator('#ap-general[open] .bs-prompt-badge').waitFor(); await settle(p);
+  await p.locator('#ap-general .bs-tokens summary').click(); await p.locator('#ap-general .bs-tokens[open]').waitFor();
+  await p.locator('#ap-general button:has-text("Preview")').click(); await p.locator('#ap-general .adm-ap-preview pre').waitFor();
+  if (!/^Smoke general http/.test(await p.locator('#ap-general .adm-ap-preview pre').textContent())) throw new Error('prompt preview does not render the text');
+  p.once('dialog', d => d.accept());
+  await p.locator('#ap-general button:has-text("Reset to default")').click();
+  await p.waitForFunction(() => !document.querySelector('#ap-general .bs-prompt-badge')); await settle(p);
+  await p.locator('#ap-runner > summary').click(); await p.locator('#ap-runner button:has-text("Preview")').click(); await p.locator('#ap-runner .adm-ap-preview pre').waitFor(); await settle(p);
+  // admin: Blocks tab (tab link keeps the URL, edit a block, the Connect an agent dialog notes it, reset)
+  await p.locator('.adm-tabs a:has-text("Blocks")').click(); await p.waitForURL(/tab=blocks/); await settle(p);
+  await p.locator('#ab-security > summary').click();
+  const sb = p.locator('#ab-security-text');
+  await sb.fill('Security\n  - Smoke rules for {server}. {connect} stays literal.'); await sb.blur();
+  await p.locator('#ab-security[open] .bs-prompt-badge').waitFor(); await settle(p);
+  await p.locator('#ab-security button:has-text("Preview")').click(); await p.locator('#ab-security .adm-ap-preview pre').waitFor();
+  if (!/Smoke rules for http\S+\. \{connect\} stays literal/.test(await p.locator('#ab-security .adm-ap-preview pre').textContent())) throw new Error('block preview');
+  await p.reload(); await settle(p);
+  if (!/tab=blocks/.test(p.url()) || !(await p.locator('.adm-tabs a[aria-current]').textContent()).startsWith('Blocks')) throw new Error('tab not kept on reload');
+  await go(`/boards/${board.id}`);
+  await p.locator('.boards-agent-btn').click(); await p.locator('#ap .ap-custom').waitFor();
+  if (!/Smoke rules for/.test(await p.locator('#ap-text').inputValue())) throw new Error('dialog does not use the block');
+  await p.locator('#ap .ap-custom a[href*="tab=blocks"]').click(); await p.waitForURL(/tab=blocks/); await p.locator('#ab-security[open]').waitFor(); await settle(p);
+  p.once('dialog', d => d.accept());
+  await p.locator('#ab-security button:has-text("Reset to default")').click();
+  await p.waitForFunction(() => !document.querySelector('#ab-security .bs-prompt-badge')); await settle(p);
+});
 await run('connect an agent @390px: full-height sheet, scrolling tabs, copy pinned, no sideways scroll', async () => {
   const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + TOKEN, 'X-Requested-With': 'weave' } });
   const m = await newPage(mctx);
@@ -392,13 +436,8 @@ await run('card sheet: description edit by click (weave:edit trigger) and link c
   await p.locator('#card-modal textarea[name=description], textarea[name=description]').first().waitFor({ timeout: 4000 });
   await esc(p);
 });
-await run('card sheet: type select autosubmits, share link select', async () => {
+await run('card sheet: share link select', async () => {
   await go(`/cards/${card.id}`); await p.waitForTimeout(800);
-  const sel = p.locator('select[data-autosubmit]').first();
-  if (await sel.count()) {
-    await p.locator('summary:has-text("Type"), [aria-label="Card type"]').first().click({ timeout: 1500 }).catch(() => {});
-    await sel.selectOption('story', { timeout: 2000 }).catch(() => {}); await settle(p);
-  }
   const share = p.locator('input[data-select-on-click]').first();
   if (await share.count()) await share.click({ timeout: 1500 }).catch(() => {});
 });
@@ -432,7 +471,7 @@ await run('board settings: every section', async () => {
   await go(`/boards/${board.id}/settings`);
   await clickEach('button, summary, a[hx-get]', { max: 60 });
 });
-for (const path of ['/settings', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks', '/notification-services', '/dashboard']) {
+for (const path of ['/settings', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks', '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', '/notification-services', '/dashboard']) {
   await run('forms on ' + path, async () => {
     await go(path);
     await clickEach('button:not([type=submit]), summary', { max: 25 });

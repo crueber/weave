@@ -43,7 +43,8 @@ Output: JSON on stdout. --output json|ndjson|table|ids|quiet  --fields a,b.c  --
   --limit N --cursor C --all  --dry-run  --yes  --timeout 30s  --body @file.json|-  -o FILE
 Errors: JSON on stderr. Exit: 0 ok 1 error 2 usage 3 unauthorized 4 not found 5 forbidden
   6 validation 7 conflict 8 network 10 nothing to do (empty queue / timeout)
-Agent skill: weave skill print|install|check|targets|uninstall      Shell completion: weave completion bash|zsh|fish|powershell
+Agent skill: weave skill print|install|check|targets|uninstall      MCP server: weave mcp [--print-config TOOL]
+Shell completion: weave completion bash|zsh|fish|powershell
 Docs: docs/CLI.md, docs/AGENTS.md
 `
 

@@ -1,0 +1,6 @@
+Concepts
+  Project > Boards > Lists (columns) > Cards. Cards carry labels, members, due dates, checklist tasks, comments and
+  attachments. A column's NAME and DESCRIPTION are its brief: they say what a card that lands there asks for.
+  WIP limits on columns are soft (advisory). A claim is a lease: `weave card claim` holds a card for a TTL so two
+  workers never take the same one; renew it while working, release it when you stop. Everything that changes
+  emits an event (`weave listen` streams them), so you wait for work instead of polling.

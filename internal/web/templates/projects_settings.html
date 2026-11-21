@@ -26,6 +26,7 @@
       {{template "projects_set_background_in" .}}
       {{template "projects_set_managers_in" .}}
       {{template "projects_set_fields_in" .}}
+      {{template "projects_set_agents_in" .}}
       {{template "projects_set_danger_in" .}}
     </div>
   </div>
@@ -118,6 +119,16 @@
   <form class="bs-add" hx-post="/ui/projects/{{.P.ID}}/fieldgroups" hx-target="#set-fields" hx-swap="outerHTML">
     <label class="sr-only" for="ps-newgroup">New group name</label><input id="ps-newgroup" name="name" placeholder="New group name" required maxlength="128"><button class="primary">Add group</button>
   </form>
+</section>{{end}}
+
+{{/* "Agents": the project's Connect an agent prompt and its text (managers only, like the whole page). */}}
+{{define "projects_set_agents"}}{{template "projects_set_agents_in" .Data}}{{end}}
+{{define "projects_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel" data-panel="agents" aria-labelledby="set-agents-h">
+  <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2>{{template "bs_status" .}}</div>
+  <p class="bs-desc">Connect AI agents to this project. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>.{{if .IsAdmin}} Create dedicated agent accounts under <a href="/admin/agents">Admin &rarr; Agents</a>.{{end}}</p>
+  <div class="bs-row"><span class="bs-text"><b>Project prompt</b><small>Asks which boards to attach to, then runs the board questionnaire for each.</small></span>
+    <span class="bs-btns"><button type="button" class="primary" hx-get="/ui/agent-prompt?scope=project&amp;id={{.P.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button></span></div>
+  {{template "bs_prompt" dict "ID" "ps-ap" "Name" "agentPrompt" "Title" "Project prompt text" "Help" "What Connect an agent hands out for this project. Plain text; the tokens below are filled in when it is shown. Boards have their own text and do not inherit this one." "Text" .Prompt.Text "Custom" .Prompt.Custom "From" .Prompt.From "Tokens" .Prompt.Tokens "URL" (print "/ui/projects/" .P.ID) "Patch" false "Target" "#set-agents" "Section" "agents" "Preview" (print "/ui/agent-prompt?scope=project&id=" .P.ID)}}
 </section>{{end}}
 
 {{define "projects_set_danger_in"}}<section id="set-danger" class="boards-sec bs-panel danger-zone" data-panel="danger" aria-labelledby="set-danger-h">

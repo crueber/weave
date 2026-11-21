@@ -1,0 +1,176 @@
+package db
+
+import (
+	"database/sql"
+	"path/filepath"
+	"testing"
+)
+
+// newMigrations are the card-type removal migrations under test. An existing database has every
+// other migration applied (including the 0600 search triggers) when these run, so the test builds
+// exactly that state, fills it with boards and cards that use the dropped columns, then upgrades.
+var newMigrations = map[string]bool{"0306_drop_board_card_type.sql": true, "0401_drop_card_type.sql": true}
+
+func cols(t *testing.T, d *DB, table string) map[string]bool {
+	t.Helper()
+	rows, err := d.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		out[n] = true
+	}
+	return out
+}
+
+func count(t *testing.T, d *DB, q string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := d.QueryRow(q, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+	return n
+}
+
+func TestDropCardTypeMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	sdb, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &DB{sdb}
+	defer d.Close()
+	if _, err := d.Exec(`CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := migFS.ReadDir("migrations")
+	for _, e := range ents {
+		if newMigrations[e.Name()] {
+			continue
+		}
+		b, _ := migFS.ReadFile("migrations/" + e.Name())
+		if _, err := d.Exec(string(b)); err != nil {
+			t.Fatalf("%s: %v", e.Name(), err)
+		}
+		if _, err := d.Exec(`INSERT INTO schema_migrations VALUES(?,?)`, e.Name(), Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !cols(t, d, "cards")["type"] || !cols(t, d, "boards")["default_card_type"] {
+		t.Fatal("previous schema should still have the card-type columns")
+	}
+
+	now := Now()
+	seed := []string{
+		`INSERT INTO users(id,email,name,role,created_at) VALUES('u1','a@x.io','Ann','admin','` + now + `')`,
+		`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','` + now + `')`,
+		`INSERT INTO boards(id,project_id,position,name,default_view,default_card_type,limit_card_types_to_default,color,agent_prompt,created_at)
+		  VALUES('b1','p1',1,'Stories','grid','story',1,'#112233','be brief','` + now + `'),('b2','p1',2,'Plain','kanban','project',0,NULL,NULL,'` + now + `')`,
+		`INSERT INTO lists(id,board_id,type,position,name,description,wip_limit,created_at) VALUES('l1','b1','active',1,'Todo','brief',3,'` + now + `'),('l2','b2','active',1,'Doing',NULL,NULL,'` + now + `')`,
+		`INSERT INTO labels(id,board_id,name,color,position,created_at) VALUES('lb1','b1','bug','crimson',1,'` + now + `')`,
+		`INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,due_date,list_changed_at,created_at,claimed_by,claimed_until)
+		  VALUES('c1','b1','l1','u1','story',65536,'Write the story','zebra details','2030-01-02T00:00:00Z','` + now + `','` + now + `','u1','2030-01-01T00:00:00Z'),
+		        ('c2','b2','l2',NULL,'project',65536,'Ship it',NULL,NULL,'` + now + `','` + now + `',NULL,NULL)`,
+		`INSERT INTO card_labels(card_id,label_id) VALUES('c1','lb1')`,
+		`INSERT INTO card_memberships(card_id,user_id) VALUES('c1','u1')`,
+		`INSERT INTO comments(id,card_id,user_id,text,created_at) VALUES('m1','c1','u1','looks good','` + now + `')`,
+	}
+	for _, q := range seed {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	triggers := func() int {
+		return count(t, d, `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND tbl_name IN ('cards','boards')`)
+	}
+	indexes := func() int {
+		return count(t, d, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name IN ('cards','boards')`)
+	}
+	trigBefore, idxBefore := triggers(), indexes()
+	if trigBefore == 0 || idxBefore == 0 {
+		t.Fatalf("expected search triggers and indexes before upgrade: %d %d", trigBefore, idxBefore)
+	}
+
+	if err := d.migrate(); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+
+	cc, bc := cols(t, d, "cards"), cols(t, d, "boards")
+	if cc["type"] || bc["default_card_type"] || bc["limit_card_types_to_default"] {
+		t.Fatalf("card-type columns survived: cards=%v boards=%v", cc, bc)
+	}
+	for _, c := range []string{"claimed_by", "template_project_id", "recurrence", "share_token"} {
+		if !cc[c] {
+			t.Errorf("cards.%s lost", c)
+		}
+	}
+	for _, c := range []string{"color", "agent_prompt", "template_visibility", "default_view", "has_inbox"} {
+		if !bc[c] {
+			t.Errorf("boards.%s lost", c)
+		}
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM schema_migrations WHERE name IN ('0306_drop_board_card_type.sql','0401_drop_card_type.sql')`); n != 2 {
+		t.Fatalf("new migrations recorded %d times", n)
+	}
+
+	var name, desc, due, claimed, view, color, prompt string
+	if err := d.QueryRow(`SELECT name,description,due_date,claimed_by FROM cards WHERE id='c1'`).Scan(&name, &desc, &due, &claimed); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Write the story" || desc != "zebra details" || due != "2030-01-02T00:00:00Z" || claimed != "u1" {
+		t.Fatalf("card data changed: %q %q %q %q", name, desc, due, claimed)
+	}
+	if err := d.QueryRow(`SELECT default_view,color,agent_prompt FROM boards WHERE id='b1'`).Scan(&view, &color, &prompt); err != nil {
+		t.Fatal(err)
+	}
+	if view != "grid" || color != "#112233" || prompt != "be brief" {
+		t.Fatalf("board data changed: %q %q %q", view, color, prompt)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM cards`); n != 2 {
+		t.Fatalf("cards: %d", n)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM boards`); n != 2 {
+		t.Fatalf("boards: %d", n)
+	}
+	if count(t, d, `SELECT COUNT(*) FROM card_labels WHERE card_id='c1'`) != 1 || count(t, d, `SELECT COUNT(*) FROM card_memberships WHERE card_id='c1'`) != 1 ||
+		count(t, d, `SELECT COUNT(*) FROM comments WHERE card_id='c1'`) != 1 {
+		t.Fatal("card relations lost")
+	}
+	if triggers() != trigBefore || indexes() != idxBefore {
+		t.Fatalf("triggers %d->%d, indexes %d->%d", trigBefore, triggers(), idxBefore, indexes())
+	}
+	var ic string
+	if err := d.QueryRow(`PRAGMA integrity_check`).Scan(&ic); err != nil || ic != "ok" {
+		t.Fatalf("integrity_check: %q %v", ic, err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM pragma_foreign_key_check`); n != 0 {
+		t.Fatalf("foreign_key_check: %d violations", n)
+	}
+	// The search index is still maintained: old rows are found, and the triggers fire for new cards.
+	if n := count(t, d, `SELECT COUNT(*) FROM search_idx WHERE search_idx MATCH 'zebra'`); n != 1 {
+		t.Fatalf("existing card missing from search: %d", n)
+	}
+	if _, err := d.Exec(`INSERT INTO cards(id,board_id,list_id,position,name,description,list_changed_at,created_at) VALUES('c3','b1','l1',131072,'After upgrade','quokka',?,?)`, now, now); err != nil {
+		t.Fatalf("insert after upgrade: %v", err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM search_idx WHERE search_idx MATCH 'quokka'`); n != 1 {
+		t.Fatalf("search trigger did not fire after upgrade: %d", n)
+	}
+	// Foreign keys still cascade through the dropped-from tables.
+	if _, err := d.Exec(`DELETE FROM boards WHERE id='b1'`); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM cards WHERE board_id='b1'`); n != 0 {
+		t.Fatalf("cascade: %d cards left", n)
+	}
+	// A second run is a no-op.
+	if err := d.migrate(); err != nil {
+		t.Fatal(err)
+	}
+}

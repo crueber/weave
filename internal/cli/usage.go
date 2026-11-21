@@ -17,7 +17,7 @@ Exit 10 (and no output) when every list is empty, so shell loops work:
 	"inbox": `weave inbox [--board B] [--assigned|--claimed]
 
 Open cards assigned to me or claimed by me across every board I can see.`,
-	"board tree":   `weave board tree --board B   (also: weave board tree B)   lists with their cards; indented text on a terminal, JSON otherwise.`,
+	"board tree":   `weave board tree --board B [--list L]... [--include-closed]   (also: weave board tree B)   lists with their cards (members, task counts); indented text on a terminal, JSON otherwise. --fields: bare paths are card paths, board.X a board field, lists... literal; board, lists and cards keep id and name.`,
 	"list stats":   `weave list stats --board B [--list L]   per list: cards, claimed, unclaimed, overdue, closed.`,
 	"card show":    `weave card show CARD [--full] [--board B]   --full adds comments, checklists and attachments.`,
 	"card move":    `weave card move CARD --to-list NAME [--position N] [--board B]`,
@@ -27,7 +27,7 @@ Open cards assigned to me or claimed by me across every board I can see.`,
 	"card release": `weave card release CARD [--note TEXT]`,
 	"card renew":   `weave card renew CARD [--ttl 15m]`,
 	"card done":    `weave card done CARD [--note TEXT] [--to-list NAME] [--keep-claim]   comment, move, release.`,
-	"card create": `weave card create --board B --list L --name "Title" [--desc TEXT|@file] [--label X]... [--assign USER]... [--due RFC3339] [--position N] [--claim]
+	"card create": `weave card create --board B --list L --name "Title" [--desc TEXT|@file|-] [--label X]... [--assign USER]... [--due RFC3339] [--position N] [--claim]
 weave card create --board B --list L --from-stdin     one card per stdin line: JSON {"name","description","labels":[],"assign":[],"list","dueDate"} or a bare title`,
 	"task add":     `weave task add CARD "text" ["text"...] [--list CHECKLIST] [--assignee USER]`,
 	"task check":   `weave task check TASK_ID...  |  weave task check --card CARD (--n INDEX | --text PREFIX)`,
@@ -59,14 +59,21 @@ WEAVE_CARD_NAME, WEAVE_LIST_ID, WEAVE_BOARD_ID, WEAVE_URL, WEAVE_TOKEN in the en
 renewed, then report back. COMMAND exit 0 = success: optional comment, move to --done-list, release.
 Exit 11 = decline: release quietly. Any other exit = failure: comment with the error tail, release, optional --fail-list.`,
 	"skill": `weave skill print [--file references/commands.md|list] [--compact]
-weave skill install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] [--dry-run]
+weave skill install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] [--dry-run] [--mcp]
 weave skill targets [--scope user|project]
 weave skill check [--target ...]        (exit 1 when missing or stale)
 weave skill uninstall [--target ...] [--force]
 
 With no --target, installs into every coding agent it detects (config dir or binary on PATH): Claude Code, Codex, OpenCode,
 pi, Gemini CLI, Cursor, Copilot, Cline, Roo, Kiro, Droid, Zed and more (the full skill folder where the tool reads Agent Skills,
-a marked block otherwise). --target all installs every verified target; "weave skill targets" lists them.`,
+a marked block otherwise). --target all installs every verified target; "weave skill targets" lists them.
+--mcp also registers "weave mcp" in each selected tool's MCP config (the key is never written).`,
+	"mcp": `weave mcp                                             MCP server over stdio (what an MCP client launches)
+weave mcp --print-config TOOL [--scope user|project]  config snippet for claude, claude-desktop, cursor, vscode, gemini, codex, ...
+
+Typed tools for daily agent work plus weave_ops/weave_call for every other op, the agent prompts as MCP prompts and
+weave://board/{id}, weave://card/{id} resources. Uses this profile (WEAVE_URL/WEAVE_TOKEN); the key never leaves it.
+Uploads read files only inside WEAVE_MCP_UPLOAD_ROOTS (default: cwd and the temp dir); listening stays with weave listen.`,
 	"login":  `weave login --url https://weave.example.com --token KEY|- [--profile NAME] [--no-verify]   verifies with whoami and saves the profile.`,
 	"config": `weave config list | use NAME | set url|token VALUE [--profile NAME] | get url|token|profile [--show] | remove NAME | path`,
 	"whoami": `weave whoami   the authenticated identity (user, role, isAgent, accessible boards).`,

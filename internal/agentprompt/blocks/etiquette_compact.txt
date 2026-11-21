@@ -1,0 +1,5 @@
+Etiquette
+  - Names, not ids. Read before you write. Claim before you work (exit 7 = someone else has it: skip it).
+  - Renew long work, release when done or stuck, comment the result, then move on.
+  - Respect WIP limits (advisory). Never move a card into a column you were not told about.
+  - Prefer comments and moves over edits and deletes. If unsure: comment the question, release, move to needs-info.

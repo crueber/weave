@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -16,8 +18,6 @@ type Board struct {
 	Position                 float64 `json:"position"`
 	Name                     string  `json:"name"`
 	DefaultView              string  `json:"defaultView"`
-	DefaultCardType          string  `json:"defaultCardType"`
-	LimitCardTypesToDefault  bool    `json:"limitCardTypesToDefault"`
 	AlwaysDisplayCardCreator bool    `json:"alwaysDisplayCardCreator"`
 	ExpandTaskListsByDefault bool    `json:"expandTaskListsByDefault"`
 	ShowCardCounter          bool    `json:"showCardCounter"`
@@ -30,18 +30,19 @@ type Board struct {
 	CardColorMode            string  `json:"cardColorMode" desc:"pill (label pills) | fill (first label colours the whole card)"`
 	TemplateVisibility       string  `json:"templateVisibility,omitempty" desc:"published templates only: private (the publisher and people with access to the board) | group | public (every signed-in user)"`
 	TemplateGroupID          *string `json:"templateGroupId,omitempty" desc:"the user group a group-visible template is shared with"`
+	AgentPrompt              string  `json:"agentPrompt,omitempty" desc:"this board's own text for the board agent prompt (plain text with {tokens}); absent = the admin default or the built-in text"`
 	CreatedAt                string  `json:"createdAt"`
 	UpdatedAt                *string `json:"updatedAt,omitempty"`
 }
 
-const boardCols = `id,project_id,position,name,default_view,default_card_type,limit_card_types_to_default,always_display_card_creator,
-	expand_task_lists_by_default,show_card_counter,show_card_ages,is_public,COALESCE(public_token,''),is_template,has_inbox,color,card_color_mode,template_visibility,template_group_id,created_at,updated_at`
+const boardCols = `id,project_id,position,name,default_view,always_display_card_creator,
+	expand_task_lists_by_default,show_card_counter,show_card_ages,is_public,COALESCE(public_token,''),is_template,has_inbox,color,card_color_mode,template_visibility,template_group_id,COALESCE(agent_prompt,''),created_at,updated_at`
 
 func scanBoard(r interface{ Scan(...any) error }) (Board, error) {
 	var b Board
-	err := r.Scan(&b.ID, &b.ProjectID, &b.Position, &b.Name, &b.DefaultView, &b.DefaultCardType, &b.LimitCardTypesToDefault,
+	err := r.Scan(&b.ID, &b.ProjectID, &b.Position, &b.Name, &b.DefaultView,
 		&b.AlwaysDisplayCardCreator, &b.ExpandTaskListsByDefault, &b.ShowCardCounter, &b.ShowCardAges, &b.IsPublic, &b.PublicToken,
-		&b.IsTemplate, &b.HasInbox, &b.Color, &b.CardColorMode, &b.TemplateVisibility, &b.TemplateGroupID, &b.CreatedAt, &b.UpdatedAt)
+		&b.IsTemplate, &b.HasInbox, &b.Color, &b.CardColorMode, &b.TemplateVisibility, &b.TemplateGroupID, &b.AgentPrompt, &b.CreatedAt, &b.UpdatedAt)
 	if !b.IsTemplate {
 		b.TemplateVisibility, b.TemplateGroupID = "", nil // only published templates have a visibility
 	}
@@ -89,8 +90,7 @@ func loadDetail(e *ops.Env, b Board, withMembers bool) (BoardDetail, error) {
 
 var boardViews = map[string]bool{"kanban": true, "grid": true, "list": true, "calendar": true, "map": true}
 
-func validView(v string) bool     { return boardViews[v] }
-func validCardType(t string) bool { return t == "project" || t == "story" }
+func validView(v string) bool { return boardViews[v] }
 
 // EnsureSystemLists creates the archive and trash lists of a board.
 func EnsureSystemLists(ctx context.Context, q querier, boardID string) error {
@@ -139,8 +139,6 @@ type BoardUpdateIn struct {
 	Name                     *string  `json:"name"`
 	Position                 *float64 `json:"position" desc:"project managers only"`
 	DefaultView              *string  `json:"defaultView" desc:"kanban|grid|list|calendar|map"`
-	DefaultCardType          *string  `json:"defaultCardType" desc:"project|story"`
-	LimitCardTypesToDefault  *bool    `json:"limitCardTypesToDefault"`
 	AlwaysDisplayCardCreator *bool    `json:"alwaysDisplayCardCreator"`
 	ExpandTaskListsByDefault *bool    `json:"expandTaskListsByDefault"`
 	ShowCardCounter          *bool    `json:"showCardCounter"`
@@ -148,6 +146,7 @@ type BoardUpdateIn struct {
 	HasInbox                 *bool    `json:"hasInbox"`
 	Color                    *string  `json:"color" desc:"board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it"`
 	CardColorMode            *string  `json:"cardColorMode" desc:"pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"`
+	AgentPrompt              *string  `json:"agentPrompt" desc:"board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default"`
 }
 type BoardMoveIn struct {
 	ID       string   `path:"id"`
@@ -207,7 +206,7 @@ func registerBoardOps() {
 		if err != nil {
 			return BoardDetail{}, err
 		}
-		b.PublicToken = ""
+		b.PublicToken, b.AgentPrompt = "", "" // anonymous readers get no agent prompt text
 		d := BoardDetail{Board: b, Level: "view"}
 		if d.Lists, err = listsOf(e, b.ID, false); err != nil {
 			return d, err
@@ -346,12 +345,6 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 		}
 		add("default_view", *in.DefaultView)
 	}
-	if in.DefaultCardType != nil {
-		if !validCardType(*in.DefaultCardType) {
-			return Board{}, ops.Invalid("invalid defaultCardType")
-		}
-		add("default_card_type", *in.DefaultCardType)
-	}
 	if in.Color != nil {
 		hex, err := NormalizeColor(*in.Color)
 		if err != nil {
@@ -369,7 +362,19 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 		}
 		add("card_color_mode", *in.CardColorMode)
 	}
-	for col, v := range map[string]*bool{"limit_card_types_to_default": in.LimitCardTypesToDefault, "always_display_card_creator": in.AlwaysDisplayCardCreator,
+	if in.AgentPrompt != nil {
+		// The prompt is instructions an agent follows with the reader's key: managers only (like sharing and templates).
+		if authz.BoardLevel(e, in.ID) < authz.Manage {
+			return Board{}, ops.Forbidden()
+		}
+		def, _ := notify.AgentPromptDefault(e, agentprompt.ScopeBoard)
+		txt, err := agentprompt.Normalize(*in.AgentPrompt, def)
+		if err != nil {
+			return Board{}, ops.Invalid("agentPrompt: " + err.Error())
+		}
+		add("agent_prompt", nullStr(txt))
+	}
+	for col, v := range map[string]*bool{"always_display_card_creator": in.AlwaysDisplayCardCreator,
 		"expand_task_lists_by_default": in.ExpandTaskListsByDefault, "show_card_counter": in.ShowCardCounter, "show_card_ages": in.ShowCardAges, "has_inbox": in.HasInbox} {
 		if v != nil {
 			add(col, boolInt(*v))

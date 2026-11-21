@@ -14,7 +14,7 @@ import (
 func TestProjector(t *testing.T) {
 	v := map[string]any{"item": map[string]any{"id": "1", "name": "n", "labels": []any{map[string]any{"name": "a", "x": 1.0}, map[string]any{"name": "b"}}, "claim": map[string]any{"by": "u", "ttl": 5.0}}}
 	got := projectEnvelope(v, []string{"id", "labels.name", "claim.by"})
-	want := map[string]any{"item": map[string]any{"id": "1", "labels": map[string]any{"name": []any{"a", "b"}}, "claim": map[string]any{"by": "u"}}}
+	want := map[string]any{"item": map[string]any{"id": "1", "labels": []any{map[string]any{"name": "a"}, map[string]any{"name": "b"}}, "claim": map[string]any{"by": "u"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
@@ -34,7 +34,6 @@ func TestJQ(t *testing.T) {
 		".items[-1].id":   {"b"},
 		".items[0].n.k":   {1.0},
 		".items | .[0]":   nil, // unsupported "[0]" without dot-key is fine: just must not panic
-		".missing":        nil,
 		".items[].n.k":    {1.0},
 		".items[0] | .id": {"a"},
 	}

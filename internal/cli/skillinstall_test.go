@@ -729,3 +729,116 @@ func TestSkillPrintCompact(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+// MCP config locations (path-table pattern; sources in docs/AGENT-TARGETS.md).
+func TestMCPConfigPathResolution(t *testing.T) {
+	cases := []struct {
+		name, goos string
+		env        map[string]string
+		tgt, scope string
+		key        string
+		want       func(b *sbox) string
+	}{
+		{"claude project", "linux", nil, "claude", "project", "mcpServers", func(b *sbox) string { return filepath.Join(b.proj, ".mcp.json") }},
+		{"claude user is a CLI command", "linux", nil, "claude", "user", "", func(b *sbox) string { return "" }},
+		{"claude-desktop linux", "linux", nil, "claude-desktop", "user", "mcpServers", func(b *sbox) string { return filepath.Join(b.home, ".config", "Claude", "claude_desktop_config.json") }},
+		{"claude-desktop darwin", "darwin", nil, "claude-desktop", "user", "mcpServers", func(b *sbox) string {
+			return filepath.Join(b.home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+		}},
+		{"claude-desktop windows", "windows", map[string]string{"APPDATA": "C:/Roaming"}, "claude-desktop", "user", "mcpServers", func(b *sbox) string { return filepath.Join("C:/Roaming", "Claude", "claude_desktop_config.json") }},
+		{"cursor user", "linux", nil, "cursor", "user", "mcpServers", func(b *sbox) string { return filepath.Join(b.home, ".cursor", "mcp.json") }},
+		{"cursor project", "linux", nil, "cursor", "project", "mcpServers", func(b *sbox) string { return filepath.Join(b.proj, ".cursor", "mcp.json") }},
+		{"vscode project", "linux", nil, "vscode", "project", "servers", func(b *sbox) string { return filepath.Join(b.proj, ".vscode", "mcp.json") }},
+		{"copilot user COPILOT_HOME", "linux", map[string]string{"COPILOT_HOME": "/cp"}, "copilot", "user", "mcpServers", func(b *sbox) string { return filepath.Join("/cp", "mcp-config.json") }},
+		{"gemini user", "linux", nil, "gemini", "user", "mcpServers", func(b *sbox) string { return filepath.Join(b.home, ".gemini", "settings.json") }},
+		{"gemini project", "linux", nil, "gemini", "project", "mcpServers", func(b *sbox) string { return filepath.Join(b.proj, ".gemini", "settings.json") }},
+		{"codex CODEX_HOME", "linux", map[string]string{"CODEX_HOME": "/ch"}, "codex", "user", "", func(b *sbox) string { return filepath.Join("/ch", "config.toml") }},
+		{"kiro user", "linux", nil, "kiro", "user", "mcpServers", func(b *sbox) string { return filepath.Join(b.home, ".kiro", "settings", "mcp.json") }},
+		{"cline override", "linux", map[string]string{"CLINE_MCP_SETTINGS_PATH": "/c/m.json"}, "cline", "user", "mcpServers", func(b *sbox) string { return "/c/m.json" }},
+		{"roo project", "linux", nil, "roo", "project", "mcpServers", func(b *sbox) string { return filepath.Join(b.proj, ".roo", "mcp.json") }},
+		{"amp user xdg", "linux", map[string]string{"XDG_CONFIG_HOME": "/xdg"}, "amp", "user", "amp.mcpServers", func(b *sbox) string { return filepath.Join("/xdg", "amp", "settings.json") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := newSbox(t)
+			b.goos, b.env = c.goos, c.env
+			tg := findTarget(c.tgt)
+			if tg == nil || tg.MCP == nil {
+				t.Fatalf("%s has no MCP spec", c.tgt)
+			}
+			if got := tg.MCP.pathFor(b.senv(), c.scope); got != c.want(b) {
+				t.Fatalf("path %q, want %q", got, c.want(b))
+			}
+			if c.key != "" && tg.MCP.keyFor(c.scope) != c.key {
+				t.Fatalf("key %q, want %q", tg.MCP.keyFor(c.scope), c.key)
+			}
+		})
+	}
+	for _, tg := range agentTargets {
+		if tg.MCPOnly && (tg.MCP == nil || !tg.OptIn) {
+			t.Fatalf("%s: MCP-only targets need an MCP spec and must be opt-in", tg.ID)
+		}
+	}
+}
+
+func TestSkillInstallMCP(t *testing.T) {
+	b := newSbox(t)
+	b.env["WEAVE_TOKEN"] = "wk_never_in_config"
+	t.Setenv("WEAVE_TOKEN", "wk_never_in_config")
+	t.Setenv("WEAVE_CONFIG_DIR", t.TempDir())
+	cfgPath := filepath.Join(b.home, ".cursor", "mcp.json")
+	_ = os.MkdirAll(filepath.Dir(cfgPath), 0o755)
+	_ = os.WriteFile(cfgPath, []byte(`{"mcpServers":{"other":{"command":"x"}},"keep":1}`), 0o600)
+	code, rows, out := b.run("install", "--target", "cursor,claude-desktop,claude", "--mcp")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	got := map[string]string{}
+	for _, r := range rows {
+		if r["kind"] == "mcp" {
+			got[r["target"].(string)] = r["action"].(string)
+		}
+	}
+	if got["cursor"] != "updated" || got["claude-desktop"] != "created" || got["claude"] != "manual" {
+		t.Fatalf("mcp rows %v\n%s", got, out)
+	}
+	doc := b.read(cfgPath)
+	if !strings.Contains(doc, `"other"`) || !strings.Contains(doc, `"keep": 1`) || !strings.Contains(doc, `"weave"`) || !strings.Contains(doc, `"stdio"`) {
+		t.Fatalf("merge lost content: %s", doc)
+	}
+	if strings.Contains(doc+b.read(filepath.Join(b.home, ".config", "Claude", "claude_desktop_config.json")), "wk_never_in_config") {
+		t.Fatal("token written into an MCP config")
+	}
+	// idempotent; a foreign weave entry is a conflict without --force
+	if _, rows, _ := b.run("install", "--target", "cursor", "--mcp"); rows[len(rows)-1]["action"] != "unchanged" {
+		t.Fatalf("second install %v", rows)
+	}
+	_ = os.WriteFile(cfgPath, []byte(`{"mcpServers":{"weave":{"command":"/elsewhere"}}}`), 0o600)
+	if code, _, _ := b.run("install", "--target", "cursor", "--mcp"); code != ExitConflict {
+		t.Fatalf("foreign entry: exit %d", code)
+	}
+	// JSON with comments is never rewritten
+	_ = os.WriteFile(cfgPath, []byte("// mine\n{}"), 0o600)
+	if code, _, _ := b.run("install", "--target", "cursor", "--mcp"); code != ExitConflict || b.read(cfgPath) != "// mine\n{}" {
+		t.Fatal("JSONC must be left alone")
+	}
+	// uninstall removes only our entry
+	_ = os.WriteFile(cfgPath, []byte(`{"mcpServers":{"other":{"command":"x"}}}`), 0o600)
+	b.run("install", "--target", "cursor", "--mcp")
+	b.run("uninstall", "--target", "cursor", "--mcp")
+	if doc := b.read(cfgPath); strings.Contains(doc, "weave") || !strings.Contains(doc, "other") {
+		t.Fatalf("uninstall: %s", doc)
+	}
+	// unverified MCP locations need an explicit target; auto mode skips them
+	b.mkdir(".codeium", "windsurf")
+	_, rows, _ = b.run("install", "--mcp")
+	for _, r := range rows {
+		if r["kind"] == "mcp" && r["target"] == "windsurf" && r["action"] != "skipped" {
+			t.Fatalf("unverified windsurf MCP written automatically: %v", r)
+		}
+	}
+	// an MCP-only target without --mcp is explained, not silently ignored
+	if _, rows, _ := b.run("install", "--target", "claude-desktop"); len(rows) != 1 || rows[0]["action"] != "skipped" {
+		t.Fatalf("claude-desktop without --mcp: %v", rows)
+	}
+}

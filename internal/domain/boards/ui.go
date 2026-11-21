@@ -7,7 +7,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
+	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -249,8 +251,11 @@ func registerUI() {
 		// The settings page has several autosaving forms that PATCH the board; each
 		// names the section to re-render in _section.
 		block := "boards_set_general"
-		if c.R.FormValue("_section") == "views" {
+		switch c.R.FormValue("_section") {
+		case "views":
 			block = "boards_set_views"
+		case "agents":
+			block = "boards_set_agents"
 		}
 		return renderSectionSaved(c, out.(Board).ID, block)
 	})
@@ -406,13 +411,34 @@ type SettingsData struct {
 	UseProjectLabels bool
 	ProjectName      string
 	Views            []string
-	CardTypes        []string
 	LabelRows        []LabelRow
 	Active           string // section shown first (?section=)
 	Done             bool   // render the "Saved" confirmation
 	Sections         []SettingsSection
 	AgentCols        []AgentCol // "Agents" section: one row per column with its live listeners
+	Prompt           PromptEdit // "Agents" section: the board prompt text editor (managers)
 	IsAdmin          bool
+}
+
+// PromptEdit feeds the bs_prompt editor of an editable agent prompt.
+type PromptEdit struct {
+	Text   string // the custom text, else the text that applies without one
+	Custom bool   // a custom text is stored
+	From   string // what applies without a custom text ("the admin default" / "Weave's built-in text")
+	Tokens []agentprompt.Token
+}
+
+// newPromptEdit builds the editor data for scope given the object's own text ("" for the admin defaults).
+func newPromptEdit(e *ops.Env, scope, own string) PromptEdit {
+	def, admin := notify.AgentPromptDefault(e, scope)
+	pe := PromptEdit{Text: def, From: "Weave's built-in text", Tokens: agentprompt.Tokens(scope)}
+	if admin {
+		pe.From = "the admin default"
+	}
+	if own != "" {
+		pe.Text, pe.Custom = own, true
+	}
+	return pe
 }
 
 // AgentCol is one column row of the board settings "Agents" section.
@@ -441,7 +467,7 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 		return nil, ops.NotFound("board") // public viewers do not get the settings fragments either
 	}
 	sd := &SettingsData{Board: d.Board, Level: d.Level, CanEdit: lvl >= authz.Edit, CanManage: lvl >= authz.Manage, Members: d.Members, Labels: d.Labels, LabelGroups: d.LabelGroups,
-		Views: []string{"kanban", "grid", "list", "calendar", "map"}, CardTypes: []string{"project", "story"}}
+		Views: []string{"kanban", "grid", "list", "calendar", "map"}}
 	for i, l := range sd.Labels {
 		r := LabelRow{Label: l}
 		if i > 0 {
@@ -458,6 +484,9 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 		sd.Sections = append(sd.Sections, SettingsSection{"notifications", "Notifications"}, SettingsSection{"danger", "Danger zone"})
 	}
 	sd.IsAdmin = c.Env.User != nil && c.Env.User.Role == "admin"
+	if sd.CanManage {
+		sd.Prompt = newPromptEdit(c.Env, agentprompt.ScopeBoard, d.Board.AgentPrompt)
+	}
 	if ls, err := listsOf(c.Env, boardID, true); err == nil {
 		for _, l := range ls {
 			ac := AgentCol{List: l, Name: listName(l)}

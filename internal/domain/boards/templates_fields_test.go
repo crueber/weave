@@ -139,3 +139,34 @@ func TestImportHonoursViewAndSettings(t *testing.T) {
 		t.Fatal("file imports must still record a board_imports row")
 	}
 }
+
+// Card types were removed: an export made before that (board defaultCardType/limitCardTypesToDefault, card
+// "type") still imports with every card and setting, the legacy keys are ignored, and new exports omit them.
+func TestImportIgnoresLegacyCardTypes(t *testing.T) {
+	e := fixture(t)
+	old := `{"format":"weave-board","version":1,
+	 "board":{"name":"Legacy","defaultView":"grid","defaultCardType":"story","limitCardTypesToDefault":true,"showCardCounter":true},
+	 "lists":[{"id":"l","name":"L","type":"active","position":1}],
+	 "cards":[{"id":"c1","listId":"l","name":"A story","type":"story","position":1},{"id":"c2","listId":"l","name":"A project","type":"project","position":2},
+	          {"id":"c3","listId":"l","name":"Odd type","type":"epic","position":3}]}`
+	b := call[boards.Board](t, e, "board.import", &boards.ImportIn{ProjectID: "p2", Format: "planka", Data: old})
+	if b.Name != "Legacy" || b.DefaultView != "grid" || !b.ShowCardCounter {
+		t.Fatalf("settings lost: %+v", b)
+	}
+	if n := count(t, e, `SELECT COUNT(*) FROM cards WHERE board_id=?`, b.ID); n != 3 {
+		t.Fatalf("cards imported: %d", n)
+	}
+	st := call[*ops.Stream](t, e, "board.export", boards.ExportIn{ID: b.ID})
+	for _, bad := range []string{"defaultCardType", "limitCardTypesToDefault", `"type":"story"`, `"type":"project"`} {
+		if strings.Contains(string(st.Data), bad) {
+			t.Errorf("new export still carries %s", bad)
+		}
+	}
+	if !strings.Contains(string(st.Data), "A story") {
+		t.Fatal("export lost the cards")
+	}
+	csv := call[*ops.Stream](t, e, "board.export", boards.ExportIn{ID: b.ID, Format: "csv"})
+	if strings.Contains(strings.ToLower(strings.SplitN(string(csv.Data), "\n", 2)[0]), "type") {
+		t.Errorf("csv header still has a type column: %s", strings.SplitN(string(csv.Data), "\n", 2)[0])
+	}
+}

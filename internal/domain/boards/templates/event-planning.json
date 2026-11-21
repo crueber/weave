@@ -106,7 +106,6 @@
     "id": "c1",
     "listId": "l3",
     "name": "Catering for 60 guests",
-    "type": "project",
     "position": 65536,
     "description": "Get three quotes, confirm dietary needs and agree delivery time.",
     "labelIds": [
@@ -129,7 +128,6 @@
     "id": "c2",
     "listId": "l4",
     "name": "Run sheet",
-    "type": "project",
     "position": 131072,
     "labelIds": [
      "b3"

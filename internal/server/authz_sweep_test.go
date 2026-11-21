@@ -408,7 +408,7 @@ var selfOps = map[string]string{
 	"search.query":       "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
 	"user.get": "directory entry", "user.list": "directory of active users", "group.get": "directory", "group.list": "directory",
 	"notification_service.list": "own services", "apikey.get": "own key status", "whoami": "self",
-	"agent.prompt": "scopes general/runner are static instance text with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
+	"agent.prompt": "scopes general/runner are instance text (the admin default or the built-in one) with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
 }
 
 // directoryOps are allowed to show the seeded CANARY names because Weave exposes a user and group

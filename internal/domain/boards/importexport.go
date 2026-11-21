@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
@@ -45,23 +46,23 @@ type impComment struct {
 	Text, CreatedAt string
 }
 type impCard struct {
-	Key                            string // id inside the document; custom-field values are addressed by it
-	ListKey, Name, Desc, Due, Type string
-	DueDone                        bool
-	DueOffsetDays                  *int // relative due date (days from the moment the board is created); wins over Due
-	Pos                            float64
-	LabelKeys                      []string
-	MemberEmails                   []string
-	TaskLists                      []impTaskList
-	Comments                       []impComment
-	Values                         []FieldValueDoc
+	Key                      string // id inside the document; custom-field values are addressed by it
+	ListKey, Name, Desc, Due string
+	DueDone                  bool
+	DueOffsetDays            *int // relative due date (days from the moment the board is created); wins over Due
+	Pos                      float64
+	LabelKeys                []string
+	MemberEmails             []string
+	TaskLists                []impTaskList
+	Comments                 []impComment
+	Values                   []FieldValueDoc
 }
 type impBoard struct {
 	Name          string
 	Color         string // normalised #rrggbb or ""
 	CardColorMode string // pill|fill or ""
+	AgentPrompt   string // the board's own agent prompt text (normalised), "" = default
 	View          string // default view; "" = kanban
-	CardType      string // default card type; "" = project
 	Flags         impFlags
 	Lists         []impList
 	Groups        []impGroup
@@ -72,7 +73,7 @@ type impBoard struct {
 
 // impFlags are the board's on/off settings (they travel with exports and templates).
 type impFlags struct {
-	LimitCardTypes, AlwaysCreator, ExpandTasks, CardCounter, CardAges, Inbox bool
+	AlwaysCreator, ExpandTasks, CardCounter, CardAges, Inbox bool
 }
 
 // ---- Weave/Planka JSON export document ----
@@ -128,7 +129,6 @@ type exportCard struct {
 	ListID         string           `json:"listId"`
 	Name           string           `json:"name"`
 	Description    string           `json:"description,omitempty"`
-	Type           string           `json:"type"`
 	DueDate        string           `json:"dueDate,omitempty"`
 	DueOffsetDays  *int             `json:"dueOffsetDays,omitempty"`
 	IsDueCompleted bool             `json:"isDueCompleted,omitempty"`
@@ -255,17 +255,14 @@ func dueFromOffset(now time.Time, days *int) (string, bool) {
 // writeImport fills a freshly inserted board from ib. now anchors relative due dates (dueOffsetDays).
 func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard, nowT time.Time) error {
 	ctx, now := e.Ctx, db.Now()
-	mode, ctype := ib.CardColorMode, ib.CardType
+	mode := ib.CardColorMode
 	if mode == "" {
 		mode = CardColorPill
 	}
-	if ctype == "" {
-		ctype = "project"
-	}
 	f := ib.Flags
-	if _, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,default_card_type=?,limit_card_types_to_default=?,always_display_card_creator=?,
-		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=? WHERE id=?`, nullStr(ib.Color), mode, ctype, boolInt(f.LimitCardTypes),
-		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), boardID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,always_display_card_creator=?,
+		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=?,agent_prompt=? WHERE id=?`, nullStr(ib.Color), mode,
+		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), nullStr(ib.AgentPrompt), boardID); err != nil {
 		return err
 	}
 	var useProject bool
@@ -358,10 +355,6 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 		if pos == 0 {
 			pos = float64(ci+1) * db.PositionGap
 		}
-		typ := c.Type
-		if typ != "story" {
-			typ = "project"
-		}
 		cid := db.NewID()
 		var due any
 		var done any
@@ -371,8 +364,8 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			due = c.Due
 			done = boolInt(c.DueDone)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,due_date,is_due_completed,comments_total,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), typ, pos, c.Name, nullStr(c.Desc), due, done, len(c.Comments), now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_due_completed,comments_total,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), pos, c.Name, nullStr(c.Desc), due, done, len(c.Comments), now, now); err != nil {
 			return err
 		}
 		if c.Key != "" {
@@ -473,13 +466,16 @@ func impFromDoc(d *exportDoc) impBoard {
 	if m := str("cardColorMode"); validCardColorMode(m) {
 		ib.CardColorMode = m
 	}
+	// The board's agent prompt travels as text (cleaned and capped like a manual edit; too long = dropped).
+	if t, err := agentprompt.Normalize(str("agentPrompt"), agentprompt.Default(agentprompt.ScopeBoard)); err == nil {
+		ib.AgentPrompt = t
+	}
 	if v := str("defaultView"); validView(v) {
 		ib.View = v
 	}
-	if t := str("defaultCardType"); validCardType(t) {
-		ib.CardType = t
-	}
-	ib.Flags = impFlags{LimitCardTypes: flag("limitCardTypesToDefault"), AlwaysCreator: flag("alwaysDisplayCardCreator"), ExpandTasks: flag("expandTaskListsByDefault"),
+	// Older exports also carry defaultCardType/limitCardTypesToDefault (and cards a "type"): card types were
+	// removed, so those keys are read past and ignored.
+	ib.Flags = impFlags{AlwaysCreator: flag("alwaysDisplayCardCreator"), ExpandTasks: flag("expandTaskListsByDefault"),
 		CardCounter: flag("showCardCounter"), CardAges: flag("showCardAges"), Inbox: flag("hasInbox")}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
@@ -492,7 +488,7 @@ func impFromDoc(d *exportDoc) impBoard {
 		ib.Labels = append(ib.Labels, impLabel{Key: l.ID, Name: l.Name, Color: l.Color, Group: l.GroupID})
 	}
 	for _, c := range d.Cards {
-		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, DueOffsetDays: c.DueOffsetDays, Type: c.Type, Pos: c.Position,
+		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, DueOffsetDays: c.DueOffsetDays, Pos: c.Position,
 			LabelKeys: c.LabelIDs, MemberEmails: c.MemberEmails, Values: c.CustomValues}
 		for _, tl := range c.TaskLists {
 			x := impTaskList{Name: tl.Name, ShowOnFront: tl.ShowOnFront, HideDone: tl.HideCompleted}
@@ -737,11 +733,14 @@ func exportBoard(e *ops.Env, in ExportIn) (*ops.Stream, error) {
 }
 
 func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
-	doc := &exportDoc{Format: "weave-board", Version: 1, Board: map[string]any{"name": b.Name, "defaultView": b.DefaultView, "defaultCardType": b.DefaultCardType, "cardColorMode": b.CardColorMode,
-		"limitCardTypesToDefault": b.LimitCardTypesToDefault, "alwaysDisplayCardCreator": b.AlwaysDisplayCardCreator, "expandTaskListsByDefault": b.ExpandTaskListsByDefault,
+	doc := &exportDoc{Format: "weave-board", Version: 1, Board: map[string]any{"name": b.Name, "defaultView": b.DefaultView, "cardColorMode": b.CardColorMode,
+		"alwaysDisplayCardCreator": b.AlwaysDisplayCardCreator, "expandTaskListsByDefault": b.ExpandTaskListsByDefault,
 		"showCardCounter": b.ShowCardCounter, "showCardAges": b.ShowCardAges, "hasInbox": b.HasInbox}}
 	if b.Color != nil {
 		doc.Board["color"] = *b.Color
+	}
+	if b.AgentPrompt != "" {
+		doc.Board["agentPrompt"] = b.AgentPrompt
 	}
 	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,''),COALESCE(wip_limit,0) FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
 	if err != nil {
@@ -774,7 +773,7 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		doc.Labels = append(doc.Labels, l)
 	}
 	rows.Close()
-	rows, err = d.QueryContext(ctx, `SELECT id,list_id,name,COALESCE(description,''),type,COALESCE(due_date,''),COALESCE(is_due_completed,0),COALESCE(position,0)
+	rows, err = d.QueryContext(ctx, `SELECT id,list_id,name,COALESCE(description,''),COALESCE(due_date,''),COALESCE(is_due_completed,0),COALESCE(position,0)
 		FROM cards WHERE board_id=? AND is_draft=0 AND is_template=0 ORDER BY position`, b.ID)
 	if err != nil {
 		return nil, err
@@ -782,7 +781,7 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 	idx := map[string]int{}
 	for rows.Next() {
 		var c exportCard
-		_ = rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.Type, &c.DueDate, &c.IsDueCompleted, &c.Position)
+		_ = rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.Position)
 		idx[c.ID] = len(doc.Cards)
 		doc.Cards = append(doc.Cards, c)
 	}

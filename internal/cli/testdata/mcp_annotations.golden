@@ -1,0 +1,234 @@
+weave_activity_board GET readOnly,idempotent
+weave_activity_card GET readOnly,idempotent
+weave_admin_backup GET openWorld
+weave_admin_stats GET readOnly,idempotent
+weave_agent_access POST 
+weave_agent_create POST 
+weave_agent_delete DELETE destructive,idempotent
+weave_agent_list GET readOnly,idempotent
+weave_agent_prompt GET readOnly,idempotent
+weave_agent_prompt_preview POST 
+weave_agent_rotateKey POST destructive
+weave_agent_update PATCH idempotent
+weave_apikey_generate POST 
+weave_apikey_revoke DELETE destructive,idempotent
+weave_attachment_cover POST 
+weave_attachment_create POST openWorld
+weave_attachment_delete DELETE destructive,idempotent
+weave_attachment_download GET openWorld
+weave_attachment_list GET readOnly,idempotent
+weave_attachment_media GET readOnly,idempotent
+weave_attachment_thumbnail GET openWorld
+weave_attachment_update PATCH idempotent
+weave_auth_logout POST 
+weave_auth_me GET readOnly,idempotent
+weave_auth_oidc_authorize GET readOnly,idempotent
+weave_auth_oidc_callback GET readOnly,idempotent
+weave_auth_oidc_info GET readOnly,idempotent
+weave_auth_oidc_settings_get GET readOnly,idempotent
+weave_auth_oidc_settings_update PUT idempotent
+weave_auth_terms_accept POST 
+weave_auth_terms_get GET readOnly,idempotent
+weave_auth_terms_set PUT idempotent
+weave_auth_whoami GET readOnly,idempotent
+weave_board_create POST 
+weave_board_delete DELETE destructive,idempotent
+weave_board_export GET openWorld
+weave_board_get GET readOnly,idempotent
+weave_board_import POST openWorld
+weave_board_instantiate POST 
+weave_board_list GET readOnly,idempotent
+weave_board_listeners GET readOnly,idempotent
+weave_board_member_add POST 
+weave_board_member_list GET readOnly,idempotent
+weave_board_member_remove DELETE destructive,idempotent
+weave_board_member_update PATCH idempotent
+weave_board_move POST 
+weave_board_public_get GET readOnly,idempotent
+weave_board_setPublic POST 
+weave_board_stats GET readOnly,idempotent
+weave_board_template_get GET readOnly,idempotent
+weave_board_template_list GET readOnly,idempotent
+weave_board_template_publish POST 
+weave_board_tree GET readOnly,idempotent
+weave_board_update PATCH idempotent
+weave_card_archive POST destructive
+weave_card_calendar GET readOnly,idempotent
+weave_card_claim POST 
+weave_card_close POST 
+weave_card_cover_set PUT idempotent
+weave_card_create POST 
+weave_card_delete DELETE destructive,idempotent
+weave_card_draft_create POST 
+weave_card_draft_publish POST 
+weave_card_due_complete POST 
+weave_card_due_set PUT idempotent
+weave_card_duplicate POST 
+weave_card_edit_list GET readOnly,idempotent
+weave_card_edit_release DELETE destructive,idempotent
+weave_card_edit_touch POST 
+weave_card_fromTemplate POST 
+weave_card_get GET readOnly,idempotent
+weave_card_inbox_list GET readOnly,idempotent
+weave_card_inbox_set PUT idempotent
+weave_card_label_add POST 
+weave_card_label_remove DELETE destructive,idempotent
+weave_card_list GET readOnly,idempotent
+weave_card_location_set PUT idempotent
+weave_card_map GET readOnly,idempotent
+weave_card_member_add POST 
+weave_card_member_remove DELETE destructive,idempotent
+weave_card_move POST 
+weave_card_next POST 
+weave_card_notifications_read POST 
+weave_card_options GET readOnly,idempotent
+weave_card_recurrence_run POST 
+weave_card_recurrence_set PUT idempotent
+weave_card_release POST 
+weave_card_renew POST 
+weave_card_restore POST 
+weave_card_share_create POST 
+weave_card_share_revoke DELETE destructive,idempotent
+weave_card_share_view GET readOnly,idempotent
+weave_card_subscribe PUT idempotent
+weave_card_template_list GET readOnly,idempotent
+weave_card_template_save POST 
+weave_card_unsubscribe DELETE destructive,idempotent
+weave_card_update PATCH idempotent
+weave_comment_create POST 
+weave_comment_delete DELETE destructive,idempotent
+weave_comment_list GET readOnly,idempotent
+weave_comment_update PATCH idempotent
+weave_config_get GET readOnly,idempotent
+weave_config_logo_delete DELETE destructive,idempotent
+weave_config_logo_get GET openWorld
+weave_config_logo_upload POST openWorld
+weave_config_public GET readOnly,idempotent
+weave_config_update PATCH idempotent
+weave_customfield_create POST 
+weave_customfield_delete DELETE destructive,idempotent
+weave_customfield_update PATCH idempotent
+weave_customfieldgroup_create POST 
+weave_customfieldgroup_delete DELETE destructive,idempotent
+weave_customfieldgroup_list GET readOnly,idempotent
+weave_customfieldgroup_update PATCH idempotent
+weave_customfieldrow_create POST 
+weave_customfieldrow_delete DELETE destructive,idempotent
+weave_customfieldrow_update PATCH idempotent
+weave_customfieldvalue_clear POST destructive
+weave_customfieldvalue_set PUT idempotent
+weave_dashboard_get GET readOnly,idempotent
+weave_dashboard_update PATCH idempotent
+weave_export_board GET openWorld
+weave_export_card GET openWorld
+weave_filter_create POST 
+weave_filter_delete DELETE destructive,idempotent
+weave_filter_list GET readOnly,idempotent
+weave_filter_update PATCH idempotent
+weave_group_create POST 
+weave_group_delete DELETE destructive,idempotent
+weave_group_get GET readOnly,idempotent
+weave_group_list GET readOnly,idempotent
+weave_group_member_add POST 
+weave_group_member_remove DELETE destructive,idempotent
+weave_group_update PATCH idempotent
+weave_label_create POST 
+weave_label_delete DELETE destructive,idempotent
+weave_label_list GET readOnly,idempotent
+weave_label_move POST 
+weave_label_project_create POST 
+weave_label_project_list GET readOnly,idempotent
+weave_label_update PATCH idempotent
+weave_labelgroup_create POST 
+weave_labelgroup_delete DELETE destructive,idempotent
+weave_labelgroup_list GET readOnly,idempotent
+weave_labelgroup_project_create POST 
+weave_labelgroup_update PATCH idempotent
+weave_list_activity GET readOnly,idempotent
+weave_list_archive POST destructive
+weave_list_clear POST destructive
+weave_list_create POST 
+weave_list_delete DELETE destructive,idempotent
+weave_list_get GET readOnly,idempotent
+weave_list_list GET readOnly,idempotent
+weave_list_listeners GET readOnly,idempotent
+weave_list_move POST 
+weave_list_moveCards POST 
+weave_list_sort POST 
+weave_list_update PATCH idempotent
+weave_notification_list GET readOnly,idempotent
+weave_notification_read POST 
+weave_notification_read_all POST 
+weave_notification_unread_count GET readOnly,idempotent
+weave_notification_service_create POST 
+weave_notification_service_delete DELETE destructive,idempotent
+weave_notification_service_list GET readOnly,idempotent
+weave_notification_service_test POST 
+weave_notification_service_update PATCH idempotent
+weave_presence_list GET readOnly,idempotent
+weave_presence_set POST idempotent
+weave_project_background_delete DELETE destructive,idempotent
+weave_project_background_file GET openWorld
+weave_project_background_list GET readOnly,idempotent
+weave_project_background_upload POST openWorld
+weave_project_create POST 
+weave_project_delete DELETE destructive,idempotent
+weave_project_favorite POST 
+weave_project_field_create POST 
+weave_project_field_delete DELETE destructive,idempotent
+weave_project_field_update PATCH idempotent
+weave_project_fieldgroup_create POST 
+weave_project_fieldgroup_delete DELETE destructive,idempotent
+weave_project_fieldgroup_list GET readOnly,idempotent
+weave_project_fieldgroup_update PATCH idempotent
+weave_project_get GET readOnly,idempotent
+weave_project_list GET readOnly,idempotent
+weave_project_manager_add POST 
+weave_project_manager_list GET readOnly,idempotent
+weave_project_manager_remove DELETE destructive,idempotent
+weave_project_unfavorite DELETE destructive,idempotent
+weave_project_update PATCH idempotent
+weave_search_query GET readOnly,idempotent
+weave_search_reindex POST 
+weave_session_list GET readOnly,idempotent
+weave_session_revoke DELETE destructive,idempotent
+weave_session_revoke_others POST destructive
+weave_smtp_test POST 
+weave_system_health GET readOnly,idempotent
+weave_system_storage GET readOnly,idempotent
+weave_system_version GET readOnly,idempotent
+weave_task_create POST 
+weave_task_delete DELETE destructive,idempotent
+weave_task_update PATCH idempotent
+weave_tasklist_create POST 
+weave_tasklist_delete DELETE destructive,idempotent
+weave_tasklist_list GET readOnly,idempotent
+weave_tasklist_update PATCH idempotent
+weave_time_add POST 
+weave_time_delete DELETE destructive,idempotent
+weave_time_list GET readOnly,idempotent
+weave_time_reset POST destructive
+weave_time_start POST 
+weave_time_stop POST 
+weave_time_update PATCH idempotent
+weave_user_activate POST 
+weave_user_avatar_delete DELETE destructive,idempotent
+weave_user_avatar_get GET openWorld
+weave_user_avatar_update PUT openWorld
+weave_user_deactivate POST 
+weave_user_delete DELETE destructive,idempotent
+weave_user_get GET readOnly,idempotent
+weave_user_list GET readOnly,idempotent
+weave_user_preferences_update PATCH idempotent
+weave_user_relink POST 
+weave_user_sessions_revokeAll POST 
+weave_user_update PATCH idempotent
+weave_webhook_create POST 
+weave_webhook_delete DELETE destructive,idempotent
+weave_webhook_deliveries GET readOnly,idempotent
+weave_webhook_events GET readOnly,idempotent
+weave_webhook_list GET readOnly,idempotent
+weave_webhook_retry POST 
+weave_webhook_test POST 
+weave_webhook_update PATCH idempotent
+weave_whoami GET readOnly,idempotent

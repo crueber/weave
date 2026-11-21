@@ -1,7 +1,12 @@
 // Package agentprompt renders the copy-paste prompts Weave hands to AI agents (general, project, board,
 // column, runner and work-order scopes). It is a leaf package: plain data in, text out, no database, no
-// server. The same templates feed the UI dialog, the `agent.prompt` op, the CLI and the generated skill
+// server. The same texts feed the UI dialog, the `agent.prompt` op, the CLI and the generated skill
 // (references/prompts.md), so there is exactly one source of truth for the wording.
+//
+// The general, project, board and runner prompts are plain text with {token}s (defaults/*.txt, see custom.go)
+// and can be customised, and so can the shared blocks they are built from (blocks/*.txt, see blocks.go). The
+// column prompt and the work order are Go templates (templates/*.tmpl) that only ever see Data and the
+// pre-rendered block strings, never run user-written text as a template.
 package agentprompt
 
 import (
@@ -54,6 +59,9 @@ type Data struct {
 	InstallBase string // download base for install.sh
 	NoInstall   bool   // leave out the "no CLI yet" install steps
 	Compact     bool   // shorter etiquette, no concepts section
+	Custom      string // editable scopes: the custom text (resolved by the caller); "" = Default(Scope)
+	// Blocks holds admin overrides of the shared blocks by block name ("" or absent = BlockDefault(name)).
+	Blocks map[string]string
 
 	ProjectName string
 	ProjectID   string
@@ -102,15 +110,23 @@ var tmpl = template.Must(template.New("agentprompt").Funcs(template.FuncMap{
 // Render renders the prompt for d.Scope.
 func Render(d Data) (string, error) {
 	switch d.Scope {
-	case ScopeGeneral, ScopeProject, ScopeBoard, ScopeList, ScopeRunner, ScopeWorkOrder:
+	case ScopeGeneral, ScopeProject, ScopeBoard, ScopeRunner:
+		return renderEditable(d)
+	case ScopeList, ScopeWorkOrder:
 	default:
 		return "", fmt.Errorf("unknown prompt scope %q", d.Scope)
 	}
 	var sb strings.Builder
-	if err := tmpl.ExecuteTemplate(&sb, d.Scope, d); err != nil {
+	if err := tmpl.ExecuteTemplate(&sb, d.Scope, tmplData{Data: d, Block: promptBlocks(d)}); err != nil {
 		return "", err
 	}
 	return sb.String(), nil
+}
+
+// tmplData is what list.tmpl and workorder.tmpl see: Data plus the rendered blocks ({{.Block.connect}}).
+type tmplData struct {
+	Data
+	Block map[string]string
 }
 
 // Title is the dialog/tab title of a rendered prompt.

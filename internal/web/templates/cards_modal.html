@@ -32,7 +32,6 @@
         <button type="button" class="cm-chipbtn" data-open-pop="due" title="Change due date (d)">Due {{cards_when $c.DueDate}}</button>
         {{else}}Due {{cards_when $c.DueDate}}{{end}}</span>{{end}}
       {{range $o.CardLabels}}{{if $edit}}<button type="button" class="cards-label cm-lab cards-color-{{.Color}}" data-open-pop="labels" title="Edit labels (l)">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</button>{{else}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}{{end}}
-      <span class="cards-badge cards-type-{{$c.Type}}" title="Card type">{{$c.Type}}</span>
       {{if $c.IsClosed}}<span class="cards-badge">closed</span>{{end}}
       {{if $c.IsDraft}}<span class="cards-badge">draft</span>{{end}}
       {{if $c.IsTemplate}}<span class="cards-badge">template</span>{{end}}
@@ -199,9 +198,6 @@
       {{if $c.CoverAttachmentID}}<form hx-post="/ui/cards/{{$c.ID}}/cover"><input type="hidden" name="attachmentId" value=""><button class="cm-quiet">Remove cover</button></form>{{end}}</div></details>
   {{else}}<span class="cm-pv cm-ro"><img class="cm-cover" src="/attachments/{{deref $c.CoverAttachmentID}}/thumbnail" alt="Cover image" loading="lazy"></span>{{end}}</div>{{end}}
 
-{{if $edit}}<div class="cm-prop" data-prop="type"><span class="cm-pl" id="cm-pl-type">Type</span>
-  <details class="cm-pv cards-pop" data-pop="type"><summary class="cm-val" aria-labelledby="cm-pl-type"><span class="cm-vtext">{{$c.Type}}</span></summary>
-    <div class="cm-popbody cards-popbody" role="group" aria-label="Card type"><form hx-post="/ui/cards/{{$c.ID}}/update"><select name="type" aria-label="Card type" data-autosubmit><option value="project" {{if eq $c.Type "project"}}selected{{end}}>project</option><option value="story" {{if eq $c.Type "story"}}selected{{end}}>story</option></select></form></div></details></div>{{end}}
 {{end}}
 
 {{define "cards_title"}}{{$d := .Data}}{{$c := $d.Card}}<div id="card-title" class="cards-title cm-title">

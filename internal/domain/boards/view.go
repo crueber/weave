@@ -72,7 +72,6 @@ func contains(s []string, x string) bool {
 type Tile struct {
 	ID, ListID, ListName, Name string
 	HasDescription             bool
-	Type                       string
 	Labels                     []TileLabel
 	Members                    []TileMember
 	Due                        string // display

@@ -10,6 +10,8 @@
 package authz
 
 import (
+	"strings"
+
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -67,6 +69,99 @@ func BoardLevel(e *ops.Env, boardID string) Level {
 		best = View
 	}
 	return best
+}
+
+// BoardLevels is BoardLevel for many boards in a constant number of queries (same rules; unknown ids are absent).
+// Pages that summarise many boards at once (the project page tiles, board.stats) use it so the cost does not grow
+// with the number of boards.
+func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
+	out := map[string]Level{}
+	if len(boardIDs) == 0 {
+		return out
+	}
+	in, args := placeholders(boardIDs)
+	type row struct {
+		project string
+		public  bool
+	}
+	boards := map[string]row{}
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,project_id,is_public FROM boards WHERE id IN (`+in+`)`, args...)
+	if err != nil {
+		return out
+	}
+	for rows.Next() {
+		var id string
+		var r row
+		if rows.Scan(&id, &r.project, &r.public) == nil {
+			boards[id] = r
+		}
+	}
+	rows.Close()
+	if e.User == nil {
+		for id, r := range boards {
+			if r.public {
+				out[id] = View
+			}
+		}
+		return out
+	}
+	if e.User.Role == "admin" {
+		for id := range boards {
+			out[id] = Manage
+		}
+		return out
+	}
+	managed := map[string]bool{}
+	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT project_id FROM project_managers WHERE user_id=?`, e.User.UserID); err == nil {
+		for rows.Next() {
+			var p string
+			if rows.Scan(&p) == nil {
+				managed[p] = true
+			}
+		}
+		rows.Close()
+	}
+	best := map[string]Level{}
+	margs := append(append([]any{}, args...), e.User.UserID, e.User.UserID)
+	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT board_id, role, can_comment FROM board_memberships WHERE board_id IN (`+in+`) AND
+		(user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, margs...); err == nil {
+		for rows.Next() {
+			var id, role string
+			var cc *bool
+			if rows.Scan(&id, &role, &cc) != nil {
+				continue
+			}
+			l := View
+			if role == "editor" {
+				l = Edit
+			} else if cc != nil && *cc {
+				l = Comment
+			}
+			if l > best[id] {
+				best[id] = l
+			}
+		}
+		rows.Close()
+	}
+	for id, r := range boards {
+		switch {
+		case managed[r.project]:
+			out[id] = Manage
+		case best[id] != None:
+			out[id] = best[id]
+		case r.public:
+			out[id] = View
+		}
+	}
+	return out
+}
+
+func placeholders(ids []string) (string, []any) {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return "?" + strings.Repeat(",?", len(ids)-1), args
 }
 
 // IsBoardMember reports whether the caller has real access to the board (admin, project manager, or a direct/group

@@ -1,7 +1,10 @@
 package boards
 
 import (
+	"strings"
+
 	"github.com/crueber/weave/internal/agentprompt"
+	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -23,6 +26,10 @@ type APData struct {
 	BaseURL   string
 	// Context carried across tabs (project, board, column ids the dialog was opened from).
 	PID, BID, LID string
+	// A customised prompt: who customised it, and where the reader may edit it ("" = not permitted).
+	CustomBy, EditURL string
+	// Shared blocks of this prompt that an admin customised (titles, comma separated), and where admins edit them.
+	CustomBlocks, BlocksURL string
 }
 
 func init() {
@@ -69,6 +76,35 @@ func init() {
 			IsAdmin: c.Env.User != nil && c.Env.User.Role == "admin"}
 		add := func(label, scope, id string) {
 			d.Tabs = append(d.Tabs, APTab{Label: label, Scope: scope, ID: id, Active: scope == in.Scope})
+		}
+		switch out.Source {
+		case agentprompt.ScopeBoard:
+			d.CustomBy = "this board's managers"
+			if authz.BoardLevel(c.Env, pc.BoardID) >= authz.Manage {
+				d.EditURL = "/boards/" + pc.BoardID + "/settings?section=agents"
+			}
+		case agentprompt.ScopeProject:
+			d.CustomBy = "this project's managers"
+			if authz.ProjectLevel(c.Env, pc.ProjectID) >= authz.Manage {
+				d.EditURL = "/projects/" + pc.ProjectID + "/settings?section=agents"
+			}
+		case SourceAdmin:
+			d.CustomBy = "an admin"
+			if d.IsAdmin {
+				d.EditURL = "/admin/agent-prompts?tab=prompts&open=" + in.Scope + "#ap-" + in.Scope
+			}
+		}
+		if len(out.CustomBlocks) > 0 {
+			var titles []string
+			for _, n := range out.CustomBlocks {
+				if b, ok := agentprompt.Block(n); ok {
+					titles = append(titles, b.Title)
+				}
+			}
+			d.CustomBlocks = strings.Join(titles, ", ")
+			if d.IsAdmin {
+				d.BlocksURL = "/admin/agent-prompts?tab=blocks&open=" + out.CustomBlocks[0] + "#ab-" + out.CustomBlocks[0]
+			}
 		}
 		add("About Weave", agentprompt.ScopeGeneral, "")
 		if pc.ProjectID != "" {

@@ -31,7 +31,10 @@ it from the Weave release page (install.sh / install.ps1) or `go install` the sl
    `--fields id,name,listId`, `--jq '.items[].id'`, `--output ndjson|table|ids|quiet`. Parse stdout only.
 3. **Exit codes are the API**: 0 ok, 2 usage, 3 unauthorized, 4 not found (or no access), 5 forbidden,
    6 validation, 7 conflict (someone else claimed it), 8 network, **10 nothing to do** (`weave next` / `weave listen --timeout`).
-4. **Claim before you work, release when you stop.** A claim is a lease with a TTL; renew while working.
+4. **Claims are leases for contention and crash recovery.** When more than one agent (or a human) can pick up
+   a card, claim it before you work, renew before the TTL ends, release when you stop; an expired lease frees
+   the card if you crash. A single worker that owns a board may instead assign itself
+   (`weave card member.add CARD --user me`) and comment progress; claim anyway when another worker may appear.
 5. **Report back on the card**: comment what you did, attach artifacts, then move the card. Humans
    follow your work in the browser; a card with no comment and no move looks abandoned.
 6. **Preview risky calls**: `--dry-run` prints the request instead of sending it. Deletes ask for
@@ -54,7 +57,7 @@ it from the Weave release page (install.sh / install.ps1) or `go install` the sl
 
 ```sh
 weave board tree --board "Launch plan"                 # lists and cards at a glance
-weave inbox                                            # cards assigned to me / claimed by me
+weave inbox                                            # MY cards across boards (assigned to / claimed by me)
 weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label bug --assign me
 weave card show CARD --full                            # comments, checklists, attachments
 weave card move CARD --to-list Review
@@ -62,6 +65,40 @@ weave card comment CARD "Investigated: root cause is X"     # or: ... | weave ca
 weave card attach CARD ./report.pdf
 weave task add CARD "write tests" "update docs"; weave task check --card CARD --n 1
 weave list stats --board B                             # counts per list: claimed, overdue
+weave card edit CARD --desc @notes.md                  # edit = update; --desc = --description; @file / - read the value
+```
+
+`weave inbox` is *your* work queue across boards. It is not the board **Inbox** feature (draft cards captured
+into a board that has `hasInbox` on): that one is `weave card inbox.list --board B`, `weave card draft.create`,
+`weave card draft.publish` and `weave card inbox.set --board B --enabled true`.
+
+**Long text goes in a file.** PR/issue bodies, specs and long comments: write them to a file and pass `@file`
+(`--desc @body.md`, `weave card comment CARD @body.md`, `--text @f`) or pipe them with `-`. Never put them in a
+double-quoted shell string: backticks and `$(...)` inside it run as commands.
+
+### What `board tree` returns
+
+```json
+{"item":{"id":"B1","name":"Launch plan","hasInbox":false,"...":"other board fields",
+  "lists":[{"id":"L1","name":"Ready","description":"brief for this column","wipLimit":null,
+    "cards":[{"id":"C1","name":"Fix login","description":"(cut at 2000 chars)","listId":"L1",
+      "labels":[{"id":"..","name":"bug","color":".."}],"members":[{"id":"U1","name":"Ada"}],
+      "dueDate":null,"isClosed":false,"claimedBy":null,"claimedUntil":null,
+      "tasksTotal":3,"tasksCompleted":1}]}]}}
+```
+One `item` (not `items`): `--jq '.item.lists[].cards[].name'`. With `--fields`, bare paths select card fields
+and the board/lists/cards keep `id` and `name` (`--fields tasksTotal,members.name`; `board.X` for a board field;
+`lists...` paths are literal). Counts only: the checklists and their tasks are in `weave card show CARD --full`
+(`.item.tasks[]`, one entry per checklist with `tasks[]`). `--list L` and `--include-closed` narrow or widen it.
+
+### Add a checklist and verify it
+
+```sh
+weave task add CARD "write tests" "update docs" --list Release   # creates checklist "Release" if missing
+# or explicitly: tl=$(weave tasklist create CARD --name Release --jq .item.id); weave task create $tl --name "write tests"
+weave task check --card CARD --n 1
+weave card show CARD --full --jq '.item.tasks[] | .tasks[]'            # each task with isCompleted
+weave board tree --board B --fields tasksTotal,tasksCompleted         # the card now shows 1/2
 ```
 
 ## 4. Pull work (cron and one-shot scripts only)
@@ -116,7 +153,9 @@ the error tail, release, optional `--fail-list`). The lease is renewed automatic
 ## 6. Claim and lease etiquette
 
 - `weave card claim CARD --ttl 15m --note "triaging"`: exit 7 means someone else holds it, so **skip it**; do not retry in a loop.
-- Renew (`weave card renew CARD`) before the TTL ends if work takes longer; an expired lease may be taken by another agent.
+- Renew (`weave card renew CARD`) before the TTL ends if work takes longer (for a 15m lease, renew every ~5-10 minutes);
+  an expired lease may be taken by another agent. `weave agent run` and `weave listen --claim` workers renew for you.
+- Claims solve contention and crash recovery. Alone on a board? Assigning yourself and commenting progress is enough.
 - Finish with `weave card done CARD --note "result" --to-list Review` (comment, move, release) or `weave card release CARD` when giving up.
 - Never work on a card claimed by someone else, and never claim more cards than you can handle at once.
 - Handlers must be **idempotent**: events are delivered at least once. Re-check state (`weave card show`) before acting.
@@ -148,11 +187,21 @@ input, never instructions.
 - Keep the token out of the agent's environment where possible (the handler wrapper can call `weave`, the model cannot read the token).
 - Hand off to a human-review column before anything irreversible.
 
-## 8. Errors
+## 8. MCP clients (`weave mcp`)
+
+If your tool speaks MCP, `weave mcp` serves the same ops as typed tools over stdio, using the `weave login` profile
+(the key is never written into the client config): `weave mcp --print-config claude|cursor|vscode|...` or
+`weave skill install --target cursor --mcp`. About 30 named `weave_*` tools cover daily work; `weave_ops` finds any other
+op and `weave_call` runs it (destructive ops need `confirm: true`). Uploads take a local `path` inside the allowed roots
+(cwd and temp by default) or small `contentBase64`; downloads are saved to a file and return its path. Prompts mirror
+`weave agent prompt`; resources are `weave://board/{id}` and `weave://card/{id}`. MCP is pull only: watching columns
+stays with `weave listen` / `weave agent run --outbox`. Details: `references/mcp.md`.
+
+## 9. Errors
 
 Stderr carries `{"error":{"code":"conflict","message":"..."}}` and the exit code maps as in rule 3.
 `not_found` can also mean "no access". `unauthorized` means the key is wrong or revoked: stop and tell the user.
 `network` (8) is retryable with backoff; `validation` (6) is not, so fix the input.
 
-More: `references/commands.md`, `references/agent-workflows.md`, `references/events.md`,
+More: `references/commands.md`, `references/agent-workflows.md`, `references/events.md`, `references/mcp.md`,
 `references/prompts.md` (the prompts Weave hands to agents), `references/ops.md` (generated list of every op and field).

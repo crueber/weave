@@ -302,6 +302,13 @@ func TestUI(t *testing.T) {
 	ok(do("POST", "/ui/projects/"+id, url.Values{"tab": {"general"}, "useProjectLabels": {"true"}}, true), "id=\"ps-labels\" type=\"checkbox\" role=\"switch\" name=\"useProjectLabels\" value=\"true\" checked")
 	ok(do("POST", "/ui/projects/"+id, url.Values{"tab": {"background"}, "backgroundType": {"gradient"}, "backgroundGradient": {"ocean-dive"}}, true), "ps-swatch on")
 	ok(do("GET", "/ui/projects/"+id+"/settings/managers", nil, true), "Add a manager")
+	// Agents: the project prompt text saves through project.update and shows as customised; empty goes back
+	ok(do("GET", "/projects/"+id+"/settings?section=agents", nil, false), `name="agentPrompt"`)
+	ok(do("POST", "/ui/projects/"+id, url.Values{"_section": {"agents"}, "agentPrompt": {"Ours {project_name}\r\n"}}, true), "Reset to default")
+	if p := call[projects.Project](t, e, "project.get", projects.IDIn{ID: id}); p.AgentPrompt != "Ours {project_name}" {
+		t.Fatalf("agent prompt %q", p.AgentPrompt)
+	}
+	ok(do("POST", "/ui/projects/"+id, url.Values{"_section": {"agents"}, "agentPrompt": {""}}, true), "Showing Weave&#39;s built-in text")
 	ok(do("POST", "/ui/projects/"+id+"/fieldgroups", url.Values{"name": {"G1"}}, true), "G1")
 	gs := call[[]projects.BaseGroup](t, e, "project.fieldgroup.list", projects.IDIn{ID: id})
 	ok(do("POST", "/ui/fieldgroups/"+gs[0].ID+"/fields?pid="+id, url.Values{"name": {"Pick"}, "type": {"select"}, "options": {"a, b"}}, true), "select: a, b")

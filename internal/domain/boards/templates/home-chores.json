@@ -85,7 +85,6 @@
     "id": "c1",
     "listId": "l2",
     "name": "Deep-clean the oven",
-    "type": "project",
     "position": 65536,
     "description": "Do the racks in the sink first; leave the cleaner on overnight.",
     "labelIds": [
@@ -96,7 +95,6 @@
     "id": "c2",
     "listId": "l1",
     "name": "Mow the lawn",
-    "type": "project",
     "position": 131072,
     "labelIds": [
      "b4"

@@ -55,7 +55,6 @@
 .boards-tile[data-card-fill] .boards-bar i{background:var(--fg-2)}
 .boards-tile[data-card-fill] .boards-prog.is-done .boards-bar i{background:var(--success)}
 .boards-tile[data-card-fill] .boards-avatar{background:var(--surface);color:var(--fg);border-color:var(--card-bg);box-shadow:0 0 0 1px var(--border-strong)}
-.boards-tile[data-card-fill] .boards-badge{background:var(--surface);color:var(--fg);border:1px solid var(--border-strong)}
 .boards-tile[data-card-fill] .boards-tile-edit{background:var(--surface);color:var(--fg-2)}
 
 /* ---- colour picker (boards_color_picker) ---- */

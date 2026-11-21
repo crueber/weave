@@ -110,7 +110,7 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 /* kanban */
 .boards-view-kanban{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .boards-view-kanban>.boards-lists{flex:1 1 auto;min-height:0}
-.boards-lists{display:flex;gap:var(--space-3,.75rem);align-items:flex-start;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent;padding:0 0 .5rem;scroll-behavior:smooth;scroll-padding:1rem;overscroll-behavior-x:contain}
+.boards-lists{display:flex;gap:var(--space-3,.75rem);align-items:flex-start;overflow-x:auto;padding:0 0 .5rem;scroll-behavior:smooth;scroll-padding:1rem;overscroll-behavior-x:contain}
 .boards-lists.is-panning{cursor:grabbing}
 .boards-lists.is-dragging{scroll-behavior:auto;user-select:none;-webkit-user-select:none}
 .boards-col{flex:0 0 17.5rem;background:var(--list-bg,var(--surface-2,#f1f1f4));border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-lg,10px);display:flex;flex-direction:column;max-height:100%;transition:background var(--dur-fast,.12s) var(--ease,ease)}
@@ -348,3 +348,38 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .bs-tplgroup{display:none}
 .bs-form:has(input[name=visibility][value=group]:checked) .bs-tplgroup{display:flex}
 .bs-tplgroup select{flex:0 1 16rem}
+
+/* Agent prompt text editor (bs_prompt in _settings.html): admin defaults, project and board settings */
+.bs-prompt .bs-sub label{font:inherit;color:inherit}
+.bs-prompt-form{margin:0}
+.bs-prompt-text{display:block;width:100%;min-width:0;box-sizing:border-box;min-height:16rem;line-height:1.45;tab-size:2}
+.bs-prompt-badge{margin-left:var(--space-1);vertical-align:2px;background:var(--accent-soft);color:var(--fg);font-weight:600}
+.bs-prompt-foot{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2)}
+.bs-prompt-foot .bs-btns{margin-left:auto}
+.bs-tokens{flex:1 1 18rem;min-width:0;font-size:var(--text-sm);color:var(--fg-2)}
+.bs-tokens summary{cursor:pointer;color:var(--accent);font-weight:600;padding:var(--space-1) 0}
+.bs-tokens summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;border-radius:var(--radius-sm)}
+.bs-tokens dl{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-1);margin:var(--space-2) 0}
+.bs-tokens dl>div{display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:var(--space-3);align-items:baseline}
+.bs-tokens dt{margin:0}.bs-tokens dd{margin:0;color:var(--muted)}
+.bs-tokens code{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--fg)}
+.bs-tokens p{margin:var(--space-2) 0 0;color:var(--muted)}
+.admin-console .adm-block>.bs-prompt>.bs-sub:first-child{margin-top:0}
+@media(max-width:560px){.bs-tokens dl>div{grid-template-columns:minmax(0,1fr);gap:0}.bs-prompt-text{min-height:12rem}}
+
+/* Slim scrollbars on the board: the lists strip and every column. The track is a fixed 3px (so nothing shifts), the thumb
+   is drawn 1px wide while idle and fills the 3px while scrolling (thin_scroll.js adds .is-scrolling for a moment) or
+   while the thumb is hovered/dragged. No arrow buttons. Chromium/Safari use the pseudo-elements; Firefox cannot go
+   below its "thin" bar, so it gets a faint thumb that firms up while scrolling. */
+.boards-lists::-webkit-scrollbar,.boards-cards::-webkit-scrollbar{width:3px;height:3px;background:transparent}
+.boards-lists::-webkit-scrollbar-button,.boards-cards::-webkit-scrollbar-button{display:none;width:0;height:0}
+.boards-lists::-webkit-scrollbar-track,.boards-cards::-webkit-scrollbar-track,.boards-lists::-webkit-scrollbar-corner,.boards-cards::-webkit-scrollbar-corner{background:transparent}
+.boards-lists::-webkit-scrollbar-thumb,.boards-cards::-webkit-scrollbar-thumb{background-color:var(--border-strong);background-clip:padding-box;border-radius:3px;border:0 solid transparent}
+.boards-cards::-webkit-scrollbar-thumb{border-left-width:1px;border-right-width:1px}
+.boards-lists::-webkit-scrollbar-thumb{border-top-width:1px;border-bottom-width:1px}
+.boards-cards.is-scrolling::-webkit-scrollbar-thumb,.boards-cards::-webkit-scrollbar-thumb:hover,.boards-cards::-webkit-scrollbar-thumb:active{border-left-width:0;border-right-width:0}
+.boards-lists.is-scrolling::-webkit-scrollbar-thumb,.boards-lists::-webkit-scrollbar-thumb:hover,.boards-lists::-webkit-scrollbar-thumb:active{border-top-width:0;border-bottom-width:0}
+@supports (-moz-appearance:none){
+  .boards-lists,.boards-cards{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+  .boards-lists.is-scrolling,.boards-cards.is-scrolling{scrollbar-color:var(--border-strong) transparent}
+}

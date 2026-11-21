@@ -24,7 +24,7 @@ var (
 )
 
 // fixture creates users + a project and returns the env acting as admin.
-func fixture(t *testing.T) *ops.Env {
+func fixture(t testing.TB) *ops.Env {
 	t.Helper()
 	e := testutil.Env(t, admin)
 	for _, u := range []*ops.Principal{admin, editor, viewer, nobody} {
@@ -80,7 +80,7 @@ func addCard(t *testing.T, e *ops.Env, boardID, listID, id, name string, pos flo
 	if due != "" {
 		dueV = due
 	}
-	if _, err := e.DB.Exec(`INSERT INTO cards(id,board_id,list_id,type,position,name,due_date,list_changed_at,created_at) VALUES(?,?,?,'project',?,?,?,'2024-01-01T00:00:00Z','2024-01-0'||?||'T00:00:00Z')`,
+	if _, err := e.DB.Exec(`INSERT INTO cards(id,board_id,list_id,position,name,due_date,list_changed_at,created_at) VALUES(?,?,?,?,?,?,'2024-01-01T00:00:00Z','2024-01-0'||?||'T00:00:00Z')`,
 		id, boardID, listID, pos, name, dueV, int(pos)%9+1); err != nil {
 		t.Fatal(err)
 	}
@@ -511,6 +511,13 @@ func TestBoardPages(t *testing.T) {
 	m := mux(e)
 
 	code, body := get(t, m, "/boards/"+b.ID, false)
+	noStory := func(view, body string) {
+		t.Helper()
+		if strings.Contains(body, ">story<") || strings.Contains(body, "cards-type-") {
+			t.Errorf("%s view renders a card-type badge", view)
+		}
+	}
+	noStory("kanban", body)
 	for _, want := range []string{"<!doctype html>", `id="board-body"`, "Fix login", "Write docs", "Ship it", `data-card-drop="/ui/boards/` + b.ID + `/cards/drop"`,
 		`data-list="` + l1.ID + `"`, `href="/cards/k1"`, "Urgent", "1/2", "boards-due-overdue", "/boards/" + b.ID + "/calendar", "/boards/" + b.ID + "/map",
 		`data-drag-handle="list"`, "Kanban &lt;b&gt;", "Add list", "EI"} {
@@ -547,10 +554,12 @@ func TestBoardPages(t *testing.T) {
 	if !strings.Contains(body, "<table") || !strings.Contains(body, "Ship it") || strings.Contains(body, "boards-lists") {
 		t.Errorf("list view wrong")
 	}
+	noStory("list", body)
 	_, body = get(t, m, "/ui/boards/"+b.ID+"/body?view=grid", true)
 	if !strings.Contains(body, "boards-grid") || !strings.Contains(body, "Ship it") {
 		t.Errorf("grid view wrong")
 	}
+	noStory("grid", body)
 	// calendar default view redirects to the cards domain page
 	cal := "calendar"
 	call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, DefaultView: &cal})
@@ -565,6 +574,12 @@ func TestBoardPages(t *testing.T) {
 	for _, want := range []string{"set-general", "set-members", "set-labels", "set-sharing", "Urgent", "Ed Itor", "export?format=csv"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("settings missing %q (%d)", want, code)
+		}
+	}
+	// card types were removed: no default-type picker or "limit card types" toggle
+	for _, bad := range []string{"defaultCardType", "limitCardTypesToDefault", "Default card type", "Limit card types", "bs-type-l", "bs-limit"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("settings still has card-type control %q", bad)
 		}
 	}
 	if code, body = get(t, m, "/ui/boards/"+b.ID+"/members", true); code != 200 || !strings.Contains(body, `id="set-members"`) {

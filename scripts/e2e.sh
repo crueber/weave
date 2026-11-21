@@ -125,7 +125,7 @@ LABEL="$ID"
 [ -n "$LIST" ] || { echo "no list; aborting"; exit 1; }
 
 # ---- card + extras
-step "card.create" "card.create" "listId|list_id=$LIST" "name=Card $RUN" "description=hello e2e" "type=project" "position=65536"
+step "card.create" "card.create" "listId|list_id=$LIST" "name=Card $RUN" "description=hello e2e" "position=65536"
 CARD="$ID"
 [ -n "$CARD" ] || { echo "no card; aborting"; exit 1; }
 cleanup_add "card.delete" "id=$CARD"

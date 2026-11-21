@@ -56,12 +56,9 @@
     <input type="hidden" name="_section" value="views">
     <div class="bs-row bs-row-stack"><span class="bs-text"><b id="bs-view-l">Default view</b><small>The view people land on when they open the board.</small></span>
       <div class="bs-seg" role="radiogroup" aria-labelledby="bs-view-l">{{$v := .Board.DefaultView}}{{range .Views}}<label><input type="radio" name="defaultView" value="{{.}}"{{if eq . $v}} checked{{end}}{{if $off}} disabled{{end}}><span>{{.}}</span></label>{{end}}</div></div>
-    <div class="bs-row bs-row-stack"><span class="bs-text"><b id="bs-type-l">Default card type</b><small>New cards start as this type.</small></span>
-      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-type-l">{{$t := .Board.DefaultCardType}}{{range $x := .CardTypes}}<label><input type="radio" name="defaultCardType" value="{{$x}}"{{if eq $x $t}} checked{{end}}{{if $off}} disabled{{end}}><span>{{$x}}</span></label>{{end}}</div></div>
     <div class="bs-row bs-row-stack bs-cardcolor"><span class="bs-text"><b id="bs-cc-l">Card colouring</b><small>How labels colour cards on this board. <b>First label (by label order) decides the card colour; colours are never mixed.</b> Reorder labels under Labels to change which colour wins.</small></span>
       <div class="bs-seg" role="radiogroup" aria-labelledby="bs-cc-l">{{$m := .Board.CardColorMode}}<label><input type="radio" name="cardColorMode" value="pill"{{if ne $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Label pill</span></label><label><input type="radio" name="cardColorMode" value="fill"{{if eq $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Colour the whole card</span></label></div>
       <div class="bs-cc-preview" aria-hidden="true"><span class="bs-cc-cap">Preview</span>{{template "bs_cc_preview" .}}</div></div>
-    {{template "bs_toggle" dict "ID" "bs-limit" "Name" "limitCardTypesToDefault" "Title" "Limit card types to the default" "Help" "Hide the other card type in the card editor." "On" .Board.LimitCardTypesToDefault "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-creator" "Name" "alwaysDisplayCardCreator" "Title" "Always show card creator" "Help" "Display who created each card on the board." "On" .Board.AlwaysDisplayCardCreator "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-counter" "Name" "showCardCounter" "Title" "Card counter" "Help" "Show the number of cards in each list header." "On" .Board.ShowCardCounter "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-ages" "Name" "showCardAges" "Title" "Card ages" "Help" "Fade cards that have not been touched for a while." "On" .Board.ShowCardAges "Off" $off}}
@@ -211,8 +208,9 @@
   </article>{{end}}
 
 {{/* "Agents": connect AI agents to this board (the "Connect an agent" dialog, shown to everyone who can view the board). */}}
+{{define "boards_set_agents"}}{{template "boards_set_agents_in" .Data}}{{end}}
 {{define "boards_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel" data-panel="agents" aria-labelledby="set-agents-h">
-  <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2></div>
+  <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2>{{template "bs_status" .}}</div>
   <p class="bs-desc">Connect AI agents to this board. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>. A personal key acts with your full role, and an agent needs Edit access to claim cards.{{if .IsAdmin}} Create dedicated agent accounts under <a href="/admin/agents">Admin &rarr; Agents</a>.{{else}} Agent accounts are created by admins.{{end}}</p>
   <div class="bs-row"><span class="bs-text"><b>Board prompt</b><small>Interviews you about what to attach to (columns, destinations, authority), then listens.</small></span>
     <span class="bs-btns"><button type="button" class="primary" hx-get="/ui/agent-prompt?scope=board&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button></span></div>
@@ -220,4 +218,6 @@
     <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=runner&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML">Runner prompt</button></span></div>
   {{range .AgentCols}}<div class="bs-row"><span class="bs-text"><b>{{.Name}}</b><small>{{if .Listeners}}Listening now: {{range $i, $x := .Listeners}}{{if $i}}, {{end}}{{$x.Name}}{{if $x.Label}} ({{$x.Label}}){{end}}{{end}}{{else}}No agent is listening.{{end}}</small></span>
     <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=list&amp;id={{.List.ID}}" hx-target="#modal" hx-swap="innerHTML">Prompt</button><a class="boards-btn" href="/lists/{{.List.ID}}">Open column</a></span></div>{{end}}
+  {{if .CanManage}}{{template "bs_prompt" dict "ID" "bs-ap" "Name" "agentPrompt" "Title" "Board prompt text" "Help" "What Connect an agent hands out for this board. Plain text; the tokens below are filled in when it is shown. A column's prompt is its description." "Text" .Prompt.Text "Custom" .Prompt.Custom "From" .Prompt.From "Tokens" .Prompt.Tokens "URL" (print "/ui/boards/" .Board.ID) "Patch" true "Target" "#set-agents" "Section" "agents" "Preview" (print "/ui/agent-prompt?scope=board&id=" .Board.ID)}}
+  {{else if .Board.AgentPrompt}}<p class="bs-hint">The board prompt is customised for this board by its managers.</p>{{end}}
 </section>{{end}}

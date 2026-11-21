@@ -17,7 +17,7 @@ nothing for 3x the heartbeat). A list filter matches the event's `listId`, `from
 {"id":"...","type":"card.moved","boardId":"...","listId":"...","fromListId":"...","toListId":"...",
  "cardId":"...","actor":{"id":"...","name":"Ada","isAgent":false},
  "card":{"id":"...","name":"...","description":"...","listId":"...","position":65536,"labels":[],"members":[],
-         "dueDate":null,"isClosed":false,"claimedBy":null,"claimedUntil":null},
+         "dueDate":null,"isClosed":false,"claimedBy":null,"claimedUntil":null,"tasksTotal":0,"tasksCompleted":0},
  "data":{},"at":"2026-01-01T12:00:00Z"}
 ```
 

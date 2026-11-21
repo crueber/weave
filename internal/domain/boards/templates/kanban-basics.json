@@ -84,7 +84,6 @@
     "id": "c1",
     "listId": "l2",
     "name": "Move me to Doing",
-    "type": "project",
     "position": 65536,
     "description": "Drag this card to **Doing**, or open it and use the list menu. The *Doing* column is limited to 3 cards, so finish work before starting more.",
     "labelIds": [
@@ -95,7 +94,6 @@
     "id": "c2",
     "listId": "l1",
     "name": "Click a card to open details",
-    "type": "project",
     "position": 131072,
     "description": "Cards open on a click: add a description, labels, tasks, a due date and comments there. Drag a card between columns to show progress."
    },
@@ -103,7 +101,6 @@
     "id": "c3",
     "listId": "l1",
     "name": "Add your own",
-    "type": "project",
     "position": 196608,
     "description": "Type a title at the bottom of any column and press Enter to add a card; keep typing to add more. Delete these samples whenever you like.",
     "labelIds": [

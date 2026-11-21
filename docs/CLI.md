@@ -77,8 +77,8 @@ Default: the server's JSON (`{"item":...}` / `{"items":[...]}`) on stdout, inden
 | Flag | Effect |
 |---|---|
 | `--output json\|ndjson\|table\|ids\|quiet` | format (`--json` is the default; `-q` = quiet) |
-| `--fields id,name,labels.name` | keep only these dotted paths of each item |
-| `--jq '.items[].id'` | tiny jq-like projection: `.a.b`, `[n]`, `[]`, `\|`; strings print raw |
+| `--fields id,name,labels.name` | keep only these dotted paths of each item (see below) |
+| `--jq '.items[].id'` | tiny jq-like projection: `.a.b`, `[n]`, `[]`, `\|`; strings print raw; an unknown key is an error |
 | `--limit N --cursor C --all` | pagination; `--all` follows the server cursor and merges pages |
 | `-o`, `--output-file PATH` | write the response (or a download, e.g. an export) to a file, atomically |
 | `--dry-run` | print the request that would be sent; writes are not sent (reads still run for name resolution) |
@@ -87,7 +87,23 @@ Default: the server's JSON (`{"item":...}` / `{"items":[...]}`) on stdout, inden
 | `--body @file.json`, `--body -`, `--stdin` | JSON payload for the body fields; explicit flags override it |
 | `--no-color` | disable colour; `NO_COLOR` and non-terminals are honoured |
 
+**`--fields` rules.** Paths are relative to each item (each element of `items`, or the single `item`). A dot descends into an
+object; a path that crosses an array maps over it and **keeps the array**, so `labels.name` gives `"labels":[{"name":"bug"}]`
+(`labels[].name` is the same). When no path matches any item, the output is unchanged-but-empty and stderr says
+`note: --fields x matched nothing; available: ...`.
+`weave board tree` is a tree whose records are the cards, so there a bare path is a **card** path: `--fields name,tasksTotal`
+keeps each card's `name` and `tasksTotal`; `board.X` keeps the board's own field `X`; a path starting with `lists` is taken
+literally (`lists.wipLimit`, `lists[].cards[].labels.name`). The board, every list and every card always keep `id` and `name`,
+so a projection never turns the board into `{"item":{"name":"..."}}`.
+
+**`--jq` rules.** `.a.b`, `[n]` (negative counts from the end), `[]` (iterate) and `|`. A key that exists with a null value
+yields `null`; a key that no object in the stream has fails with exit 2 and names what is there, e.g.
+`weave board tree B --jq '.items[]'` -> `--jq .items[]: no key "items"; available: item` (board tree returns one `item`).
+Iterating a non-array (`.item[]`) is an error too; an out-of-range index yields nothing.
+
 Any string value may be `-` (read stdin) or `@path` (read a file), e.g. `weave card update CARD --description @spec.md`.
+Short aliases work on every op that has the long field: `--desc` = `--description`, `--due` = `--dueDate`, and the verb
+`edit` = `update` (`weave card edit CARD --desc @notes.md`). `@path` that does not name an existing file is sent literally.
 File upload ops take a path: `weave attachment create CARD --file ./report.pdf`.
 If an op has a field with the same name as a global flag (`--limit`, `--url`, `--body`), the op's field wins.
 
@@ -110,8 +126,10 @@ Errors go to stderr as JSON, always: `{"error":{"code":"conflict","message":"...
 
 ```sh
 weave board tree --board "Launch plan"           # lists with cards (text on a terminal, JSON otherwise)
+weave board tree B [--list L]... [--include-closed]   # only these lists / also closed lists and cards
 weave inbox [--assigned|--claimed]                # my open cards across boards
 weave list stats --board B [--list L]             # per list: cards, claimed, unclaimed, overdue, closed
+weave board stats --project P [--boardId B]        # per board: open, done, overdue, due soon, claimed, listening, columns; newest activity first
 
 weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label bug --assign me --due 2026-12-01T00:00:00Z
 printf '%s\n' '{"name":"A","labels":["bug"]}' 'plain title' | weave card create --board B --list Backlog --from-stdin   # bulk, NDJSON out
@@ -186,12 +204,69 @@ weave agent prompt [--general | --runner [--board B] | --project P | --board B |
 Prints (raw text) the copy-paste prompt that connects an AI agent: the same text as the browser's **Connect an agent** dialog, rendered by the
 `agent.prompt` op. Prompts never contain a key; they reference `$WEAVE_TOKEN`. Board and project prompts ask the agent to interview you and confirm a
 PLAN before it listens; the runner prompt contains the complete wrapper script and service unit; the work order names files only.
+The JSON output (`--json`) has `source`: `builtin`, `admin`, `project` or `board`, i.e. where a customised text came from, and `customBlocks`:
+the shared blocks the prompt used whose text an admin replaced. The texts are edited
+with the existing update commands (plain text with `{tokens}`, see docs/AGENTS.md; an empty value goes back to the default):
+`weave board update BOARD --agentPrompt "$(cat board-prompt.txt)"` (board managers) and `weave project update PROJECT --agentPrompt ...`
+(project managers). The admin defaults (`agentprompt.general|project|board|runner`) and the shared blocks (`agentblock.<name>`, e.g.
+`agentblock.security`) are edited in Admin console > Agent prompts (tabs Prompts and Blocks) or with
+`PATCH /api/v1/config/settings` (`weave config` is the local profile command, so the `config.*` ops have no CLI verb).
+
+## `weave mcp`
+
+```sh
+weave mcp                                            # MCP server over stdio (what an MCP client launches)
+weave mcp --print-config TOOL [--scope user|project]  # snippet on stdout, where it goes on stderr
+weave skill install --target TOOL[,TOOL] --mcp [--scope project] [--force]   # merge the entry into the tool's config
+```
+An MCP server built into the slim CLI: an MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI, Codex, Kiro, Cline, Roo,
+Amp, ...) starts `weave mcp` and talks JSON-RPC on its stdin/stdout. It is a connector, not part of the server: it resolves the
+connection like every command (`weave login` profile, `WEAVE_PROFILE`, `WEAVE_URL`/`WEAVE_TOKEN`), calls the same REST ops and adds no
+permission path. The key never appears in tool output, prompts, logs, errors or written configs (`--print-config` and `--mcp` write only
+the binary path, `mcp` and, for a non-default profile, `WEAVE_PROFILE`). Implementation: official Go SDK
+`github.com/modelcontextprotocol/go-sdk`; tool derivation in `internal/cli/mcp_tools.go` is transport-agnostic.
+- **Tools.** About 30 curated agent-grain tools (`mcpCurated` in `mcp_tools.go`, op names only; the generated list is in
+  `skills/weave/references/mcp.md`). Name, input schema (from field `in`/`type`/`required`/`desc`), description (summary + op) and
+  annotations are derived from the op schema (live `GET /api/v1/_ops`, cached; embedded snapshot offline). Annotations: GET read-only and
+  idempotent; DELETE and verbs delete/clear/trash/archive/revoke/reset/purge destructive; PUT/PATCH/`*.set` idempotent; uploads and
+  downloads open-world and not read-only (a download writes a local file). `weave_ops` searches every op (by words, tag, or exact `op`
+  for its schema); `weave_call {op, args, confirm}` runs any op the role allows and refuses destructive ones without `confirm: true`
+  (naming the dedicated tool when there is one). Admin-only ops are hidden from a key a startup `whoami` shows is not an admin (shown
+  when whoami fails; the server decides). Errors are tool results with `isError` and `{"error":{"code","message"}}` (codes as above plus
+  `confirm_required`), never protocol errors.
+- **Result shaping.** Each result is capped at `WEAVE_MCP_MAX_RESULT` bytes (64 KiB, `0` = off) with an explicit `[truncated: ...]` marker
+  and a hint (structured content is dropped then). GET ops with a `limit` field get `limit: 50` unless given; item arrays of other ops are
+  cut at 200 with a `truncated` note. Card descriptions (card get/list, board tree, search, next, claim) are cut at 2000 characters
+  unless `full: true`. Strings are sent literally (no `@file` or `-` expansion), and `.`/`..` ids are rejected.
+- **Uploads** (ops with a file field: `attachment.create`, `project.background.upload`, `user.avatar.update`, `board.import`,
+  `config.logo.upload`): `path` (absolute or relative to the server's cwd) or `contentBase64` + `filename` (`WEAVE_MCP_MAX_BASE64_MB`,
+  2). Allowed roots: cwd (dropped when it is `$HOME` or `/`) and the OS temp dir, replaced by `WEAVE_MCP_UPLOAD_ROOTS`; roots and paths
+  are symlink-resolved and compared on component boundaries (case-insensitive on Windows and macOS). Denied even inside roots: `.ssh
+  .gnupg .aws .azure .kube .docker .git .config/gcloud .config/gh` directories, `.env* *.pem *.key id_* .netrc .git-credentials .npmrc
+  .pypirc` files, Weave's config and cache dirs. The file is opened through `os.Root` (non-blocking on unix, so a FIFO swapped in
+  cannot hang the server), must be a regular file with the same identity as the checked one, and is streamed (multipart through a pipe)
+  through a reader that fails past `WEAVE_MCP_MAX_UPLOAD_MB` (256, bounded by the op's `maxBytes`). `-` is refused (stdin is the protocol
+  pipe); Windows UNC/device paths, alternate data streams and reserved names are refused. The result is the op's JSON plus
+  `uploaded: {path, filename, bytes, sha256, sniffedMime}`; file bytes are never echoed.
+- **Downloads** (`binary` ops, or a GET answering non-JSON): streamed to `<temp>/weave-mcp/<id>-<random>/<name>` (0600) or `saveTo`
+  (same root and deny checks; exclusive create unless `overwrite: true`, never through a symlink, never executable), capped by
+  `WEAVE_MCP_MAX_DOWNLOAD_MB` (1024). Returns `path`, `bytes`, `mime` (sniffed), `sha256`. Attachment downloads and thumbnails that are
+  PNG/JPEG/GIF/WebP up to `WEAVE_MCP_INLINE_IMAGE_MB` (1) are also returned as image content; SVG/HTML and other binary ops (backups,
+  exports, avatars) are only saved.
+- **Prompts** `about_weave`, `project`, `board`, `column`, `runner` render through `agent.prompt` (names or ids as arguments), so admin,
+  project and board overrides apply. **Resources**: `weave://board/{id}` (columns with brief, WIP limit, card/claim counts, from
+  `board.tree`) and `weave://card/{id}` (`card.get`).
+- **Pull only.** `weave_card_next`/`claim`/`renew`/`release` take work; there is no event stream over MCP. Unattended work stays with
+  `weave listen` and `weave agent run --outbox`.
+- **Config locations** (`--print-config`, `--mcp`): JSON configs are merged (only the `weave` entry changes; a different `weave` entry needs
+  `--force`, JSON with comments is never rewritten). Claude Code user scope and Codex (TOML) are printed as commands/snippets, not
+  written. Unverified locations (Windsurf/Devin, Zed) need an explicit `--target`. Paths and sources: `docs/AGENT-TARGETS.md`.
 
 ## Agent skill
 
 ```sh
 weave skill print [--file references/commands.md|list] [--compact]
-weave skill install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] [--dry-run]
+weave skill install [--target a,b|all] [--scope user|project] [--dir PATH] [--force] [--dry-run] [--mcp]
 weave skill targets [--scope user|project]       # every known tool: detected / installed state / path
 weave skill check [--target ...]                 # per-target current|stale|modified|missing; exit 1 unless all current
 weave skill uninstall [--target ...] [--force]   # removes only what Weave wrote

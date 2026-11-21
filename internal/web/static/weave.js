@@ -63,7 +63,7 @@ document.addEventListener('htmx:configRequest', function (e) {
 });
 
 // ---- Delegated behaviours (no inline handlers: the Content-Security-Policy forbids them) ----
-// data-select-on-click: select the field's text.   data-autosubmit: submit the form when it changes.
+// data-select-on-click: select the field's text.
 // data-close-dialog: close the enclosing <dialog>.  data-reload: reload the page.
 // data-click-trigger="evt": fire the htmx trigger `evt` on click unless the click was on a link.
 // data-bool-param="name": send the checkbox state as parameter `name` with its htmx request.
@@ -74,10 +74,6 @@ document.addEventListener('click', function (e) {
   if (t.closest('[data-reload]')) location.reload();
   var ct = t.closest('[data-click-trigger]');
   if (ct && !t.closest('a') && window.htmx) htmx.trigger(ct, ct.getAttribute('data-click-trigger'));
-});
-document.addEventListener('change', function (e) {
-  var f = e.target && e.target.closest && e.target.closest('[data-autosubmit]');
-  if (f && f.form) f.form.requestSubmit();
 });
 document.addEventListener('htmx:configRequest', function (e) {
   var el = e.detail && e.detail.elt;

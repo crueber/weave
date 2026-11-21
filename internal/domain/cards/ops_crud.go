@@ -33,7 +33,6 @@ type GetIn struct {
 type CreateIn struct {
 	ListID      string   `path:"listId" desc:"list to create the card in (active or closed list)"`
 	Name        string   `json:"name" required:"true" desc:"card title"`
-	Type        string   `json:"type" desc:"project | story (default: board default card type)"`
 	Description string   `json:"description"`
 	DueDate     string   `json:"dueDate" desc:"RFC3339, YYYY-MM-DD or YYYY-MM-DDTHH:MM"`
 	Position    *float64 `json:"position" desc:"explicit position; default end of list"`
@@ -43,7 +42,6 @@ type UpdateIn struct {
 	ID             string  `path:"id"`
 	Name           *string `json:"name"`
 	Description    *string `json:"description" desc:"markdown-lite; empty string clears"`
-	Type           *string `json:"type" desc:"project | story"`
 	DueDate        *string `json:"dueDate" desc:"empty string clears"`
 	IsDueCompleted *bool   `json:"isDueCompleted"`
 }
@@ -115,7 +113,7 @@ func init() {
 		UI: "GET /ui/cards/{id}"}, cardGet)
 	ops.Register(ops.Op{Name: "card.create", Summary: "Create a card at the end (or given position) of a list", Method: "POST", Path: "/lists/{listId}/cards",
 		UI: "POST /ui/lists/{listId}/cards"}, cardCreate)
-	ops.Register(ops.Op{Name: "card.update", Summary: "Update card title, description, type, due date or completion", Method: "PATCH", Path: "/cards/{id}",
+	ops.Register(ops.Op{Name: "card.update", Summary: "Update card title, description, due date or completion", Method: "PATCH", Path: "/cards/{id}",
 		UI: "POST /ui/cards/{id}/update"}, cardUpdate)
 	ops.Register(ops.Op{Name: "card.delete", Summary: "Delete a card (must be in the trash list, or a draft/template)", Method: "DELETE", Path: "/cards/{id}",
 		UI: "POST /ui/cards/{id}/delete"}, cardDelete)
@@ -243,8 +241,6 @@ func cardList(e *ops.Env, in ListCardsIn) (ListOut, error) {
 	return out, nil
 }
 
-func validType(t string) bool { return t == "project" || t == "story" }
-
 func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -266,16 +262,6 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 	if ltype != "active" && ltype != "closed" {
 		return Card{}, ops.Invalid("cards can only be created in active or closed lists")
 	}
-	typ := in.Type
-	if typ == "" {
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT default_card_type FROM boards WHERE id=?`, boardID).Scan(&typ)
-		if !validType(typ) {
-			typ = "project"
-		}
-	}
-	if !validType(typ) {
-		return Card{}, ops.Invalid("type must be project or story")
-	}
 	var due any
 	if in.DueDate != "" {
 		d, err := normTime(in.DueDate)
@@ -292,8 +278,8 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 	now := db.Now()
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		pos := positionFor(e.Ctx, tx, in.ListID, "", "", "", in.Position)
-		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,type,position,name,description,due_date,is_closed,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, boardID, in.ListID, e.User.UserID, typ, pos, name, desc, due, ltype == "closed", now, now)
+		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_closed,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, boardID, in.ListID, e.User.UserID, pos, name, desc, due, ltype == "closed", now, now)
 		if err != nil {
 			return err
 		}
@@ -340,12 +326,6 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 			d = *in.Description
 		}
 		sets, args = append(sets, "description=?"), append(args, d)
-	}
-	if in.Type != nil {
-		if !validType(*in.Type) {
-			return Card{}, ops.Invalid("type must be project or story")
-		}
-		sets, args = append(sets, "type=?"), append(args, *in.Type)
 	}
 	if in.DueDate != nil {
 		if *in.DueDate == "" {

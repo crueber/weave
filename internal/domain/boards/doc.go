@@ -15,6 +15,9 @@
 //	SingleSelectConflicts(ctx, db, cardID, labelID) ([]string, error)
 //	                                              label ids to remove when adding labelID (single-select groups)
 //	CallByForm(env, opName, url.Values)           call another domain's op via its own input tags
+//	Stats(env, boardIDs) (map[string]BoardStats, error)
+//	                                              at-a-glance counts for many boards (authz-filtered, constant queries)
+//	ActivityLess(a, b BoardStats) bool            most recently active first, then position, then id
 //
 // Realtime events (room board:<id>): board.created|updated|deleted,
 // boardMembership.created|updated|deleted, label.created|updated|deleted,

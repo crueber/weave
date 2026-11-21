@@ -1,0 +1,10 @@
+Connect (do this first; never print or log the key)
+  The API key must already be in your environment as $WEAVE_TOKEN. Check only that it is set, never its value:
+    [ -n "$WEAVE_TOKEN" ] || echo "WEAVE_TOKEN is not set"
+  If it is not set, STOP and ask the user to set WEAVE_TOKEN themselves (export it in their shell or an env file).
+  Never ask them to paste the key into this chat, and never echo, log, commit or write it into a file you create.
+  {install}
+  weave config set url {server}
+  weave config set token "$WEAVE_TOKEN"
+  weave whoami && weave doctor
+  {install_skill}

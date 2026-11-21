@@ -45,8 +45,10 @@ a label shows as a pill or colors the whole card (the first label wins, colors n
 
 **Everything a serious Planka board has, and the Pro extras.** Projects, boards, lists and cards; labels and label groups; checklists;
 comments with mentions; attachments with thumbnails; custom fields (including repeating groups); time tracking; recurring cards;
-card templates and board templates; drafts and an inbox; calendar and map views; saved filters; public boards and share links;
+card templates and a built-in board template gallery; drafts and an inbox; calendar and map views; saved filters; public boards and share links;
 user groups; notifications (in-app, email, and chat services such as Slack, Discord, Telegram, Matrix and ntfy); webhooks; search; import from Trello, CSV or a Weave export; export to HTML.
+
+**Built for AI agents.** A **Connect an agent** dialog hands any coding agent a ready-to-paste prompt for Weave, a project, a board, a column or an unattended runner. Admins edit the default texts and the shared blocks in the console, and project and board managers can override their own prompt. See [docs/AGENTS.md](docs/AGENTS.md).
 
 **Yours to run.** A single container or binary with SQLite, no external services. Sign-in is OpenID Connect only, and your identity
 provider's groups decide who is an admin, a project owner, a member, a worker or a guest. Secure defaults out of the box:
@@ -180,7 +182,7 @@ built on the design tokens in `internal/web/static/weave.css` (see `docs/DESIGN-
 
 ## Status and known gaps
 Feature status lives in `docs/FEATURES.md`. Not yet complete or verified in a real browser:
-- Drag-and-drop, the card modal and calendar editing are tested via rendered HTML only.
+- Drag-and-drop, the card sheet and settings were checked in headless Chromium by script, not on touch devices or other browsers.
 - PDF export returns print-ready HTML unless `WEAVE_PDF_CMD` points at a PDF tool.
 - The map view is a coordinate plot with OpenStreetMap links, not tiled maps.
 - worker/guest roles are stored but behave like other non-admin roles.
@@ -286,6 +288,8 @@ Environment variables (secrets in env override values stored in the admin UI):
 | `WEAVE_SESSION_HOURS` | `24` | session lifetime; also editable as `session.hours` in Admin > Configuration (the env var pins it). When it ends the browser is sent back through the OIDC provider, so the IdP decides whether a fresh sign-in is needed |
 | `WEAVE_SESSION_MAX_IDLE_MINUTES` | `0` (none) | instance-wide upper bound on session idleness, also editable as `session.maxIdleMinutes` in Admin > Configuration. A session idle longer than this ends, even if the user's own auto-logout is longer or unset; the stricter of the two applies |
 | `WEAVE_TEMPLATES_HIDDEN` | empty | built-in board templates to hide from the New board gallery (ids like `builtin:sprint`, one per line, comma separated or a JSON array); also editable as `templates.hidden` in Admin > Configuration. Hidden templates cannot be created from either. Boards that people published as templates are not affected |
+| `WEAVE_AGENTPROMPT_GENERAL`, `_PROJECT`, `_BOARD`, `_RUNNER` | empty (built-in text) | default text of the **Connect an agent** prompts (plain text with `{tokens}`, max 20000 characters); normally edited in Admin console > Agent prompts as `agentprompt.general|project|board|runner` (the env var pins it). Projects and boards can override the project and board text in their settings. See [docs/AGENTS.md](docs/AGENTS.md) |
+| `WEAVE_AGENTBLOCK_<NAME>` (`INSTANCE`, `CONNECT`, `INSTALL`, `INSTALL_SKILL`, `KEYNOTE`, `CONCEPTS`, `QUESTIONNAIRE`, `ETIQUETTE`, `ETIQUETTE_COMPACT`, `SECURITY`, `READMORE`) | empty (built-in text) | text of a shared block the prompts insert (`{connect}`, `{security}`...; plain text with data tokens, max 20000 characters); normally edited in Admin console > Agent prompts > Blocks as `agentblock.<name>` (the env var pins it). Global: projects and boards cannot change blocks |
 | `WEAVE_HSTS` | on when `WEAVE_BASE_URL` is https | `off` stops sending `Strict-Transport-Security: max-age=15552000` (180 days, no `includeSubDomains`/`preload`). Never sent for an http base URL |
 | `WEAVE_HSTS_MAX_AGE` | `15552000` | HSTS `max-age` in seconds |
 | `WEAVE_SMTP_HOST/PORT/USER/PASSWORD/FROM` | - | outgoing email (also editable in Admin > Settings) |
@@ -300,6 +304,12 @@ Environment variables (secrets in env override values stored in the admin UI):
 | `WEAVE_USER_STORAGE_MB` | `5120` | upload quota per user (sum of the files they attached; links are free), `0` = unlimited. Admins are not exempt; raise it here |
 | `WEAVE_NOTIFY_BLOCK_PRIVATE` | `false` | also refuse notification-service destinations on private networks (RFC 1918, ULA, CGNAT). Loopback, link-local/cloud-metadata and unspecified addresses are always refused |
 | `WEAVE_NOTIFY_ALLOW_HOSTS` | - | comma-separated host names, IPs or CIDRs (`*.corp.example`, `10.9.0.0/16`) that notification services may always use, overriding every block |
+| `WEAVE_MCP_UPLOAD_ROOTS` | cwd + OS temp dir | **client side (`weave mcp`)**: OS path list of the directories MCP uploads may read and `saveTo` may write; replaces the defaults. The cwd is never a default root when it is `$HOME` or `/`. Credential/config paths (`.ssh`, `.git`, `.env*`, `*.pem`, Weave's config dir, ...) are refused even inside |
+| `WEAVE_MCP_MAX_UPLOAD_MB` | `256` | client side: largest file `weave mcp` uploads, also bounded by the op's own cap; `0` = the op's cap |
+| `WEAVE_MCP_MAX_BASE64_MB` | `2` | client side: largest `contentBase64` upload |
+| `WEAVE_MCP_MAX_DOWNLOAD_MB` | `1024` | client side: largest download `weave mcp` saves to disk, `0` = unlimited |
+| `WEAVE_MCP_INLINE_IMAGE_MB` | `1` | client side: PNG/JPEG/GIF/WebP attachments up to this size are also returned inline as images |
+| `WEAVE_MCP_MAX_RESULT` | `65536` | client side: bytes of JSON per MCP tool result before it is cut with a marker, `0` = off |
 
 Build-time: `VERSION` build arg / `make build VERSION=x` stamps `system.version` and the CLI version.
 
@@ -384,6 +394,19 @@ Aider, Cursor/Windsurf/Cline/Roo/Kiro rules files and `AGENTS.md`/`GEMINI.md`/Co
 cross-tool `~/.agents/skills`; it is written once. Paths, env overrides and sources: `docs/AGENT-TARGETS.md`. An edited install is never
 overwritten without `--force`.
 
+**MCP clients.** `weave mcp` is an MCP server over stdio built into the CLI: Claude Code, Claude Desktop, Cursor, VS Code,
+Gemini CLI and other MCP clients get about 30 typed `weave_*` tools for daily agent work, `weave_ops` to find any other op and
+`weave_call` to run it (destructive ops need `confirm: true`), the agent prompts as MCP prompts and `weave://board/{id}` /
+`weave://card/{id}` resources. It uses the `weave login` profile; the API key is never written into the client's config.
+```sh
+weave mcp --print-config claude-desktop               # pasteable snippet (claude, cursor, vscode, gemini, codex, kiro, cline, roo, amp, ...)
+weave skill install --target cursor,claude-desktop --mcp   # merge the server entry into those configs (only our "weave" key changes)
+claude mcp add --transport stdio --scope user weave -- "$(command -v weave)" mcp
+```
+Uploads read local files only inside the allowed roots (working directory and temp dir by default, `WEAVE_MCP_UPLOAD_ROOTS`) and
+never credential paths; downloads are saved to a file whose path is returned. MCP is pull only: unattended listening stays with
+`weave listen` / `weave agent run --outbox`. Details: `docs/CLI.md` (`weave mcp`) and `docs/AGENTS.md`.
+
 **Claim/lease semantics.** `weave card claim` takes a time-limited lease on a card (atomic: exit code 7 if someone else holds it);
 `renew` extends it, `release` or `done` ends it, and a crashed agent's lease simply expires. `weave next ... --claim` is the pull
 variant (exit 10 when the queue is empty). Details in `docs/AGENTS.md`.
@@ -460,6 +483,7 @@ weave listen --board B --list Ready [--exec CMD] [--once] [--include-existing]
 weave agent run --board B --listen Ready --done-list Review -- ./handle.sh
 weave ops [tag]   weave schema card.create   weave <tag> <verb> --help    # everything else comes from the server schema
 weave skill print|install|check|targets|uninstall      weave completion bash|zsh|fish|powershell
+weave mcp   weave mcp --print-config claude|cursor|vscode|...   weave skill install --target cursor --mcp   # MCP connector
 ```
 Names work wherever an id is expected (`--board "Launch plan" --list Backlog`, unambiguous prefixes too). Output is JSON on stdout
 (`--output json|ndjson|table|ids|quiet`, `--fields a,b.c`, `--jq '.item.id'`, `--all`, `--dry-run`, `--yes`); errors are JSON on stderr.
@@ -475,3 +499,9 @@ make skill        # regenerate skills/weave and the CLI schema snapshot after ch
 make e2e          # CLI end-to-end against a running server; needs WEAVE_URL and an admin WEAVE_TOKEN
 make ui-smoke     # screenshots the SSO page and / with the `obscura` headless browser
 ```
+
+## License
+
+[MIT](LICENSE) © Christopher Rueber
+
+> No politics allowed — see our [Code of Conduct](CODE_OF_CONDUCT.md).

@@ -1,0 +1,45 @@
+{{define "title"}}Agent prompts - Weave{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "agentprompts" "Crumb" .User.Name}}{{template "agentprompts-body" .}}{{template "admin_bottom"}}{{end}}
+
+{{/* The texts of the Connect an agent prompts, in two tabs (?tab=prompts|blocks, plain links so reload and links keep the
+   tab): the four editable prompts (config agentprompt.<scope>) and the shared blocks they insert (config agentblock.<name>),
+   all written by config.update. Each text is one expandable editor (agentprompts-item); a save redraws only that editor.
+   The column prompt is the column description and the work order is fixed, so neither is here. */}}
+{{define "agentprompts-body"}}{{with .Data}}<section id="adm-prompts" class="boards-sec adm-ap-page" aria-labelledby="adm-prompts-h">
+  <div class="bs-sec-head"><h2 id="adm-prompts-h">Agent prompts</h2></div>
+  <nav class="adm-tabs" aria-label="Agent prompt texts">
+    <a href="/admin/agent-prompts?tab=prompts"{{if eq .Tab "prompts"}} aria-current="page"{{end}}>Prompts{{if .Prompts}} <span class="adm-tab-n" title="customised">{{.Prompts}}</span>{{end}}</a>
+    <a href="/admin/agent-prompts?tab=blocks"{{if eq .Tab "blocks"}} aria-current="page"{{end}}>Blocks{{if .Blocks}} <span class="adm-tab-n" title="customised">{{.Blocks}}</span>{{end}}</a>
+  </nav>
+  {{if eq .Tab "blocks"}}<p class="bs-desc">Shared sections that the prompts insert with tokens such as <code>{connect}</code> or <code>{security}</code>. A change applies to every prompt that uses the block, the column prompt included. Projects and boards cannot change blocks.</p>
+  {{else}}<p class="bs-desc">The texts that Connect an agent and <code>weave agent prompt</code> hand to AI agents. Weave fills in each <code>{token}</code>: names, ids, the column briefs (always fenced as data) and the shared blocks from the Blocks tab.</p>{{end}}
+  <div class="adm-ap-list">{{range .Items}}{{template "agentprompts-item" .}}{{end}}</div>
+</section>{{end}}{{end}}
+
+{{define "agentprompts-item-frag"}}{{template "agentprompts-item" .Data}}{{end}}
+{{/* One editor: the summary is its header (title, what it is and where it is used, Customised); the body holds the text
+   (saves on change), the token legend (collapsed), Preview (sample data, unsaved text; a disabled env-pinned textarea is not
+   sent, so Preview then posts the key empty, which previews the effective text) and Reset to default. */}}
+{{define "agentprompts-item"}}<details class="adm-ap" id="{{.ID}}"{{if .Open}} open{{end}}>
+  <summary><span class="adm-ap-t"><b>{{.Title}}</b><small>{{.Desc}}</small></span>
+    <span class="adm-badges">{{if .Locked}}<span class="boards-badge is-warn">Environment</span>{{end}}{{if .Custom}}<span class="boards-badge bs-prompt-badge">Customised</span>{{end}}</span></summary>
+  <div class="adm-ap-body">
+    {{template "adm_error" .Err}}
+    <form class="bs-prompt-form" hx-post="/ui/admin/agent-prompts" hx-trigger="change" hx-target="#{{.ID}}" hx-swap="outerHTML">
+      <input type="hidden" name="_section" value="{{.Tab}}">
+      <label class="boards-sr" for="{{.ID}}-text">{{.Title}} text</label>
+      <textarea id="{{.ID}}-text" name="{{.Key}}" rows="{{if eq .Kind "block"}}8{{else}}14{{end}}" class="bs-mono bs-prompt-text adm-ap-text" spellcheck="false" maxlength="20000"{{if .Locked}} disabled{{end}}>{{.Text}}</textarea>
+    </form>
+    <p class="adm-ap-help">{{if .Note}}{{.Note}}{{else if .Custom}}Customised. Saves when you leave the field; Reset goes back to Weave's built-in text.{{else}}Weave's built-in text. Edit it to customise; saves when you leave the field.{{end}}{{template "adm_status" dict "Done" .Done}}</p>
+    <div class="bs-prompt-foot">
+      <details class="bs-tokens"><summary>Tokens</summary>
+        <dl>{{range .Tokens}}<div><dt><code>{{.Name}}</code></dt><dd>{{.Desc}}</dd></div>{{end}}</dl>
+        <p>{{if eq .Kind "block"}}Blocks take these data tokens only: another block's token stays as typed.{{else}}Column briefs are always fenced as data.{{end}} Anything else in braces is kept as typed; a line that is only a token which expands to nothing is dropped.</p></details>
+      <span class="bs-btns"><button type="button" hx-post="/ui/admin/agent-prompts/preview" hx-include="#{{.ID}}-text" hx-vals='{"_section":"{{.Tab}}"{{if .Locked}},"{{.Key}}":""{{end}}}' hx-target="#{{.ID}}-prev" hx-swap="innerHTML">Preview</button>{{if and .Custom (not .Locked)}}<button type="button" hx-post="/ui/admin/agent-prompts" hx-vals='{"{{.Key}}":"","_section":"{{.Tab}}"}' hx-target="#{{.ID}}" hx-swap="outerHTML" hx-confirm="Remove the custom text of {{.Title}} and go back to Weave's built-in text?">Reset to default</button>{{end}}</span>
+    </div>
+    <div id="{{.ID}}-prev" class="adm-ap-prev" aria-live="polite"></div>
+  </div>
+</details>{{end}}
+
+{{/* The Preview result: the text rendered with sample data (collapsible, no script). */}}
+{{define "agentprompts-preview"}}{{with .Data}}<details class="adm-ap-preview" open><summary>Preview <small>{{.Sample}}</small></summary><pre>{{.Text}}</pre></details>{{end}}{{end}}

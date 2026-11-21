@@ -31,7 +31,7 @@
   </header>
   <div class="boards-cards" role="list" aria-label="Cards in {{$name}}" data-list="{{$c.List.ID}}"{{if $p.CanEdit}} data-drop="card"{{end}}>
     {{range $c.Cards}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}
-    <p class="boards-empty-list" role="note">{{if and $c.Total (not $c.Cards)}}No cards match the filter.{{else if $c.AddCardURL}}This list is empty &mdash; add the first card.{{else}}No cards.{{end}}</p>
+    <p class="boards-empty-list" role="note">{{if and $c.Total (not $c.Cards)}}No cards match the filter.{{else if $c.AddCardURL}}This list is empty.{{else}}No cards.{{end}}</p>
   </div>
   {{if $c.AddCardURL}}<div class="boards-composer boards-addcard" data-composer="card" data-list="{{$c.List.ID}}">
     <button type="button" class="boards-add-open" data-open aria-label="Add a card to {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Add a card</button>
@@ -47,7 +47,7 @@
   {{if boardsTileFilled $t $p}}{{/* fill mode: the first label is the card colour (shown by the fill itself); only the other labels get neutral text chips */}}
   {{$rest := boardsChipLabels $t $p}}{{if $rest}}<div class="boards-tile-labels boards-lchips">{{range $rest}}<span class="boards-lchip" title="{{.Name}}">{{.Name}}</span>{{end}}</div>{{end}}
   {{else if $t.Labels}}<div class="boards-tile-labels">{{range $t.Labels}}<button type="button" class="boards-label" data-label-toggle style="background:{{boardsColor .Color}}" title="{{.Name}}" aria-label="Label {{.Name}}"><span class="boards-label-text">{{.Name}}</span></button>{{end}}</div>{{end}}
-  <div class="boards-tile-name">{{if boardsTileFilled $t $p}}{{with index $t.Labels 0}}{{if .Name}}<span class="boards-sr">Label {{.Name}}. </span>{{end}}{{end}}{{end}}{{if eq $t.Type "story"}}<span class="boards-badge">story</span> {{end}}{{if $p.ReadOnly}}<span class="boards-tile-link">{{$t.Name}}</span>{{else}}<a class="boards-tile-link" href="/cards/{{$t.ID}}" data-open-card="{{$t.ID}}">{{$t.Name}}</a>{{end}}</div>
+  <div class="boards-tile-name">{{if boardsTileFilled $t $p}}{{with index $t.Labels 0}}{{if .Name}}<span class="boards-sr">Label {{.Name}}. </span>{{end}}{{end}}{{end}}{{if $p.ReadOnly}}<span class="boards-tile-link">{{$t.Name}}</span>{{else}}<a class="boards-tile-link" href="/cards/{{$t.ID}}" data-open-card="{{$t.ID}}">{{$t.Name}}</a>{{end}}</div>
   {{if or $t.Due $t.TasksTotal $t.HasDescription $t.Comments $t.Attachments $t.Members $t.ClaimedBy (and $p.Board.ShowCardAges (gt $t.AgeDays 0))}}<div class="boards-tile-meta">
     {{if $t.Due}}<span class="boards-due boards-due-{{$t.DueState}}" title="Due {{$t.DueRaw}}{{if eq $t.DueState "overdue"}} (overdue){{end}}"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg> {{$t.Due}}</span>{{end}}
     {{if $t.HasDescription}}<span class="boards-meta" title="Has a description"><svg class="ico" aria-hidden="true"><use href="#i-desc"/></svg><span class="boards-sr">Has a description</span></span>{{end}}

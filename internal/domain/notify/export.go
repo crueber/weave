@@ -37,14 +37,14 @@ type exTaskList struct {
 type exComment struct{ User, Text, At string }
 type exField struct{ Group, Name, Value string }
 type exCard struct {
-	ID, Name, Description, Due, List, Type string
-	Closed, DueDone                        bool
-	Labels                                 []exLabel
-	Members                                []string
-	TaskLists                              []exTaskList
-	Comments                               []exComment
-	Attachments                            []string
-	Fields                                 []exField
+	ID, Name, Description, Due, List string
+	Closed, DueDone                  bool
+	Labels                           []exLabel
+	Members                          []string
+	TaskLists                        []exTaskList
+	Comments                         []exComment
+	Attachments                      []string
+	Fields                           []exField
 }
 type exList struct {
 	Name  string
@@ -87,7 +87,7 @@ func slug(s string) string {
 // loadCards loads cards (with labels, members, tasks, comments, attachments, custom fields) for a
 // condition on the cards table alias c, e.g. "c.board_id=?" / "c.id=?".
 func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,c.type,COALESCE(l.name,l.type),l.type
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(l.name,l.type),l.type
 	 FROM cards c JOIN lists l ON l.id=c.list_id WHERE c.is_draft=0 AND c.is_template=0 AND `+where+` ORDER BY l.position, c.position`, arg)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 	for rows.Next() {
 		c := &exCard{}
 		var ltype string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Due, &c.DueDone, &c.Closed, &c.Type, &c.List, &ltype); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Due, &c.DueDone, &c.Closed, &c.List, &ltype); err != nil {
 			rows.Close()
 			return nil, err
 		}

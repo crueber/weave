@@ -44,6 +44,7 @@ func Render(base []cli.Op) map[string][]byte {
 		"skills/weave/references/commands.md":        []byte(read("commands.md")),
 		"skills/weave/references/agent-workflows.md": []byte(read("agent-workflows.md")),
 		"skills/weave/references/events.md":          []byte(read("events.md")),
+		"skills/weave/references/mcp.md":             []byte(renderMCP(merged)),
 		"skills/weave/references/prompts.md":         []byte(agentprompt.Reference()),
 		"skills/weave/references/ops.md":             []byte(renderOps(merged)),
 		// Compact form for tools that only read instruction/rules files (AGENTS.md, GEMINI.md, .mdc ...).
@@ -86,6 +87,20 @@ func renderOps(ops []*cli.Op) string {
 		}
 	}
 	return sb.String()
+}
+
+// renderMCP fills the curated tool table of the `weave mcp` reference from the code.
+func renderMCP(ops []*cli.Op) string {
+	summary := map[string]string{}
+	for _, o := range ops {
+		summary[o.Name] = strings.TrimSpace(o.Summary)
+	}
+	var sb strings.Builder
+	sb.WriteString("| tool | op | what it does |\n|---|---|---|\n")
+	for _, t := range cli.MCPCuratedTools() {
+		fmt.Fprintf(&sb, "| `%s` | `%s` | %s |\n", t[0], t[1], strings.ReplaceAll(summary[t[1]], "|", "\\|"))
+	}
+	return strings.ReplaceAll(read("mcp.md"), "{{MCP_TOOLS}}", strings.TrimRight(sb.String(), "\n"))
 }
 
 // RegenHint is the message tests print when generated output is stale.

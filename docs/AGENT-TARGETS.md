@@ -3,7 +3,7 @@
 One row per coding-agent tool. The code is the registry in `internal/cli/skilltargets.go`; this file records where each path
 came from. Verified date for every row: **2026-11-10**. "Verified" means read on the tool's official docs or source that day;
 the ecosystem moves fast, so re-check before changing a path. Unverified targets are opt-in only (never automatic, never in
-`--target all`); there are currently none.
+`--target all`); there are currently no unverified skill targets (two MCP config locations are unverified, see below).
 
 `Detection` = config dir exists **or** binary on PATH. In project scope a tool is also detected by its project dir (`.cursor/`, ...).
 `~/.agents/skills` (project: `.agents/skills`) is the cross-tool location from the Agent Skills ecosystem; every tool marked
@@ -61,6 +61,33 @@ Used when a tool has no verified skills dir, or on explicit request (OptIn = nev
 | `aider` | instructions block (`CONVENTIONS.md`) | none | `CONVENTIONS.md` | OptIn; Aider does not load it by itself, add `read: CONVENTIONS.md` to `.aider.conf.yml` or use `aider --read CONVENTIONS.md` | https://aider.chat/docs/usage/conventions.html |
 | `agents-md` | instructions block (legacy name) | `./AGENTS.md` in the current directory | `AGENTS.md` at the project root | OptIn | https://agents.md |
 | `dir` | skill folder | `--dir PATH` (the skill goes straight into PATH) | - | OptIn | - |
+
+## MCP server config (`weave mcp --print-config`, `weave skill install --mcp`)
+
+Optional `MCP` spec per target (`mcpSpec` in `internal/cli/mcp_install.go`, data in `skilltargets.go`). The entry is always
+`{"command": "<abs path of weave>", "args": ["mcp"]}`, plus `"type": "stdio"` where the tool wants it and `env.WEAVE_PROFILE` for a
+non-default profile; **never a token**. JSON files are merged (only the `weave` key under the listed top-level key changes; a different
+`weave` entry needs `--force`; JSON with comments is left alone and the snippet is printed instead). Verified **2026-11-21** by reading
+the official pages below (through a summarising fetch tool); unverified locations need an explicit `--target` and are never automatic.
+
+| Tool (target id) | User config (key) | Project config (key) | Type field | Verified | Source |
+|---|---|---|---|---|---|
+| Claude Code (`claude`) | not written: `claude mcp add --transport stdio --scope user weave -- <weave> mcp` (user scope lives in `~/.claude.json`, which Claude Code rewrites itself) | `.mcp.json` (`mcpServers`) | `stdio` | yes | https://code.claude.com/docs/en/mcp |
+| Claude Desktop (`claude-desktop`, MCP only, opt-in) | macOS `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows `%APPDATA%\Claude\claude_desktop_config.json`, Linux `~/.config/Claude/claude_desktop_config.json` (`mcpServers`) | none | omitted | yes | https://modelcontextprotocol.io/docs/develop/connect-local-servers |
+| Cursor (`cursor`) | `~/.cursor/mcp.json` (`mcpServers`) | `.cursor/mcp.json` (`mcpServers`) | `stdio` (listed as required in the field table) | yes | https://cursor.com/docs/context/mcp |
+| VS Code / GitHub Copilot (`copilot`, alias `vscode`) | `$COPILOT_HOME/mcp-config.json`, default `~/.copilot/mcp-config.json` (`mcpServers`, shared with Copilot CLI) | `.vscode/mcp.json` (`servers`) | `stdio` (required in `servers` files) | yes; the editor's user-profile `mcp.json` has no documented per-OS path and is not targeted (use `code --add-mcp`) | https://code.visualstudio.com/docs/agents/reference/mcp-configuration |
+| Gemini CLI (`gemini`) | `~/.gemini/settings.json` (`mcpServers`; `GEMINI_CLI_HOME`) | `.gemini/settings.json` | omitted | yes | https://geminicli.com/docs/tools/mcp-server/ |
+| OpenAI Codex CLI (`codex`) | `$CODEX_HOME/config.toml`, default `~/.codex/config.toml`: TOML `[mcp_servers.weave]`, printed only (`codex mcp add weave -- <weave> mcp`) | `.codex/config.toml` (trusted projects), printed only | n/a | yes | https://learn.chatgpt.com/docs/extend/mcp?surface=cli , https://learn.chatgpt.com/docs/config-file/config-reference |
+| Kiro (`kiro`) | `~/.kiro/settings/mcp.json` (`mcpServers`) | `.kiro/settings/mcp.json` | omitted | yes | https://kiro.dev/docs/mcp/configuration/ |
+| Cline (`cline`) | `$CLINE_MCP_SETTINGS_PATH`, default `~/.cline/data/settings/cline_mcp_settings.json` (Cline CLI; the VS Code extension's file is opened from its UI) (`mcpServers`) | none | omitted | yes | https://docs.cline.bot/mcp/configuring-mcp-servers |
+| Roo Code (`roo`) | none (global file lives in VS Code storage, no documented path) | `.roo/mcp.json` (`mcpServers`) | omitted | yes | https://roocodeinc.github.io/Roo-Code/features/mcp/using-mcp-in-roo |
+| Amp (`amp`) | `$XDG_CONFIG_HOME/amp/settings.json`, default `~/.config/amp/settings.json` (`amp.mcpServers`) | `.amp/settings.json` (needs `amp mcp approve weave`) | omitted | yes | https://ampcode.com/docs/customize/mcp |
+| Windsurf / Devin Desktop (`windsurf`) | `~/.config/devin/mcp_config.json` (Windows `%APPDATA%\devin\mcp_config.json`) (`mcpServers`) | `.devin/mcp_config.json` | omitted | **no**: the English docs list the new `devin` paths, localized pages and older installs use `~/.codeium/windsurf/mcp_config.json` | https://docs.devin.ai/desktop/cascade/mcp |
+| Zed (`zed`) | `~/.config/zed/settings.json` (`context_servers`) | none | omitted | **no**: only the Linux path was confirmed and `settings.json` usually has comments (then the snippet is printed) | https://zed.dev/docs/ai/mcp |
+
+Not targeted (different shapes, print by hand from `weave mcp --print-config claude`): OpenCode (`mcp.servers`, `type: local`, command array,
+https://opencode.ai/docs/mcp-servers/), Goose (YAML `extensions:`), Continue (YAML `mcpServers` list or a copied JSON file in
+`.continue/mcpServers/`).
 
 ## How pi and omp were interpreted
 

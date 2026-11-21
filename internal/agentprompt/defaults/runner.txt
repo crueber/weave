@@ -1,9 +1,9 @@
-{{define "runner"}}You are an AI agent setting up an UNATTENDED Weave runner: a small service that picks up cards and hands each one to a coding agent, headless.
-{{if .HasBoard}}Board: {{q .Board.Name}} (board id {{.Board.ID}}){{end}}
+You are an AI agent setting up an UNATTENDED Weave runner: a small service that picks up cards and hands each one to a coding agent, headless.
+{board_line}
 
-{{template "instance" .}}
-{{template "connect" .}}
-{{template "keynote" .}}
+{instance}
+{connect}
+{keynote}
 How it works
   Weave ships the daemon: `weave agent run` listens, claims cards, renews the lease, runs your command once per card and
   reports back. You write ONLY a small wrapper script and a service unit around it. Do NOT write your own event-stream
@@ -22,9 +22,9 @@ How it works
   anything else = failed.
 
 Step 1: interview the user (once) and confirm a PLAN
-{{template "questionnaire" .}}
+{questionnaire}
 For the runner the "run:" line is the `weave agent run` command, for example:
-  weave agent run --board {{if .HasBoard}}{{q .Board.Name}}{{else}}"<board>"{{end}} --listen "<column>" --claim-move-to "<on-claim column>" \
+  weave agent run --board {board_name} --listen "<column>" --claim-move-to "<on-claim column>" \
     --done-list "<done column>" --blocked-list "<needs-info column>" --fail-list "<needs-info column>" \
     --ttl 15m --concurrency 1 --exec-timeout 25m --max-attempts 2 --respect-wip --include-existing \
     --outbox --agent-label "<name>" -- ./weave-handle.sh
@@ -97,6 +97,6 @@ Step 4: verify and get approval
   - Create a test card in the listened column and run once: `weave agent run <the flags> --once --timeout 2m -- ./weave-handle.sh`
   - Show the user the wrapper, the unit and the command and get explicit approval. NEVER start or enable the service unasked.
 
-{{template "etiquette" .}}
-{{template "security" .}}
-{{template "readmore" .}}{{end}}
+{etiquette}
+{security}
+{readmore}

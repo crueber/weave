@@ -73,7 +73,6 @@
     "id": "c1",
     "listId": "l1",
     "name": "Release 1.0",
-    "type": "project",
     "position": 65536,
     "description": "Due a week from now: adjust the date when you know the real one.",
     "taskLists": [
@@ -109,7 +108,6 @@
     "id": "c2",
     "listId": "l2",
     "name": "Smoke test the release candidate",
-    "type": "project",
     "position": 131072,
     "description": "Run the critical paths on a production-like environment.",
     "labelIds": [
@@ -121,7 +119,6 @@
     "id": "c3",
     "listId": "l4",
     "name": "Announce and monitor",
-    "type": "project",
     "position": 196608,
     "description": "Post the notes, update the docs and watch errors for the first day.",
     "labelIds": [

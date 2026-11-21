@@ -354,7 +354,7 @@ func renderDesc(c *web.Ctx, id, mode string, locker *EditHolder) error {
 	return c.RenderBlock("cards_modal.html", "cards_desc", d)
 }
 
-// uiUpdate handles the title, description and type forms of the modal.
+// uiUpdate handles the title and description forms of the modal.
 func uiUpdate(c *web.Ctx) error {
 	_ = c.R.ParseForm()
 	id, part := c.R.PathValue("id"), c.R.Form.Get("_part")

@@ -1,0 +1,4 @@
+Read more
+  weave skill print            the full Weave skill (this CLI, the work protocol, the event envelope)
+  weave <noun> <verb> --help   flags of any command
+  weave ops                    every operation the server offers

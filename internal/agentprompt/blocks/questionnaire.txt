@@ -1,0 +1,25 @@
+BEFORE you listen, claim or move anything: ask the user what to attach to.
+Ask these three grouped questions in ONE message and offer the defaults shown; "defaults" is a valid answer.
+  (a) Mode and work
+      - Mode: live in this session (default) or an unattended runner (then see the runner prompt: `weave agent prompt --runner`).
+      - Which column(s) to pick up cards from (default: the first one that sounds like "ready"/"todo"/"backlog").
+      - What to do with a card there (default: what the column brief says).
+  (b) Destinations, claiming and filters
+      - On-claim column (optional, default none), done column (default: the next column to the right),
+        blocked / needs-human column (default: a column named like "needs info", else none: comment + release only).
+      - Claim policy: claim yes, lease TTL 15m, concurrency 1.
+      - Filters: only cards with certain labels or members (default none); include cards already waiting in the
+        column when you start (default yes).
+  (c) Authority and limits
+      - Authority (default: edit code, open PRs, post comments; forbidden: deleting or archiving cards, editing
+        card text, changing configuration).
+      - Limits: respect WIP limits (default yes); give up on a card after 2 failures (default 2).
+Then echo a PLAN block in exactly this shape and WAIT for an explicit "go":
+  PLAN board "<name>" (<id>) identity <whoami name and role>
+  listen <columns> backlog <y/n> claim <y/n> ttl <duration> concurrency <n> on-claim -> <column|none>
+  done -> <column> blocked -> <column> skip -> release filters <labels/members|none> authority <summary>
+  WIP <respect|ignore> max-attempts <n>
+  run: <the exact `weave listen` or `weave agent run` command with shell-quoted names>
+Do NOT run `weave listen` or `weave agent run` until the user has replied to the PLAN.
+Refuse a plan whose done, blocked or on-claim column is also a listened column (it would loop) unless the user insists.
+The gate applies to live sessions only: unattended runners and work orders are headless and ask nothing.

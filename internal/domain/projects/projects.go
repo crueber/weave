@@ -7,8 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/realtime"
 )
@@ -69,6 +71,7 @@ type Project struct {
 	ManagerUserIDs     []string `json:"managerUserIds"`
 	BoardCount         int      `json:"boardCount"`
 	CanManage          bool     `json:"canManage"`
+	AgentPrompt        string   `json:"agentPrompt,omitempty" desc:"this project's own text for the project agent prompt (plain text with {tokens}); absent = the admin default or the built-in text"`
 	CreatedAt          string   `json:"createdAt"`
 	UpdatedAt          string   `json:"updatedAt"`
 }
@@ -138,13 +141,13 @@ const projCols = `p.id,p.name,COALESCE(p.description,''),p.is_hidden,p.use_proje
  COALESCE(p.background_color,''),COALESCE(p.background_gradient,''),COALESCE(p.background_image_id,''),COALESCE(p.owner_manager_id,''),
  EXISTS(SELECT 1 FROM project_favorites f WHERE f.project_id=p.id AND f.user_id=?),
  COALESCE((SELECT group_concat(user_id) FROM project_managers m WHERE m.project_id=p.id),''),
- (SELECT COUNT(*) FROM boards b WHERE b.project_id=p.id AND b.is_template=0),p.created_at,COALESCE(p.updated_at,'')`
+ (SELECT COUNT(*) FROM boards b WHERE b.project_id=p.id AND b.is_template=0),COALESCE(p.agent_prompt,''),p.created_at,COALESCE(p.updated_at,'')`
 
 func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var mgrs string
 	err := sc.Scan(&p.ID, &p.Name, &p.Description, &p.IsHidden, &p.UseProjectLabels, &p.BackgroundType, &p.BackgroundColor,
-		&p.BackgroundGradient, &p.BackgroundImageID, &p.OwnerManagerID, &p.IsFavorite, &mgrs, &p.BoardCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.BackgroundGradient, &p.BackgroundImageID, &p.OwnerManagerID, &p.IsFavorite, &mgrs, &p.BoardCount, &p.AgentPrompt, &p.CreatedAt, &p.UpdatedAt)
 	p.ManagerUserIDs = []string{}
 	if mgrs != "" {
 		p.ManagerUserIDs = strings.Split(mgrs, ",")
@@ -269,6 +272,7 @@ type UpdateIn struct {
 	BackgroundColor    *string `json:"backgroundColor" desc:"Hex colour like #1d6fa5 (type color)"`
 	BackgroundGradient *string `json:"backgroundGradient" desc:"Named gradient (type gradient), e.g. ocean-dive"`
 	BackgroundImageID  *string `json:"backgroundImageId" desc:"Uploaded background image id (type image)"`
+	AgentPrompt        *string `json:"agentPrompt" desc:"This project's text for the project agent prompt, plain text with {tokens} such as {project_name} {boards} {connect} {questionnaire} (max 20000 characters); empty string, or text equal to the default, goes back to the admin default"`
 }
 
 type DeleteOut struct {
@@ -318,7 +322,7 @@ func init() {
 		return p, nil
 	})
 
-	ops.Register(ops.Op{Name: "project.update", Summary: "Update a project (name, description, hidden, labels toggle, background)", Method: "PATCH", Path: "/projects/{id}",
+	ops.Register(ops.Op{Name: "project.update", Summary: "Update a project (name, description, hidden, labels toggle, background, agent prompt text)", Method: "PATCH", Path: "/projects/{id}",
 		UI: "POST /ui/projects/{id}"}, updateProject)
 
 	ops.Register(ops.Op{Name: "project.delete", Summary: "Delete a project and everything in it", Method: "DELETE", Path: "/projects/{id}",
@@ -417,6 +421,14 @@ func updateProject(e *ops.Env, in UpdateIn) (Project, error) {
 		}
 		cur.BackgroundImageID = *in.BackgroundImageID
 	}
+	if in.AgentPrompt != nil {
+		def, _ := notify.AgentPromptDefault(e, agentprompt.ScopeProject)
+		txt, err := agentprompt.Normalize(*in.AgentPrompt, def)
+		if err != nil {
+			return cur, ops.Invalid("agentPrompt: " + err.Error())
+		}
+		cur.AgentPrompt = txt
+	}
 	if in.BackgroundType != nil {
 		switch *in.BackgroundType {
 		case "", "color", "gradient", "image":
@@ -440,8 +452,8 @@ func updateProject(e *ops.Env, in UpdateIn) (Project, error) {
 		}
 	}
 	_, err = e.DB.ExecContext(e.Ctx, `UPDATE projects SET name=?,description=?,is_hidden=?,use_project_labels=?,background_type=?,background_color=?,
-		background_gradient=?,background_image_id=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
-		nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), db.Now(), in.ID)
+		background_gradient=?,background_image_id=?,agent_prompt=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
+		nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), nullStr(cur.AgentPrompt), db.Now(), in.ID)
 	if err != nil {
 		return cur, err
 	}

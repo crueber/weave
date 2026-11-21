@@ -11,6 +11,8 @@
 //	notify.SMTPConfigured(e) bool
 //	notify.Config(e, key) string / ConfigBool / ConfigAll(e, "oidc.") / ConfigDB(ctx, db, key)
 //	notify.Public(e) PublicConfig   branding + login-page flags (op config.public)
+//	notify.AgentPromptDefault(e, scope) (text, admin)   admin default of an editable agent prompt (config agentprompt.<scope>) or the built-in text
+//	notify.AgentBlocks(e) map[string]string           admin texts of the customised shared agent prompt blocks (config agentblock.<name>)
 //	notify.ReadCardNotifications(e, cardID) (int, error)   for card "read-notifications"
 //	notify.MentionIDs(text) / MentionsToText(text)          "@[Name](userId)" markup helpers
 //	notify.Search / IndexCard / Reindex                      global FTS5 search

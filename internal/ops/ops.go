@@ -247,11 +247,15 @@ type Schema struct {
 	Auth    string  `json:"auth"`
 	UI      string  `json:"ui"`
 	Fields  []Field `json:"fields"`
+	// Binary marks a file-stream response (downloads); clients save it instead of parsing JSON.
+	Binary bool `json:"binary,omitempty"`
+	// MaxBytes is the request body cap of upload/import ops (Op.MaxBody); absent = the 2 MiB default.
+	MaxBytes int64 `json:"maxBytes,omitempty"`
 }
 
 func (o *Op) Schema() Schema {
 	s := Schema{Name: o.Name, Tag: o.Tag, Summary: o.Summary, Method: o.Method, Path: o.Path, UI: o.UI,
-		Auth: [...]string{"user", "public", "admin"}[o.Auth]}
+		Auth: [...]string{"user", "public", "admin"}[o.Auth], Binary: o.Binary, MaxBytes: o.MaxBody}
 	for i := 0; i < o.In.NumField(); i++ {
 		f := o.In.Field(i)
 		if !f.IsExported() {

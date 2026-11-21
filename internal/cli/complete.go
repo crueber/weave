@@ -52,7 +52,7 @@ func cmdCompletion(a *App, args []string) int {
 
 // builtinCommands lists the non-schema commands completed at position 1.
 var builtinCommands = []string{"help", "version", "ops", "schema", "config", "login", "logout", "whoami", "doctor",
-	"completion", "verify-release", "skill", "listen", "watch", "next", "inbox", "agent", "serve", "healthcheck"}
+	"completion", "verify-release", "skill", "mcp", "listen", "watch", "next", "inbox", "agent", "serve", "healthcheck"}
 
 // cmdComplete prints completion candidates for the words typed so far (hidden command used by
 // the generated shell scripts, so completion always reflects the server's current schema).
@@ -84,9 +84,12 @@ func cmdComplete(a *App, words []string) int {
 			}
 		}
 		if len(positional) >= 2 {
-			if o := cat.Lookup(positional[0], positional[1]); o != nil {
+			if o := cat.LookupVerb(positional[0], positional[1]); o != nil {
 				for _, f := range o.Fields {
 					add(f.Name)
+					for _, al := range fieldAliases[f.Name] {
+						add(al)
+					}
 				}
 			}
 		}
@@ -103,6 +106,11 @@ func cmdComplete(a *App, words []string) int {
 		for _, o := range cat.Tag(positional[0]) {
 			out = append(out, o.Verb())
 		}
+		for al, v := range verbAliases {
+			if cat.Lookup(positional[0], v) != nil {
+				out = append(out, al)
+			}
+		}
 		for k := range shortcuts {
 			if t, v, ok := strings.Cut(k, " "); ok && t == positional[0] {
 				out = append(out, v)
@@ -112,7 +120,7 @@ func cmdComplete(a *App, words []string) int {
 		case "completion":
 			out = append(out, "bash", "zsh", "fish", "powershell")
 		case "skill":
-			out = append(out, "print", "install", "check")
+			out = append(out, "print", "install", "check", "targets", "uninstall")
 		case "config":
 			out = append(out, "list", "use", "set", "get", "remove", "path")
 		case "agent":

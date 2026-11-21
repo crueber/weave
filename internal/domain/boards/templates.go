@@ -220,7 +220,6 @@ type TemplatePreviewLabel struct {
 type TemplatePreviewCard struct {
 	Name          string   `json:"name"`
 	Column        string   `json:"column"`
-	Type          string   `json:"type,omitempty"`
 	Labels        []string `json:"labels,omitempty"`
 	Tasks         int      `json:"tasks,omitempty"`
 	DueOffsetDays *int     `json:"dueOffsetDays,omitempty"`
@@ -544,7 +543,7 @@ func templateGet(e *ops.Env, in TemplateGetIn) (TemplatePreview, error) {
 		listName[l.Key] = l.Name
 	}
 	for _, c := range t.ib.Cards {
-		pc := TemplatePreviewCard{Name: c.Name, Column: listName[c.ListKey], Type: c.Type, DueOffsetDays: c.DueOffsetDays}
+		pc := TemplatePreviewCard{Name: c.Name, Column: listName[c.ListKey], DueOffsetDays: c.DueOffsetDays}
 		for _, k := range c.LabelKeys {
 			if n := labelName[k]; n != "" {
 				pc.Labels = append(pc.Labels, n)

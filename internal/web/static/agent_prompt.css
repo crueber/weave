@@ -32,3 +32,5 @@ dialog#modal:has(.ap)[open]{display:flex;flex-direction:column;animation:cards-s
   .ap-hint{display:none}
   .ap-copy{flex:1 1 auto}
 }
+.ap-custom{margin:0;font-size:var(--text-sm);color:var(--fg-2)}
+.ap-badge{display:inline-block;margin-right:var(--space-1);padding:0 .35rem;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--fg);font-size:var(--text-xs);font-weight:600}

@@ -3,8 +3,39 @@ package cardextras
 import (
 	"strings"
 
+	"github.com/crueber/weave/internal/events"
 	"github.com/crueber/weave/internal/ops"
 )
+
+func init() { events.TaskCounts = taskCounts }
+
+// taskCounts is events.TaskCounts: {total, completed} tasks per card in one aggregate query, so card
+// snapshots (board.tree, card.list, card.next, event payloads) show checklist progress without N+1 reads.
+func taskCounts(e *ops.Env, cardIDs []string) map[string][2]int {
+	out := map[string][2]int{}
+	if len(cardIDs) == 0 {
+		return out
+	}
+	args := make([]any, len(cardIDs))
+	for i, id := range cardIDs {
+		args[i] = id
+	}
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT tl.card_id,COUNT(t.id),COALESCE(SUM(t.is_completed),0)
+		FROM task_lists tl JOIN tasks t ON t.task_list_id=tl.id
+		WHERE tl.card_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(cardIDs)), ",")+`) GROUP BY tl.card_id`, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n [2]int
+		if rows.Scan(&id, &n[0], &n[1]) == nil {
+			out[id] = n
+		}
+	}
+	return out
+}
 
 // FrontTaskList is a task list flagged show_on_front_of_card.
 type FrontTaskList struct {

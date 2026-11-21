@@ -20,7 +20,6 @@ type Card struct {
 	CreatorUserID     *string  `json:"creatorUserId"`
 	PrevListID        *string  `json:"prevListId"`
 	CoverAttachmentID *string  `json:"coverAttachmentId"`
-	Type              string   `json:"type"`
 	Position          *float64 `json:"position"`
 	Name              string   `json:"name"`
 	Description       *string  `json:"description"`
@@ -59,7 +58,7 @@ func cardGetCard(e *ops.Env, id string) (Card, error) {
 	return ops.Typed[Card](e, "card.get", GetIn{ID: id})
 }
 
-const cardCols = `id,board_id,list_id,creator_user_id,prev_list_id,cover_attachment_id,type,position,name,description,due_date,is_due_completed,
+const cardCols = `id,board_id,list_id,creator_user_id,prev_list_id,cover_attachment_id,position,name,description,due_date,is_due_completed,
 comments_total,is_closed,is_draft,is_template,lat,lng,location_name,recurrence,share_token,list_changed_at,created_at,updated_at,template_project_id,claimed_by,claimed_until,claim_note`
 
 type querier interface {
@@ -74,7 +73,7 @@ func LoadCard(e *ops.Env, id string) (Card, error) { return loadCard(e, e.DB, id
 func loadCard(e *ops.Env, q querier, id string) (Card, error) {
 	var c Card
 	err := q.QueryRowContext(e.Ctx, `SELECT `+cardCols+` FROM cards WHERE id=?`, id).Scan(&c.ID, &c.BoardID, &c.ListID, &c.CreatorUserID,
-		&c.PrevListID, &c.CoverAttachmentID, &c.Type, &c.Position, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.CommentsTotal,
+		&c.PrevListID, &c.CoverAttachmentID, &c.Position, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.CommentsTotal,
 		&c.IsClosed, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.TemplateProjectID, &c.ClaimedBy, &c.ClaimedUntil, &c.ClaimNote)
 	if err == sql.ErrNoRows {
