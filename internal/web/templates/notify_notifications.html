@@ -6,6 +6,7 @@
 <li class="notify-item{{if not .IsRead}} unread{{end}}" id="notif-{{.ID}}">
   <div class="notify-body">
     <div class="notify-summary">{{.Summary}}</div>
+    {{if .Reason}}<div class="notify-reason">{{.Reason}}</div>{{end}}
     <div class="notify-meta">{{if .CardID}}<a href="/cards/{{.CardID}}">{{.CardName}}</a>{{end}}{{if .BoardName}} &middot; <a href="/boards/{{.BoardID}}">{{.BoardName}}</a>{{end}} &middot; {{notifyTime .CreatedAt}}</div>
   </div>
   {{if not .IsRead}}<button class="notify-btn" hx-post="/ui/notifications/{{.ID}}/read" hx-target="#notify-list" hx-swap="outerHTML" title="Mark as read">Mark read</button>{{end}}

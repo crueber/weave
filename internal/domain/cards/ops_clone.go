@@ -5,6 +5,7 @@ import (
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/boards"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -55,6 +56,9 @@ func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, error) {
 		if members[u] {
 			_, _ = tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_memberships(card_id,user_id) VALUES(?,?)`, id, u)
 		}
+	}
+	if e.User != nil && !o.IsTemplate { // duplicating or starting from a template creates a card: "Watch cards I create"
+		autoWatch(e.Ctx, tx, id, e.User.UserID, "subscribe_own_cards")
 	}
 	if !o.SkipExtras {
 		for _, h := range DuplicateHooks {
@@ -248,6 +252,7 @@ type PublishIn struct {
 }
 
 func init() {
+	boards.LoadDrafts = loadDrafts
 	ops.Register(ops.Op{Name: "card.inbox.set", Summary: "Enable or disable the board inbox (drafts)", Method: "PUT", Path: "/boards/{boardId}/inbox",
 		UI: "POST /ui/boards/{boardId}/inbox/settings"}, func(e *ops.Env, in InboxSetIn) (InboxOut, error) {
 		if err := authz.RequireBoard(e, in.BoardID, authz.Manage); err != nil {
@@ -264,6 +269,28 @@ func init() {
 		UI: "POST /ui/boards/{boardId}/inbox"}, draftCreate)
 	ops.Register(ops.Op{Name: "card.draft.publish", Summary: "Publish an inbox draft into a list", Method: "POST", Path: "/cards/{id}/publish",
 		UI: "POST /ui/cards/{id}/publish"}, draftPublish)
+}
+
+// loadDrafts is boards.LoadDrafts: a board's drafts for the Inbox panel in one query (no authz; the board page
+// has authorized the board).
+func loadDrafts(e *ops.Env, boardID string) ([]boards.Draft, error) {
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(u.id,''),COALESCE(u.name,''),COALESCE(u.is_agent,0),
+		COALESCE(c.description,'')<>'',c.created_at
+		FROM cards c LEFT JOIN users u ON u.id=c.creator_user_id
+		WHERE c.board_id=? AND c.is_draft=1 AND c.is_template=0 ORDER BY c.created_at, c.id`, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []boards.Draft{}
+	for rows.Next() {
+		var d boards.Draft
+		if err := rows.Scan(&d.ID, &d.Name, &d.CreatorID, &d.CreatorName, &d.CreatorIsAgent, &d.HasDescription, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 func inboxList(e *ops.Env, in InboxIn) (InboxOut, error) {
@@ -310,6 +337,9 @@ func draftCreate(e *ops.Env, in DraftCreateIn) (Card, error) {
 	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,is_draft,list_changed_at,created_at)
 			VALUES(?,?,?,?,?,?,?,1,?,?)`, id, in.BoardID, list, e.User.UserID, endPos(e.Ctx, tx, list), name, desc, now, now)
+		if err == nil {
+			autoWatch(e.Ctx, tx, id, e.User.UserID, "subscribe_own_cards")
+		}
 		return err
 	})
 	if err != nil {

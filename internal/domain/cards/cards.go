@@ -95,9 +95,10 @@ func loadCard(e *ops.Env, q querier, id string) (Card, error) {
 	c.LabelIDs = strs(e, q, `SELECT label_id FROM card_labels WHERE card_id=?`, id)
 	c.MemberIDs = strs(e, q, `SELECT user_id FROM card_memberships WHERE card_id=?`, id)
 	if e.User != nil {
-		var n int
-		_ = q.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM card_subscriptions WHERE card_id=? AND user_id=?`, id, e.User.UserID).Scan(&n)
-		c.IsSubscribed = n > 0
+		var muted bool // a muted row is "not watching" (see muteCard)
+		if q.QueryRowContext(e.Ctx, `SELECT muted FROM card_subscriptions WHERE card_id=? AND user_id=?`, id, e.User.UserID).Scan(&muted) == nil {
+			c.IsSubscribed = !muted
+		}
 	}
 	return c, nil
 }
@@ -129,6 +130,11 @@ func emitKind(e *ops.Env, kind, typ, name, boardID, cardID string, data map[stri
 		data = map[string]any{}
 	}
 	data["id"], data["cardId"], data["boardId"] = cardID, cardID, boardID
+	if c, ok := data["card"].(Card); ok {
+		// isSubscribed is the acting user's own watch state: never ship it to the board room, the activity log or webhooks
+		c.IsSubscribed = false
+		data["card"] = c
+	}
 	if ops.EmitHook != nil {
 		ops.Emit(e, ops.Event{Type: typ, Kind: kind, BoardID: boardID, CardID: cardID, Name: name, Data: data})
 		return
@@ -294,11 +300,39 @@ func labelAllowed(ctx context.Context, q querier, boardID, labelID string) bool 
 	return n > 0
 }
 
-func subscribe(ctx context.Context, q querier, cardID, userID string, permanent bool) {
-	p := 0
-	if permanent {
-		p = 1
+// Watching a card (card_subscriptions), one row per (card, user):
+//   - watchCard (card.subscribe, an explicit choice): is_permanent=1, muted=0; it also clears a mute.
+//   - muteCard (card.unsubscribe): muted=1, is_permanent=0, keeping or creating the row. A muted card never notifies
+//     its user, not even through a watched column or board, and auto-watch never re-adds it.
+//   - autoWatch (creating a card, commenting, being added as a member): inserts is_permanent=0 only when there is no
+//     row at all, so it never overrides a mute or an explicit choice. Agents (users.is_agent) never auto-watch.
+//
+// is_permanent therefore means "watched explicitly"; it is reported by subscription.list and changes no delivery rule.
+func watchCard(ctx context.Context, q querier, cardID, userID string) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO card_subscriptions(card_id,user_id,is_permanent,muted) VALUES(?,?,1,0)
+		ON CONFLICT(card_id,user_id) DO UPDATE SET is_permanent=1, muted=0`, cardID, userID)
+	return err
+}
+
+func muteCard(ctx context.Context, q querier, cardID, userID string) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO card_subscriptions(card_id,user_id,is_permanent,muted) VALUES(?,?,0,1)
+		ON CONFLICT(card_id,user_id) DO UPDATE SET is_permanent=0, muted=1`, cardID, userID)
+	return err
+}
+
+// autoWatch adds an implicit watch; pref names the users column that must be on ("" = no preference check).
+func autoWatch(ctx context.Context, q querier, cardID, userID, pref string) {
+	cond := ""
+	switch pref {
+	case "subscribe_own_cards", "subscribe_to_card_when_commenting":
+		cond = " AND " + pref + "=1"
 	}
-	_, _ = q.ExecContext(ctx, `INSERT INTO card_subscriptions(card_id,user_id,is_permanent) VALUES(?,?,?)
-		ON CONFLICT(card_id,user_id) DO UPDATE SET is_permanent=MAX(is_permanent,excluded.is_permanent)`, cardID, userID, p)
+	_, _ = q.ExecContext(ctx, `INSERT OR IGNORE INTO card_subscriptions(card_id,user_id,is_permanent,muted)
+		SELECT ?,id,0,0 FROM users WHERE id=? AND is_agent=0`+cond, cardID, userID)
+}
+
+// AutoWatchComment makes a commenter watch the card when their "Watch when I comment" preference
+// (users.subscribe_to_card_when_commenting) is on. cardextras calls it after comment.create commits; no authz.
+func AutoWatchComment(e *ops.Env, cardID, userID string) {
+	autoWatch(e.Ctx, e.DB, cardID, userID, "subscribe_to_card_when_commenting")
 }

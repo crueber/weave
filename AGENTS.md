@@ -50,12 +50,16 @@ internal/testutil    Env(t, principal) with a temp SQLite DB   internal/all  bla
 scripts/             e2e.sh  ui-smoke.sh  csp-smoke.mjs  check-contrast.py  release-local.sh  install.sh/.ps1  update-pins.sh
 scripts/publish/    workflow/CI files shipped to the GitHub mirror (used by publish-to-github.sh)   scripts/gen-badges.py  docs/badges/*.svg
 scripts/demo/        seed.sh + seed.mjs (fictional data, throwaway instance), record.mjs (README demo), encode.py (webm/webp), shots.mjs (docs/screenshots); see the header comments
+site/                the project website (static GitHub Pages: index.html, style.css, site.js, theme-init.js, img/); no external requests, CSP self
+scripts/site-stage.sh  stages site/ + docs/demo.webm into one dir (make site / make site-preview; the Pages workflow runs it too)
+scripts/site/        seed.sh + seed.mjs (fictional site data), shots.mjs (site screenshots), webp.py, check-contrast.py (site tokens)
+scripts/publish/     GitHub workflow templates installed by publish-to-github.sh (*.yml glob): ci, cli-release, docker-image, pages
 docs/                DESIGN.md (contract)  DESIGN-SYSTEM.md (tokens)  CLI.md  AGENTS.md (agent user guide)  WEBHOOKS.md  MAINTENANCE.md  FEATURES.md  AGENT-TARGETS.md (coding-agent paths + sources)
 .forgejo/workflows/ci.yml   runner/  (Forgejo runner compose + config)
 ```
 
 Domain ownership and **migration number ranges** are in `docs/DESIGN.md`. Existing migrations: `0001_core` (never edit),
-`0100/0101` auth, `0200/0201` projects (0201 project agent prompt text), `0301/0302/0303/0304/0305` boards (colours, column descriptions, column WIP limit, template visibility, board agent prompt text; `0306` drops the board card-type settings, `0307` indexes `lists(board_id)` for board statistics), `0400/0401` cards (`0401` drops `cards.type`), `0500` cardextras, `0600` notify, `0800` agents/events,
+`0100/0101/0102` auth (`0102` turns "Watch cards I create" on for everyone), `0200/0201` projects (0201 project agent prompt text), `0301/0302/0303/0304/0305` boards (colours, column descriptions, column WIP limit, template visibility, board agent prompt text; `0306` drops the board card-type settings, `0307` indexes `lists(board_id)` for board statistics, `0308` column watches `list_subscriptions`), `0400/0401/0402` cards (`0401` drops `cards.type`, `0402` adds `card_subscriptions.muted`), `0500` cardextras, `0600` notify, `0800` agents/events,
 `0900` api-key expiry, `0950` attachment index. Add new files in the owning domain's range (or the next free number); migrations
 run in filename order, once, inside one transaction. **Never edit an applied migration**; add a new one.
 

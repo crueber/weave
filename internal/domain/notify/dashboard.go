@@ -200,7 +200,7 @@ func init() {
 			out := DashboardOut{Panels: panelCfgs(cfg), Limit: cfg.Limit, MyCards: []DashCard{}, DueSoon: []DashCard{}, Overdue: []DashCard{}, Activity: []DashActivity{}, Unread: unreadCount(e)}
 			uid := e.User.UserID
 			mine := `(EXISTS(SELECT 1 FROM card_memberships m WHERE m.card_id=c.id AND m.user_id=?)`
-			mineSub := mine + ` OR EXISTS(SELECT 1 FROM card_subscriptions s WHERE s.card_id=c.id AND s.user_id=?))`
+			mineSub := mine + ` OR EXISTS(SELECT 1 FROM card_subscriptions s WHERE s.card_id=c.id AND s.user_id=? AND s.muted=0))` // a muted card is not followed
 			now := time.Now().UTC()
 			for _, p := range out.Panels {
 				if !p.Enabled {

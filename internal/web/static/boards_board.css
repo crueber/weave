@@ -268,7 +268,7 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-settings[data-active=general] #set-general,.boards-settings[data-active=members] #set-members,.boards-settings[data-active=labels] #set-labels,
 .boards-settings[data-active=views] #set-views,.boards-settings[data-active=filters] #set-filters,.boards-settings[data-active=sharing] #set-sharing,
 .boards-settings[data-active=profile] #set-profile,.boards-settings[data-active=appearance] #set-appearance,.boards-settings[data-active=workspace] #set-workspace,
-.boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,
+.boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,.boards-settings[data-active=watching] #set-watching,
 .boards-settings[data-active=agents] #set-agents,.boards-settings[data-active=background] #set-background,.boards-settings[data-active=managers] #set-managers,.boards-settings[data-active=fields] #set-fields,.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=danger] #set-danger{display:block}
 .bs-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-2)}
 .bs-sec-head h2{margin:0;font-size:var(--text-lg);font-weight:700;letter-spacing:-.01em}
@@ -383,3 +383,16 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
   .boards-lists,.boards-cards{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
   .boards-lists.is-scrolling,.boards-cards.is-scrolling{scrollbar-color:var(--border-strong) transparent}
 }
+/* ---- watching: the board header bell (left of the shortcuts button), the column header bell, the column menu item ---- */
+.boards-watch-btn{display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2)}
+.boards-watch-btn .watch-ico{display:inline-block;width:1.25em;height:1.25em;vertical-align:middle}
+.boards-watch-btn:hover{background:var(--surface-3);color:var(--fg)}
+.boards-watch-btn.is-on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.boards-watch-btn.is-on:hover{color:var(--accent-hover);border-color:var(--accent-hover)}
+.boards-col-watch{display:inline-flex;align-items:center;flex:none;color:var(--accent)}
+.boards-col-watch .watch-ico{width:.9rem;height:.9rem}
+.boards-menu-pop .boards-watch-item{display:flex;align-items:center;gap:.5rem}
+.boards-watch-item .watch-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
+.boards-watch-item.is-on .watch-ico{color:var(--accent)}
+.boards-watch-item small{margin-left:auto;color:var(--muted);font-size:var(--text-xs)}
+.boards-watch-item+.boards-menu-colour{margin-top:.35rem;padding-top:.45rem;border-top:1px solid var(--border)}

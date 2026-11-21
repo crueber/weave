@@ -130,8 +130,9 @@ func TestCommentNotificationsAndActions(t *testing.T) {
 
 func TestMoveAndMembershipNotifications(t *testing.T) {
 	w := seed(t)
-	ops.Emit(w.alice, ops.Event{Type: "cardUpdate", BoardID: "b1", CardID: "c1", Data: map[string]any{
-		"fromList": map[string]any{"id": "l1", "name": "Todo"}, "toList": map[string]any{"id": "l2", "name": "Done"}}})
+	// the real card.move shape: the card already sits in l2, the event names both list ids
+	x(t, w.alice, `UPDATE cards SET list_id='l2' WHERE id='c1'`)
+	ops.Emit(w.alice, ops.Event{Type: "cardMove", BoardID: "b1", CardID: "c1", Data: map[string]any{"fromListId": "l1", "toListId": "l2"}})
 	ops.Emit(w.alice, ops.Event{Type: "cardMembershipCreate", BoardID: "b1", CardID: "c1", Data: map[string]any{"userId": "carol"}})
 	notify.Wait()
 	got := rows(t, w.alice, `SELECT user_id||':'||type,'x' FROM notifications`)

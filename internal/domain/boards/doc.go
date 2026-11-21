@@ -18,6 +18,7 @@
 //	Stats(env, boardIDs) (map[string]BoardStats, error)
 //	                                              at-a-glance counts for many boards (authz-filtered, constant queries)
 //	ActivityLess(a, b BoardStats) bool            most recently active first, then position, then id
+//	LoadDrafts func(e, boardID) ([]Draft, error)  set by cards: the board's drafts for the Inbox column (inbox.go), one query
 //
 // Realtime events (room board:<id>): board.created|updated|deleted,
 // boardMembership.created|updated|deleted, label.created|updated|deleted,
@@ -27,5 +28,7 @@
 // Browser contract with the cards domain: tiles open /ui/cards/{id} into #modal;
 // the add-card form posts to the UI route of op "card.create" (hidden if absent);
 // drops call op "card.move" bound with form fields id, cardId, listId, position,
-// afterId, beforeId, index.
+// afterId, beforeId, index; a dropped draft (from the Inbox column) calls op "card.draft.publish" (id, listId,
+// position) instead. The Inbox routes (/ui/boards/{boardId}/inbox, .../inbox/settings, .../inbox/publish) live here
+// and call card.draft.create, card.inbox.set and card.draft.publish.
 package boards

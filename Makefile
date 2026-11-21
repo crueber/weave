@@ -4,7 +4,7 @@ VPKG := github.com/crueber/weave/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(VPKG).Version=$(VERSION)
 WEAVE_URL ?= http://localhost:8080
 
-.PHONY: build cli skill skill-check release-local test vet docker run e2e ui-smoke
+.PHONY: build cli skill skill-check release-local test vet docker run e2e ui-smoke site site-preview
 
 # Regenerates skills/weave/** and internal/cli/snapshot.json from the op registry. Run after ANY
 # op change; `go test ./cmd/weave-skillgen` fails when they are stale.
@@ -44,3 +44,13 @@ e2e: build
 
 ui-smoke:
 	WEAVE_URL=$(WEAVE_URL) scripts/ui-smoke.sh
+
+# project website (site/ + docs/demo.webm) staged into one directory, the same way the Pages workflow does
+SITE_DIR ?= dist/site
+SITE_PORT ?= 8099
+site:
+	scripts/site-stage.sh $(SITE_DIR)
+
+site-preview: site
+	@echo "http://localhost:$(SITE_PORT)/"
+	cd $(SITE_DIR) && python3 -m http.server $(SITE_PORT) --bind 127.0.0.1

@@ -100,6 +100,7 @@ type Column struct {
 	Total      int // unfiltered card count
 	AddCardURL string
 	Listeners  []ListenerOut // open event streams on this list (agents, integrations)
+	Watching   bool          // the viewer watches this column (header bell; menu item state)
 }
 
 // Crumb is a board plus its project's name: what the top bar's breadcrumbs and view switcher need (templates _boards_topbar.html).
@@ -142,6 +143,9 @@ type PageData struct {
 	PageURL     string
 	LiveBoardID string
 	NoCards     int
+	Watching    bool    // the viewer watches the whole board (header bell); never set on public pages
+	HasInbox    bool    // the caller sees this board's Inbox (inbox.go: showInbox)
+	Drafts      []Draft // the Inbox, oldest first (never filtered, never counted in NoCards)
 }
 
 func addCardPattern() string {
@@ -186,11 +190,16 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		return nil, err
 	}
 	pattern := addCardPattern()
+	watched := map[string]bool{}
+	if !readOnly && e.User != nil {
+		pd.Watching = boardWatched(e, b.ID)
+		watched = watchedLists(e, b.ID)
+	}
 	cols := make([]Column, 0, len(lists))
 	idx := map[string]int{}
 	for _, l := range lists {
 		idx[l.ID] = len(cols)
-		c := Column{List: l}
+		c := Column{List: l, Watching: watched[l.ID]}
 		for _, x := range e.Hub.Listeners.ForList(l.ID) {
 			c.Listeners = append(c.Listeners, ListenerOut{UserID: x.UserID, Name: x.Name, IsAgent: x.IsAgent, Label: x.Label, Since: x.Since})
 		}
@@ -217,6 +226,9 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		}
 	}
 	pd.Columns = cols
+	if err := loadInbox(e, pd, readOnly); err != nil {
+		return nil, err
+	}
 	return pd, nil
 }
 

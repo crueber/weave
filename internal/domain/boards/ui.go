@@ -158,6 +158,7 @@ func boardParam(c *web.Ctx) string {
 
 func registerUI() {
 	registerQuick()
+	registerInbox()
 	// ---- board pages ----
 	web.Route("GET /boards/{id}", func(c *web.Ctx) error {
 		d, err := ops.Typed[BoardDetail](c.Env, "board.get", BoardGetIn{ID: c.R.PathValue("id")})
@@ -579,7 +580,8 @@ func dropCard(c *web.Ctx) error {
 	cardID, listID := c.R.FormValue("id"), c.R.FormValue("container")
 	after, before := c.R.FormValue("afterId"), c.R.FormValue("beforeId")
 	var n int
-	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT COUNT(*) FROM cards WHERE id=? AND board_id=?`, cardID, boardID).Scan(&n)
+	var draft bool
+	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT COUNT(*),COALESCE(MAX(is_draft),0) FROM cards WHERE id=? AND board_id=?`, cardID, boardID).Scan(&n, &draft)
 	if n == 0 {
 		return ops.NotFound("card")
 	}
@@ -588,6 +590,12 @@ func dropCard(c *web.Ctx) error {
 		return ops.NotFound("list")
 	}
 	pos := PlaceBetween(c.R.Context(), c.Env.DB, "cards", "list_id=? AND id<>?", []any{listID, cardID}, after, before)
+	if draft { // dragged out of the Inbox onto a column: publish it there
+		if err := draftDrop(c, cardID, listID, pos); err != nil {
+			return err
+		}
+		return refresh(c)
+	}
 	form := url.Values{"id": {cardID}, "cardId": {cardID}, "listId": {listID}, "position": {fmt.Sprint(pos)},
 		"afterId": {after}, "beforeId": {before}, "index": {c.R.FormValue("index")}}
 	if _, err := CallByForm(c.Env, "card.move", form); err != nil {

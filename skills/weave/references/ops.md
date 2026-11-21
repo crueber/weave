@@ -5,7 +5,7 @@
 Every op is callable as `weave <tag> <verb>` (op `a.b.c` is `weave a b.c`). Path fields can be given positionally.
 The server is the source of truth: `weave ops` / `weave schema OP` show what *your* server supports.
 
-Tags: activity, admin, agent, apikey, attachment, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, system, task, tasklist, time, user, webhook, whoami
+Tags: activity, admin, agent, apikey, attachment, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, subscription, system, task, tasklist, time, user, webhook, whoami
 
 ## activity
 
@@ -495,6 +495,15 @@ At-a-glance numbers for the boards of a project (or one board), most recently ac
 | `--projectId` | path | string | yes | project id |
 | `--boardId` | query | string |  | only this board of the project (default: every board of the project you can open) |
 
+### `weave board subscribe`
+
+Watch a board: get notified about every card on it (created, moved, closed or re-opened, commented on, due date changed)  
+`PUT /boards/{id}/subscription` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | board id |
+
 ### `weave board template.get`
 
 Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields  
@@ -537,6 +546,15 @@ Board, lists and compact cards (id, name, description, labels, members, claim) i
 | `--id` | path | string | yes | board id |
 | `--includeClosed` | query | bool |  | also return closed lists and closed cards (default false) |
 | `--listIds` | query | string |  | comma separated list ids to restrict the tree to |
+
+### `weave board unsubscribe`
+
+Stop watching a board (card and column watches stay)  
+`DELETE /boards/{id}/subscription` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | board id |
 
 ### `weave board update`
 
@@ -872,7 +890,7 @@ Mark all of the caller's notifications for this card as read
 
 ### `weave card options`
 
-Lists, board members and labels available to a card (drives the card modal pickers)  
+Lists, board members and labels available to a card, and the caller's watch state (drives the card modal pickers)  
 `GET /cards/{id}/options` (auth: user)
 
 | flag | in | type | required | description |
@@ -956,7 +974,7 @@ Read a shared card anonymously
 
 ### `weave card subscribe`
 
-Subscribe to card notifications  
+Watch a card: get notified when it is moved, closed or re-opened, commented on or its due date changes (also clears a mute)  
 `PUT /cards/{id}/subscription` (auth: user)
 
 | flag | in | type | required | description |
@@ -984,7 +1002,7 @@ Save a card as a project-wide card template
 
 ### `weave card unsubscribe`
 
-Unsubscribe from card notifications  
+Stop watching a card and mute it: no notifications about it even through a watched column or board, and creating, commenting or being added never re-watches it (card.subscribe undoes)  
 `DELETE /cards/{id}/subscription` (auth: user)
 
 | flag | in | type | required | description |
@@ -1676,6 +1694,24 @@ Sort a list's cards by name, due date or creation time
 | `--field` | body | string | yes | name \| dueDate \| createdAt |
 | `--order` | body | string |  | asc (default) \| desc |
 
+### `weave list subscribe`
+
+Watch a column: get notified about cards created in it or moved in or out, and comments, close/re-open and due-date changes on its cards  
+`PUT /lists/{id}/subscription` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+
+### `weave list unsubscribe`
+
+Stop watching a column  
+`DELETE /lists/{id}/subscription` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+
 ### `weave list update`
 
 Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position  
@@ -2062,6 +2098,17 @@ Send a test e-mail using the current SMTP settings
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--to` | body | string | yes | Recipient of the test message |
+
+## subscription
+
+### `weave subscription list`
+
+What you watch: boards, columns and cards (newest first), and the cards you muted; only boards you can still view  
+`GET /users/me/subscriptions` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--limit` | query | number |  | cards and muted cards to return, most recently changed first (default 100, max 500) |
 
 ## system
 

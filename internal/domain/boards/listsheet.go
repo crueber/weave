@@ -23,6 +23,7 @@ type ListSheetData struct {
 	PrevID      string // neighbouring columns (prev/next buttons); "" at the ends
 	NextID      string
 	Listeners   []ListenerOut // open event streams on this column (agents, integrations)
+	Watching    bool          // the viewer watches this column
 }
 
 // ListActivityView feeds the lazily loaded activity section of the column sheet.
@@ -52,7 +53,7 @@ func loadListSheet(c *web.Ctx, id string) (*ListSheetData, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &ListSheetData{Board: b, List: l, CanEdit: authz.BoardLevel(c.Env, l.BoardID) >= authz.Edit}
+	d := &ListSheetData{Board: b, List: l, CanEdit: authz.BoardLevel(c.Env, l.BoardID) >= authz.Edit, Watching: l.IsSubscribed != nil && *l.IsSubscribed}
 	if l.Name != nil {
 		d.Name = *l.Name
 	}

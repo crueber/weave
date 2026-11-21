@@ -66,6 +66,8 @@ type BoardDetail struct {
 	Labels      []Label      `json:"labels"`
 	LabelGroups []LabelGroup `json:"labelGroups"`
 	Members     []Member     `json:"members"`
+	// IsSubscribed is the caller's own watch state (board.subscribe); absent when not watching and on public views.
+	IsSubscribed bool `json:"isSubscribed,omitempty" desc:"you watch this board (per caller; absent = not watching)"`
 }
 
 func loadDetail(e *ops.Env, b Board, withMembers bool) (BoardDetail, error) {
@@ -179,7 +181,9 @@ func registerBoardOps() {
 		if lvl < authz.Manage {
 			b.PublicToken = ""
 		}
-		return loadDetail(e, b, e.User != nil)
+		d, err := loadDetail(e, b, e.User != nil)
+		d.IsSubscribed = boardWatched(e, in.ID)
+		return d, err
 	})
 	ops.Register(ops.Op{Name: "board.create", Summary: "Create a board in a project (project manager)", Method: "POST", Path: "/projects/{projectId}/boards",
 		UI: ui("POST", "/projects/{projectId}/boards")}, boardCreate)
@@ -302,7 +306,7 @@ func insertBoard(e *ops.Env, tx *sql.Tx, id, projectID, name, view string, pos *
 		p = appendPos(e.Ctx, tx, "boards", "project_id=?", projectID)
 	}
 	now := db.Now()
-	if _, err := tx.ExecContext(e.Ctx, `INSERT INTO boards(id,project_id,position,name,default_view,created_at) VALUES(?,?,?,?,?,?)`,
+	if _, err := tx.ExecContext(e.Ctx, `INSERT INTO boards(id,project_id,position,name,default_view,show_card_counter,created_at) VALUES(?,?,?,?,?,1,?)`,
 		id, projectID, p, name, view, now); err != nil {
 		return err
 	}

@@ -47,10 +47,12 @@ weave_board_move POST
 weave_board_public_get GET readOnly,idempotent
 weave_board_setPublic POST 
 weave_board_stats GET readOnly,idempotent
+weave_board_subscribe PUT idempotent
 weave_board_template_get GET readOnly,idempotent
 weave_board_template_list GET readOnly,idempotent
 weave_board_template_publish POST 
 weave_board_tree GET readOnly,idempotent
+weave_board_unsubscribe DELETE destructive,idempotent
 weave_board_update PATCH idempotent
 weave_card_archive POST destructive
 weave_card_calendar GET readOnly,idempotent
@@ -155,6 +157,8 @@ weave_list_listeners GET readOnly,idempotent
 weave_list_move POST 
 weave_list_moveCards POST 
 weave_list_sort POST 
+weave_list_subscribe PUT idempotent
+weave_list_unsubscribe DELETE destructive,idempotent
 weave_list_update PATCH idempotent
 weave_notification_list GET readOnly,idempotent
 weave_notification_read POST 
@@ -194,6 +198,7 @@ weave_session_list GET readOnly,idempotent
 weave_session_revoke DELETE destructive,idempotent
 weave_session_revoke_others POST destructive
 weave_smtp_test POST 
+weave_subscription_list GET readOnly,idempotent
 weave_system_health GET readOnly,idempotent
 weave_system_storage GET readOnly,idempotent
 weave_system_version GET readOnly,idempotent

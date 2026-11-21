@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/extras_card.css">
 <link rel="stylesheet" href="/static/agents.css">
 <link rel="stylesheet" href="/static/boards_listsheet.css">
+<link rel="stylesheet" href="/static/boards_inbox.css">
 {{template "boards_sprite"}}
 <div class="boards-shell boards-shell-{{.View}}" id="board-shell"{{boardsBoardAttr .Board}}>
   {{template "boards_filterbar" .}}
@@ -29,7 +30,8 @@
 <script src="/static/boards_popover.js" defer></script>
 <script src="/static/boards_keys.js" defer></script>
 <script src="/static/boards_colors.js" defer></script>
-<script src="/static/boards_listsheet.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
+<script src="/static/boards_listsheet.js" defer></script>
+<script src="/static/boards_inbox.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
 
 {{define "boards_help"}}<dialog id="boards-help" class="boards-help" aria-labelledby="boards-help-h">
   <form method="dialog" class="boards-help-close"><button class="boards-btn" aria-label="Close shortcuts">Close</button></form>
@@ -80,6 +82,7 @@
 {{define "boards_list_options"}}{{range .Data}}{{if or (eq .Type "active") (eq .Type "closed")}}<option value="{{.ID}}">{{deref .Name}}</option>{{end}}{{end}}{{end}}
 
 {{define "boards_body"}}{{template "boards_body_in" .Data}}{{end}}
+{{define "boards_watch_board"}}{{template "boards_watch_board_btn" .Data}}{{end}}
 
 {{/* fragments returned by the quick endpoints */}}
 {{define "boards_tiles"}}{{$p := .Data.P}}{{range .Data.Tiles}}{{template "boards_tile" dict "T" . "P" $p}}{{end}}{{end}}

@@ -1,0 +1,39 @@
+{{/* The "Watching" section of the user settings page (auth_settings.html loads it lazily from /ui/settings/watching).
+   Data: notify.watchingView (subscription.list). Uses the shared bs-* settings styles. Stop buttons re-render this section. */}}
+{{define "page"}}{{template "notify_watching" .}}{{end}}
+{{define "notify_watching"}}{{$l := .Data.L}}<section id="set-watching" class="boards-sec bs-panel nw" data-panel="watching" aria-labelledby="set-watching-h">
+  <link rel="stylesheet" href="/static/notify_ui.css">
+  <div class="bs-sec-head"><h2 id="set-watching-h">Watching</h2></div>
+  <p class="bs-desc">You hear about cards that are created, moved, closed or re-opened, commented on, or get a new due date. Watch a whole board with the bell next to the shortcuts button, a column from its menu, a card from its sheet. You never hear about your own changes, and one change notifies you once however many ways you watch it.</p>
+
+  <h3 class="nw-h">Boards <span class="nw-n">{{len $l.Boards}}</span></h3>
+  <ul class="bs-members nw-list">{{range $l.Boards}}<li class="bs-member">
+    <span class="nw-ico" aria-hidden="true">{{template "watch_bell" true}}</span>
+    <span class="bs-member-t"><a href="/boards/{{.ID}}"><b>{{.Name}}</b></a>{{if .Context}}<small>{{.Context}}</small>{{end}}</span>
+    <form hx-post="/ui/settings/watching/stop" hx-target="#set-watching" hx-swap="outerHTML"><input type="hidden" name="kind" value="board"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="limit" value="{{$.Data.Limit}}"><button type="submit" class="btn btn-sm nw-btn" aria-label="Stop watching the board {{.Name}}">Stop watching</button></form>
+  </li>{{else}}<li class="bs-empty-row">No boards. Use the bell next to a board's shortcuts button to hear about everything on it.</li>{{end}}</ul>
+
+  <h3 class="nw-h">Columns <span class="nw-n">{{len $l.Lists}}</span></h3>
+  <ul class="bs-members nw-list">{{range $l.Lists}}<li class="bs-member">
+    <span class="nw-ico" aria-hidden="true">{{template "watch_bell" true}}</span>
+    <span class="bs-member-t"><a href="/lists/{{.ID}}"><b>{{.Name}}</b></a><small>{{.Context}}</small></span>
+    <form hx-post="/ui/settings/watching/stop" hx-target="#set-watching" hx-swap="outerHTML"><input type="hidden" name="kind" value="list"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="limit" value="{{$.Data.Limit}}"><button type="submit" class="btn btn-sm nw-btn" aria-label="Stop watching the column {{.Name}}">Stop watching</button></form>
+  </li>{{else}}<li class="bs-empty-row">No columns. A column's menu has "Watch column".</li>{{end}}</ul>
+
+  <h3 class="nw-h">Muted <span class="nw-n">{{$l.MutedTotal}}</span></h3>
+  <p class="bs-desc nw-desc">Muted cards never notify you, not even through a column or board you watch, and creating or commenting does not watch them again.</p>
+  <ul class="bs-members nw-list">{{range $l.Muted}}<li class="bs-member is-muted">
+    <span class="nw-ico" aria-hidden="true">{{template "watch_bell_muted"}}</span>
+    <span class="bs-member-t"><a href="/cards/{{.ID}}"><b>{{.Name}}</b></a><small>{{.Context}}</small></span>
+    <form hx-post="/ui/settings/watching/watch" hx-target="#set-watching" hx-swap="outerHTML"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="limit" value="{{$.Data.Limit}}"><button type="submit" class="btn btn-sm nw-btn" aria-label="Watch the card {{.Name}} again">Watch again</button></form>
+  </li>{{else}}<li class="bs-empty-row">Nothing muted.</li>{{end}}</ul>
+  {{if gt $l.MutedTotal (len $l.Muted)}}<p class="bs-hint nw-more">Showing {{len $l.Muted}} of {{$l.MutedTotal}} muted cards. <button type="button" class="btn btn-sm" hx-get="/ui/settings/watching?limit={{.Data.More}}" hx-target="#set-watching" hx-swap="outerHTML">Show more</button></p>{{end}}
+  <h3 class="nw-h">Cards <span class="nw-n">{{$l.CardsTotal}}</span></h3>
+  <ul class="bs-members nw-list">{{range $l.Cards}}<li class="bs-member">
+    <span class="nw-ico" aria-hidden="true">{{template "watch_bell" true}}</span>
+    <span class="bs-member-t"><a href="/cards/{{.ID}}"><b>{{.Name}}</b></a><small>{{.Context}} &middot; {{if .Explicit}}watched on purpose{{else}}watched automatically{{end}}</small></span>
+    <form hx-post="/ui/settings/watching/stop" hx-target="#set-watching" hx-swap="outerHTML"><input type="hidden" name="kind" value="card"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="limit" value="{{$.Data.Limit}}"><button type="submit" class="btn btn-sm nw-btn" aria-label="Stop watching and mute the card {{.Name}}" title="Stops and mutes: it will not reach you through a watched column or board either">Stop watching</button></form>
+  </li>{{else}}<li class="bs-empty-row">No cards. You watch cards you create or comment on (see Workspace), and any card from its sheet.</li>{{end}}</ul>
+  {{if gt $l.CardsTotal (len $l.Cards)}}<p class="bs-hint nw-more">Showing the {{len $l.Cards}} most recently changed of {{$l.CardsTotal}} cards. <button type="button" class="btn btn-sm" hx-get="/ui/settings/watching?limit={{.Data.More}}" hx-target="#set-watching" hx-swap="outerHTML">Show more</button></p>{{end}}
+
+</section>{{end}}

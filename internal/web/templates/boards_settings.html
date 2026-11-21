@@ -63,7 +63,8 @@
     {{template "bs_toggle" dict "ID" "bs-counter" "Name" "showCardCounter" "Title" "Card counter" "Help" "Show the number of cards in each list header." "On" .Board.ShowCardCounter "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-ages" "Name" "showCardAges" "Title" "Card ages" "Help" "Fade cards that have not been touched for a while." "On" .Board.ShowCardAges "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-tasks" "Name" "expandTaskListsByDefault" "Title" "Expand task lists" "Help" "Open task lists automatically when a card is opened." "On" .Board.ExpandTaskListsByDefault "Off" $off}}
-    {{template "bs_toggle" dict "ID" "bs-inbox" "Name" "hasInbox" "Title" "Board inbox" "Help" "Keep a drafts inbox for quickly capturing cards before triage." "On" .Board.HasInbox "Off" $off}}
+    {{template "bs_toggle" dict "ID" "bs-inbox" "Name" "hasInbox" "Title" "Board inbox" "Help" "Adds an Inbox column for capturing ideas before they become cards." "On" .Board.HasInbox "Off" $off}}
+    {{if .Board.HasInbox}}<p class="bs-hint bs-inbox-note">The Inbox is the first column of the <a href="/boards/{{.Board.ID}}?view=kanban">Kanban view</a>. Members see it; people who only see this board because it is public do not.</p>{{end}}
   </form>
 </section>{{end}}
 

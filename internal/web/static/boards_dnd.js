@@ -15,7 +15,10 @@
   function tileSiblings(box, skip) { return [].slice.call(box.children).filter(function (n) { return isTile(n) && n !== skip; }); }
   function prevTile(n) { for (var p = n.previousElementSibling; p; p = p.previousElementSibling) if (isTile(p)) return p; return null; }
   function nextTile(n) { for (var p = n.nextElementSibling; p; p = p.nextElementSibling) if (isTile(p)) return p; return null; }
-  function openCols() { return [].slice.call(lists().children).filter(function (c) { return c.classList.contains('boards-col') && !c.classList.contains('is-collapsed'); }); }
+  // real, expanded columns (the Inbox is a .boards-col too, but cards never drop into it and it never moves)
+  function openCols() { return [].slice.call(lists().children).filter(function (c) { return c.classList.contains('boards-col') && !c.classList.contains('is-collapsed') && !c.classList.contains('boards-inbox'); }); }
+  function isInbox(col) { return !!(col && col.classList.contains('boards-inbox')); }
+  function isDraft(el) { return !!(el && el.classList.contains('boards-draft')); }
 
   // browsers start native drags on links/images; we drive our own
   document.addEventListener('dragstart', function (e) { if (e.target.closest && e.target.closest('.boards-lists')) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
@@ -29,7 +32,7 @@
     var kind = '', el = null;
     var tile = t.closest('.boards-tile');
     if (tile && tile.closest('.boards-cards')) { kind = 'card'; el = tile; }
-    else { var head = t.closest('.boards-col-head'); if (head) { kind = 'list'; el = head.closest('.boards-col'); } }
+    else { var head = t.closest('.boards-col-head'); if (head && !head.closest('.boards-inbox')) { kind = 'list'; el = head.closest('.boards-col'); } }
     if (!el) return;
     S = { kind: kind, el: el, id: e.pointerId, x0: e.clientX, y0: e.clientY, touch: e.pointerType === 'touch', started: false, timer: 0 };
     last.x = e.clientX; last.y = e.clientY;
@@ -89,7 +92,9 @@
     if (!S) return;
     if (S.kind === 'card') {
       var el = document.elementFromPoint(x, y), col = el && el.closest && el.closest('.boards-col');
-      if (!col || col.classList.contains('is-collapsed') || !lists().contains(col)) col = nearestCol(x);
+      // over the Inbox: a draft may go back home (no-op on drop); anything else snaps to the nearest real column
+      if (isInbox(col) && !(isDraft(S.el) && !col.classList.contains('is-collapsed'))) col = nearestCol(x);
+      else if (!col || col.classList.contains('is-collapsed') || !lists().contains(col)) col = nearestCol(x);
       if (!col) return;
       var box = col.querySelector('.boards-cards'); if (!box) return;
       var before = null, tiles = tileSiblings(box, S.el);
@@ -160,11 +165,14 @@
       var p = prevTile(el), n = nextTile(el);
       var sameSpot = el.parentNode === home.parent && el.nextElementSibling === home.next;
       if (sameSpot) return;
+      if (isInbox(col)) { home.parent.insertBefore(el, home.next); B.announce('Left in the Inbox'); return; }   // drafts keep capture order
+      var draft = isDraft(el);
       var all = tileSiblings(box), pos = all.indexOf(el) + 1;
       B.recount(col); if (oldCol && oldCol !== col) B.recount(oldCol);
-      B.announce('Moved card ' + nameOf(el) + ' to ' + colName(col) + ', position ' + pos + ' of ' + all.length);
+      B.announce((draft ? 'Moved draft ' : 'Moved card ') + nameOf(el) + ' to ' + colName(col) + ', position ' + pos + ' of ' + all.length);
       B.post(l.dataset.cardDrop, { id: el.dataset.id, container: col.dataset.id, afterId: p ? p.dataset.id : '', beforeId: n ? n.dataset.id : '' }).then(function (r) {
-        if (!r.ok) { B.toast(r.error || 'Could not move the card', { error: true }); B.refresh(true); }
+        if (!r.ok) { B.toast(r.error || 'Could not move the card', { error: true }); B.refresh(true); return; }
+        if (draft) { B.toast('Moved to ' + colName(col)); B.refresh(true); }   // the draft is now a card: re-render it as one
       });
     } else {
       var cols = openCols(), i = cols.indexOf(el), pc = cols[i - 1], nc = cols[i + 1];

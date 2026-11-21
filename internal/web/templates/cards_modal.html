@@ -16,10 +16,12 @@
           {{range $o.Lists}}{{if ne $cur .BoardID}}{{$cur = .BoardID}}<div class="cm-pop-h">{{.BoardName}}</div>{{end}}
           <button type="button" class="cm-opt{{if eq .ID $c.ListID}} is-on{{end}}" hx-post="/ui/cards/{{$c.ID}}/move" hx-vals='{"listId":"{{.ID}}","_part":"modal"}'{{if eq .ID $c.ListID}} aria-current="true"{{end}}><span class="cm-tick" aria-hidden="true">{{if eq .ID $c.ListID}}&#10003;{{end}}</span>{{.Name}}</button>{{end}}
         </div></details>
+      {{else if $c.IsDraft}}<span class="cm-list-ro">Inbox</span>{{/* a draft's list_id is only a placeholder home */}}
       {{else}}<span class="cm-list-ro">{{$o.ListName}}</span>{{end}}
     </nav>
     <span id="cards-saved" class="cards-saved cm-saved" role="status" aria-live="polite"></span>
     <span class="cards-nav cm-nav" role="group" aria-label="Card navigation"><button type="button" class="cards-navbtn" data-card-nav="prev" aria-label="Previous card (k)" title="Previous card (k)" disabled>&#8249;</button><button type="button" class="cards-navbtn" data-card-nav="next" aria-label="Next card (j)" title="Next card (j)" disabled>&#8250;</button></span>
+    {{if .User}}{{template "cards_watch" .}}{{end}}
     {{template "cards_menu" .}}
     <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
   </div>
@@ -37,7 +39,7 @@
       {{if $c.IsTemplate}}<span class="cards-badge">template</span>{{end}}
       {{if eq $o.ListType "archive"}}<span class="cards-badge">archived</span>{{end}}
       {{if eq $o.ListType "trash"}}<span class="cards-badge cards-badge-warn">in trash</span>{{end}}
-      {{if $c.IsSubscribed}}<span class="cards-badge" title="you are subscribed">subscribed</span>{{end}}
+      {{with $o.Watch}}{{if .Muted}}<span class="cards-badge cm-watch-badge" title="You muted this card: no notifications about it">muted</span>{{else if eq .Via "card"}}<span class="cards-badge cm-watch-badge" title="You watch this card">watching</span>{{else if eq .Via "list"}}<span class="cards-badge cm-watch-badge" title="You watch the column {{$o.ListName}}">watching via column</span>{{else if eq .Via "board"}}<span class="cards-badge cm-watch-badge" title="You watch the board {{$o.BoardName}}">watching via board</span>{{end}}{{end}}
     </div>
   </header>
 
@@ -94,6 +96,22 @@
   </div>
 </div>{{end}}
 
+{{/* Watch control in the top bar. Four states (card.options .Watch): not watching -> "Watch"; watching the card ->
+   "Watching" (pressing it stops and mutes, the mute rule of card.unsubscribe); watching only through the column or the
+   board -> a small popover "Watching via column X" offering to watch the card itself or mute it; muted -> "Muted", pressing
+   watches again. Mutations re-render the sheet (the plain mutation routes in cards/ui.go). */}}
+{{define "cards_watch"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$w := $o.Watch}}
+{{if $w.Muted}}<button type="button" class="cm-watch is-muted" aria-pressed="false" hx-post="/ui/cards/{{$c.ID}}/subscribe" title="You muted this card: no notifications about it, even through its column or board. Click to watch it again">{{template "watch_bell_muted"}}<span>Muted</span></button>
+{{else if eq $w.Via "card"}}<button type="button" class="cm-watch is-on" aria-pressed="true" hx-post="/ui/cards/{{$c.ID}}/unsubscribe" title="You watch this card. Click to stop watching (mutes it, also through its column or board)">{{template "watch_bell" true}}<span>Watching</span></button>
+{{else if $w.Via}}<details class="cm-watchpop cards-pop" data-pop="watch"><summary class="cm-watch is-on is-via" aria-haspopup="true" title="{{if eq $w.Via "list"}}You watch the column {{$o.ListName}}{{else}}You watch the board {{$o.BoardName}}{{end}}">{{template "watch_bell" true}}<span>Watching <small>via {{if eq $w.Via "list"}}column {{$o.ListName}}{{else}}board{{end}}</small></span><i class="cm-chev" aria-hidden="true"></i></summary>
+  <div class="cm-popbody cards-popbody cm-watch-panel" role="group" aria-label="Watching">
+    <p class="cm-watch-why">{{if eq $w.Via "list"}}You get notifications about this card because you watch the column <b>{{$o.ListName}}</b>.{{else}}You get notifications about this card because you watch the board <b>{{$o.BoardName}}</b>.{{end}}</p>
+    <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/subscribe">{{template "watch_bell" true}} Watch this card itself<small>Keeps notifying wherever it moves</small></button>
+    <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/unsubscribe">{{template "watch_bell_muted"}} Mute this card<small>No notifications about it from any watch</small></button>
+  </div></details>
+{{else}}<button type="button" class="cm-watch" aria-pressed="false" hx-post="/ui/cards/{{$c.ID}}/subscribe" title="Watch this card: get notified when it is moved, closed, commented on or its due date changes">{{template "watch_bell" false}}<span>Watch</span></button>{{end}}
+{{end}}
+
 {{/* the "..." actions menu: rare actions, destructive ones at the bottom */}}
 {{define "cards_menu"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}
 <details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Card actions" title="Card actions" aria-haspopup="true">&hellip;</summary>
@@ -106,7 +124,7 @@
     {{else}}<div class="cm-share"><span class="cm-pop-h">Share link</span><input readonly value="{{$d.Origin}}/share/{{deref $c.ShareToken}}" data-select-on-click aria-label="Share link"><button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/share/revoke">Revoke link</button></div>{{end}}
     {{if not $c.IsTemplate}}{{if not $c.IsDraft}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/template" title="Save as a project-wide card template">Save as template</button>{{end}}{{end}}
     {{end}}
-    {{if $c.IsSubscribed}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/unsubscribe">Unsubscribe</button>{{else}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/subscribe">Subscribe</button>{{end}}
+    {{if .User}}{{if eq $o.Watch.Via "card"}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/unsubscribe" title="Stop watching and mute this card">Stop watching</button>{{else if $o.Watch.Via}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/subscribe">Watch this card</button><button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/unsubscribe">Mute this card</button>{{else}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/subscribe">{{if $o.Watch.Muted}}Watch again{{else}}Watch card{{end}}</button>{{end}}{{end}}
     <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/notifications/read" hx-swap="none">Mark notifications read</button>
     <button type="button" class="cm-mi" data-open-help>Keyboard shortcuts</button>
     <a class="cm-mi" href="/cards/{{$c.ID}}">Open as page</a>

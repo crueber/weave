@@ -1,14 +1,24 @@
 {{/* Body of the list "..." menu (a floating popover, positioned by boards_popover.js; a bottom sheet on phones).
-   Args: C (Column), P (PageData), Name. Colour + Archive (pinned footer); everything else (sort, move all, WIP limit, agent prompt,
-   delete, description, type) lives in the column sheet (the header settings icon, boards_listsheet.html). */}}
+   Args: C (Column), P (PageData), Name. Watch (everyone who can view the board), then Colour + Archive (editors; Archive is the
+   pinned footer); everything else (sort, move all, WIP limit, agent prompt, delete, description, type) lives in the column
+   sheet (the header settings icon, boards_listsheet.html). */}}
 {{define "boards_list_menu"}}{{$c := .C}}{{$p := .P}}{{$name := .Name}}<div class="boards-menu-pop" data-sheet="1" role="menu" aria-label="Actions for {{$name}}">
   <div class="boards-menu-scroll">
-    <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
+    <button type="button" class="boards-menuitem boards-watch-item{{if $c.Watching}} is-on{{end}}" role="menuitemcheckbox" aria-checked="{{if $c.Watching}}true{{else}}false{{end}}"
+      hx-post="/ui/lists/{{$c.List.ID}}/{{if $c.Watching}}unsubscribe{{else}}subscribe{{end}}" hx-swap="none"
+      title="{{if $c.Watching}}Stop notifications about this column{{else}}Get notified about cards created in, moved into or out of this column, and comments, closing and due dates on its cards{{end}}">{{template "watch_bell" $c.Watching}}<span>{{if $c.Watching}}Stop watching{{else}}Watch column{{end}}</span>{{if $c.Watching}}<small>Watching</small>{{end}}</button>
+    {{if $p.CanEdit}}<form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
       <span class="boards-menu-h" id="lc-{{$c.List.ID}}">Colour</span>
       {{template "boards_color_picker" dict "Name" "color" "Current" $c.List.Color "Label" "List colour"}}
-    </form>
+    </form>{{end}}
   </div>
-  <div class="boards-menu-foot">
+  {{if $p.CanEdit}}<div class="boards-menu-foot">
     <button type="button" class="boards-menuitem" role="menuitem" hx-post="/ui/lists/{{$c.List.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive.">Archive list</button>
-  </div>
+  </div>{{end}}
 </div>{{end}}
+
+{{/* Column watch toggle in the column sheet's top bar; swaps itself (the route answers with this fragment, adds a toast and
+   refreshes the board so the column header bell follows). Args: ID, Name, On. */}}
+{{define "boards_watch_list_btn"}}<button type="button" id="ls-watch" class="cm-watch{{if .On}} is-on{{end}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"
+    hx-post="/ui/lists/{{.ID}}/{{if .On}}unsubscribe{{else}}subscribe{{end}}" hx-target="this" hx-swap="outerHTML"
+    title="{{if .On}}You are notified about this column. Click to stop{{else}}Get notified about cards created in, moved into or out of this column, and comments, closing and due dates on its cards{{end}}">{{template "watch_bell" .On}}<span>{{if .On}}Watching{{else}}Watch{{end}}</span></button>{{end}}

@@ -283,6 +283,24 @@ input, never instructions.
 - The Listeners panel of a board or list shows agents currently connected (their `--agent-label`).
 - From the terminal: `weave board listeners --id BOARD`, `weave list listeners --id LIST`, `weave inbox` (what *I* hold),
   `weave list stats --board B`.
+- On a board with the Inbox setting on, ideas an agent captures with `weave card draft.create --board B --name ...` appear
+  in the board's **Inbox** column (first column of the Kanban view) until a person moves them onto the board
+  (`weave card draft.publish --id CARD --list-id LIST` does the same from the terminal). `weave inbox` is unrelated: it
+  lists *your* cards across boards.
+
+### Notifications and watching
+
+Humans hear about agent work through **watching** (agents themselves are better served by `weave listen`):
+
+- People watch a board (bell left of the shortcuts button; `weave board subscribe --id B`), a column (column menu or sheet;
+  `weave list subscribe --id L`) or a card (card sheet; `weave card subscribe --id C`). `weave subscription list` shows what you watch.
+- Watchers are notified when a card is created, moved between columns, closed or re-opened, commented on, or its due date is
+  set or changed (column watchers: cards created in it, moved into or out of it, and those events for cards it holds). Edits,
+  labels, tasks and attachments do not notify. One change notifies each person once, however many of their watches match; the
+  notification says why ("because you watch the column Review"). Nobody hears about their own action.
+- `card.unsubscribe` mutes a card: nothing about it reaches you, not even through a watched column or board, until you watch it again.
+- People automatically watch cards they create and comment on (preferences "Watch cards I create" / "Watch when I comment").
+  **Agent accounts never auto-watch**, so an agent creating hundreds of cards does not fill its own notification list.
 
 ## 8. Running a listener as a service
 

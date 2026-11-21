@@ -99,6 +99,8 @@
 
   // ---- applying server state without clobbering the user ----
   function busyCol(col) {
+    // the Inbox (boards_inbox.js) never re-renders under a capture in progress, not even with the caret carried over
+    if (col.classList.contains('boards-inbox') && activeComposer(col)) return true;
     // an open list menu lives in #popover-root while open: it is keyed by list id (WeavePop registry), not by DOM position
     return !!col.querySelector('.boards-col-title-input, .boards-menu[open], .boards-tile.is-pending, .boards-tile.is-grabbed, [data-busy]') || col.classList.contains('is-origin') ||
       !!(window.WeavePop && WeavePop.isOpen(col.dataset.id));

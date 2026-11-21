@@ -8,6 +8,7 @@
     <a href="/boards/{{$d.BoardID}}/calendar?month={{$d.Next}}" aria-label="Next month">&rsaquo;</a>
     <a href="/boards/{{$d.BoardID}}/calendar">Today</a>
     <a href="/boards/{{$d.BoardID}}/map">Map</a>
+    {{if $d.Inbox}}<a class="cards-inbox-link" href="/boards/{{$d.BoardID}}?view=kanban" title="The Inbox is the first column of the Kanban view">Inbox ({{$d.Inbox}})</a>{{end}}
   </div>
   <div class="cards-cal-body">
     <div class="cards-cal-grid" role="grid">

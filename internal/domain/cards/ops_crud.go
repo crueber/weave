@@ -283,11 +283,7 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 		if err != nil {
 			return err
 		}
-		var sub bool
-		_ = tx.QueryRowContext(e.Ctx, `SELECT subscribe_own_cards FROM users WHERE id=?`, e.User.UserID).Scan(&sub)
-		if sub {
-			subscribe(e.Ctx, tx, id, e.User.UserID, false)
-		}
+		autoWatch(e.Ctx, tx, id, e.User.UserID, "subscribe_own_cards") // "Watch cards I create"
 		return nil
 	})
 	if err != nil {
@@ -307,7 +303,11 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 		return Card{}, err
 	}
 	sets, args := []string{}, []any{}
+	var prevDue *string
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT due_date FROM cards WHERE id=?`, in.ID).Scan(&prevDue)
+	changed := []string{} // event Data "changed": which fields this update touched (notify reacts to dueDate)
 	if in.Name != nil {
+		changed = append(changed, "name")
 		n := strings.TrimSpace(*in.Name)
 		if n == "" {
 			return Card{}, ops.Invalid("name cannot be empty")
@@ -326,20 +326,28 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 			d = *in.Description
 		}
 		sets, args = append(sets, "description=?"), append(args, d)
+		changed = append(changed, "description")
 	}
 	if in.DueDate != nil {
 		if *in.DueDate == "" {
 			sets = append(sets, "due_date=NULL", "is_due_completed=NULL")
+			if prevDue != nil {
+				changed = append(changed, "dueDate")
+			}
 		} else {
 			d, err := normTime(*in.DueDate)
 			if err != nil {
 				return Card{}, err
 			}
 			sets, args = append(sets, "due_date=?"), append(args, d)
+			if prevDue == nil || *prevDue != d {
+				changed = append(changed, "dueDate")
+			}
 		}
 	}
 	if in.IsDueCompleted != nil {
 		sets, args = append(sets, "is_due_completed=?"), append(args, *in.IsDueCompleted)
+		changed = append(changed, "isDueCompleted")
 	}
 	if len(sets) == 0 {
 		return loadCard(e, e.DB, in.ID)
@@ -350,7 +358,7 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 	}
 	c, err := loadCard(e, e.DB, in.ID)
 	if err == nil {
-		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c})
+		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c, "changed": changed})
 	}
 	return c, err
 }
@@ -563,11 +571,16 @@ func cardClose(e *ops.Env, in CloseIn) (Card, error) {
 			return doMove(e, in.ID, target, nil, "", "")
 		}
 	}
+	was := c.IsClosed
 	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET is_closed=?,updated_at=? WHERE id=?`, closing, db.Now(), in.ID); err != nil {
 		return c, err
 	}
 	c, _ = loadCard(e, e.DB, in.ID)
-	emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c})
+	changed := []string{}
+	if was != closing {
+		changed = append(changed, "isClosed")
+	}
+	emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c, "changed": changed})
 	return c, nil
 }
 

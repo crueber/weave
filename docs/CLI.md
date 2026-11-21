@@ -146,6 +146,11 @@ weave task check|uncheck TASK_ID...               # or: --card CARD --n 2 / --te
 weave task list CARD
 
 weave next --board B --list Ready [--list L2] [--claim] [--move-to 'In progress'] [--ttl 15m] [--wait 60s]
+
+weave board subscribe B | weave board unsubscribe B     # watch a whole board (notifications, not the event stream)
+weave list subscribe L  | weave list unsubscribe L      # watch a column
+weave card subscribe C  | weave card unsubscribe C      # watch a card / stop and MUTE it (also silences column/board watches)
+weave subscription list [--limit 100]                   # what I watch: boards, columns, cards, muted
 ```
 `weave next` prints `{"item": card}` and exits 0, or exits **10** with no output when every list is empty, so
 `while card=$(weave next ... --claim); do ...; done` is a complete worker loop. All shortcuts call ops through the generic

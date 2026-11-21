@@ -174,3 +174,88 @@ func TestDropCardTypeMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// openWithout builds a database with every migration applied except skip (the state of an existing install).
+func openWithout(t *testing.T, skip map[string]bool) *DB {
+	t.Helper()
+	sdb, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "old.db")+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &DB{sdb}
+	t.Cleanup(func() { d.Close() })
+	if _, err := d.Exec(`CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := migFS.ReadDir("migrations")
+	for _, e := range ents {
+		if skip[e.Name()] {
+			continue
+		}
+		b, _ := migFS.ReadFile("migrations/" + e.Name())
+		if _, err := d.Exec(string(b)); err != nil {
+			t.Fatalf("%s: %v", e.Name(), err)
+		}
+		if _, err := d.Exec(`INSERT INTO schema_migrations VALUES(?,?)`, e.Name(), Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return d
+}
+
+// Watching (0102, 0308, 0402): existing card and board subscriptions survive, the column table exists, the mute
+// column defaults to 0 and "Watch cards I create" is switched on for everyone once.
+func TestWatchMigrations(t *testing.T) {
+	d := openWithout(t, map[string]bool{"0102_watch_own_cards_default.sql": true, "0308_list_subscriptions.sql": true, "0402_card_subscription_mute.sql": true})
+	if cols(t, d, "card_subscriptions")["muted"] || count(t, d, `SELECT COUNT(*) FROM sqlite_master WHERE name='list_subscriptions'`) != 0 {
+		t.Fatal("the old schema should not have the watch changes yet")
+	}
+	now := Now()
+	for _, q := range []string{
+		`INSERT INTO users(id,email,name,role,created_at) VALUES('u1','a@x.io','Ann','user','` + now + `'),('u2','b@x.io','Ben','user','` + now + `')`,
+		`UPDATE users SET subscribe_own_cards=0, subscribe_to_card_when_commenting=0 WHERE id='u2'`,
+		`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','` + now + `')`,
+		`INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'B','` + now + `')`,
+		`INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('l1','b1','active',1,'Todo','` + now + `')`,
+		`INSERT INTO cards(id,board_id,list_id,position,name,list_changed_at,created_at) VALUES('c1','b1','l1',1,'C','` + now + `','` + now + `')`,
+		`INSERT INTO card_subscriptions(card_id,user_id,is_permanent) VALUES('c1','u1',1),('c1','u2',0)`,
+		`INSERT INTO board_subscriptions(board_id,user_id) VALUES('b1','u2')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	if err := d.migrate(); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM card_subscriptions WHERE card_id='c1' AND muted=0`); n != 2 {
+		t.Fatalf("card subscriptions after upgrade (unmuted): %d", n)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM card_subscriptions WHERE user_id='u1' AND is_permanent=1`); n != 1 {
+		t.Fatal("is_permanent lost")
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM board_subscriptions WHERE board_id='b1' AND user_id='u2'`); n != 1 {
+		t.Fatal("board subscription lost")
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM users WHERE subscribe_own_cards=1`); n != 2 {
+		t.Fatalf("subscribe_own_cards flipped for %d of 2 users", n)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM users WHERE id='u2' AND subscribe_to_card_when_commenting=0`); n != 1 {
+		t.Fatal("the comment preference must be left alone")
+	}
+	if _, err := d.Exec(`INSERT INTO list_subscriptions(list_id,user_id,created_at) VALUES('l1','u1',?)`, now); err != nil {
+		t.Fatalf("list_subscriptions: %v", err)
+	}
+	if _, err := d.Exec(`INSERT INTO card_subscriptions(card_id,user_id) VALUES('c1','u3x')`); err == nil {
+		t.Fatal("foreign keys should still hold")
+	}
+	if _, err := d.Exec(`DELETE FROM lists WHERE id='l1'`); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM list_subscriptions`); n != 0 {
+		t.Fatalf("list watches must cascade with the list: %d", n)
+	}
+	if err := d.migrate(); err != nil {
+		t.Fatal(err)
+	}
+}

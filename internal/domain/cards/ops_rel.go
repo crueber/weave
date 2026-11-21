@@ -56,21 +56,20 @@ func init() {
 		UI: "POST /ui/cards/{id}/labels"}, labelAdd)
 	ops.Register(ops.Op{Name: "card.label.remove", Summary: "Remove a label from a card", Method: "DELETE", Path: "/cards/{id}/labels/{labelId}",
 		UI: "POST /ui/cards/{id}/labels/{labelId}/remove"}, labelRemove)
-	ops.Register(ops.Op{Name: "card.subscribe", Summary: "Subscribe to card notifications", Method: "PUT", Path: "/cards/{id}/subscription",
+	// Watch toggles emit no event: an activity row would tell everyone on the board who watches what.
+	ops.Register(ops.Op{Name: "card.subscribe", Summary: "Watch a card: get notified when it is moved, closed or re-opened, commented on or its due date changes (also clears a mute)", Method: "PUT", Path: "/cards/{id}/subscription",
 		UI: "POST /ui/cards/{id}/subscribe"}, func(e *ops.Env, in IDIn) (SubscribeOut, error) {
 		if _, err := viewCard(e, in.ID); err != nil {
 			return SubscribeOut{}, err
 		}
-		subscribe(e.Ctx, e.DB, in.ID, e.User.UserID, true)
-		return SubscribeOut{in.ID, true}, nil
+		return SubscribeOut{in.ID, true}, watchCard(e.Ctx, e.DB, in.ID, e.User.UserID)
 	})
-	ops.Register(ops.Op{Name: "card.unsubscribe", Summary: "Unsubscribe from card notifications", Method: "DELETE", Path: "/cards/{id}/subscription",
+	ops.Register(ops.Op{Name: "card.unsubscribe", Summary: "Stop watching a card and mute it: no notifications about it even through a watched column or board, and creating, commenting or being added never re-watches it (card.subscribe undoes)", Method: "DELETE", Path: "/cards/{id}/subscription",
 		UI: "POST /ui/cards/{id}/unsubscribe"}, func(e *ops.Env, in IDIn) (SubscribeOut, error) {
 		if _, err := viewCard(e, in.ID); err != nil {
 			return SubscribeOut{}, err
 		}
-		_, err := e.DB.ExecContext(e.Ctx, `DELETE FROM card_subscriptions WHERE card_id=? AND user_id=?`, in.ID, e.User.UserID)
-		return SubscribeOut{in.ID, false}, err
+		return SubscribeOut{in.ID, false}, muteCard(e.Ctx, e.DB, in.ID, e.User.UserID)
 	})
 	ops.Register(ops.Op{Name: "card.notifications.read", Summary: "Mark all of the caller's notifications for this card as read", Method: "POST", Path: "/cards/{id}/notifications/read",
 		UI: "POST /ui/cards/{id}/notifications/read"}, func(e *ops.Env, in IDIn) (ReadOut, error) {
@@ -95,7 +94,7 @@ func memberAdd(e *ops.Env, in MemberIn) (Card, error) {
 		return Card{}, err
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		subscribe(e.Ctx, e.DB, in.ID, in.UserID, false)
+		autoWatch(e.Ctx, e.DB, in.ID, in.UserID, "") // being added to a card watches it (never over a mute; not for agents)
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
 		c, _ := loadCard(e, e.DB, in.ID)
 		emit(e, "cardMembershipCreate", "card.member.added", boardID, in.ID, map[string]any{"userId": in.UserID, "card": c})
@@ -206,10 +205,17 @@ type Options struct {
 	CardMembers []UserOpt  `json:"cardMembers"`
 	CardLabels  []LabelOpt `json:"cardLabels"`
 	Labels      []LabelOpt `json:"labels"`
+	Watch       WatchState `json:"watch" desc:"the caller's own watch state for this card"`
+}
+
+// WatchState is the caller's watch state of a card (per viewer; never part of events or payloads).
+type WatchState struct {
+	Via   string `json:"via,omitempty" desc:"why you hear about this card: card (you watch it) | list (you watch its column) | board (you watch the board); absent = not watching"`
+	Muted bool   `json:"muted" desc:"you muted this card: no notifications about it, even through a watched column or board"`
 }
 
 func init() {
-	ops.Register(ops.Op{Name: "card.options", Summary: "Lists, board members and labels available to a card (drives the card modal pickers)", Method: "GET", Path: "/cards/{id}/options",
+	ops.Register(ops.Op{Name: "card.options", Summary: "Lists, board members and labels available to a card, and the caller's watch state (drives the card modal pickers)", Method: "GET", Path: "/cards/{id}/options",
 		UI: "GET /ui/cards/{id}"}, cardOptions)
 }
 
@@ -223,6 +229,23 @@ func cardOptions(e *ops.Env, in IDIn) (Options, error) {
 	var listID string
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.name,b.project_id,COALESCE(p.name,''),COALESCE(l.name,l.type),l.type,l.id FROM boards b JOIN cards c ON c.board_id=b.id JOIN lists l ON l.id=c.list_id LEFT JOIN projects p ON p.id=b.project_id WHERE c.id=?`, in.ID).
 		Scan(&o.BoardName, &o.ProjectID, &o.ProjectName, &o.ListName, &o.ListType, &listID)
+	if e.User != nil {
+		var muted *bool
+		var list, board bool
+		_ = e.DB.QueryRowContext(e.Ctx, `SELECT (SELECT muted FROM card_subscriptions WHERE card_id=?1 AND user_id=?2),
+			EXISTS(SELECT 1 FROM list_subscriptions WHERE list_id=?3 AND user_id=?2), EXISTS(SELECT 1 FROM board_subscriptions WHERE board_id=?4 AND user_id=?2)`,
+			in.ID, e.User.UserID, listID, boardID).Scan(&muted, &list, &board)
+		switch {
+		case muted != nil && *muted:
+			o.Watch.Muted = true
+		case muted != nil:
+			o.Watch.Via = "card"
+		case list:
+			o.Watch.Via = "list"
+		case board:
+			o.Watch.Via = "board"
+		}
+	}
 	o.CardMembers, o.CardLabels = []UserOpt{}, []LabelOpt{}
 	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT u.id,u.name,COALESCE(u.username,'') FROM card_memberships m JOIN users u ON u.id=m.user_id WHERE m.card_id=? ORDER BY u.name`, in.ID); err == nil {
 		for rows.Next() {

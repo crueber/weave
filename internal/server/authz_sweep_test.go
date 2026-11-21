@@ -408,7 +408,8 @@ var selfOps = map[string]string{
 	"search.query":       "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
 	"user.get": "directory entry", "user.list": "directory of active users", "group.get": "directory", "group.list": "directory",
 	"notification_service.list": "own services", "apikey.get": "own key status", "whoami": "self",
-	"agent.prompt": "scopes general/runner are instance text (the admin default or the built-in one) with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
+	"subscription.list": "own watches, filtered to boards the caller can still view (authz.BoardLevels)",
+	"agent.prompt":      "scopes general/runner are instance text (the admin default or the built-in one) with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
 }
 
 // directoryOps are allowed to show the seeded CANARY names because Weave exposes a user and group
@@ -486,8 +487,9 @@ func TestAuthzSweepReadOnlyMembersCannotWrite(t *testing.T) {
 			t.Parallel()
 			bad := sweep(t, caller, true, func(r result) bool {
 				switch r.op {
-				case "card.edit.release", "card.notifications.read", "card.subscribe", "card.unsubscribe", "project.favorite", "project.unfavorite":
-					return true // per-user state (own edit lock, own subscription, own favourites)
+				case "card.edit.release", "card.notifications.read", "card.subscribe", "card.unsubscribe", "project.favorite", "project.unfavorite",
+					"board.subscribe", "board.unsubscribe", "list.subscribe", "list.unsubscribe":
+					return true // per-user state (own edit lock, own watches, own favourites); anyone who can view may watch
 				case "card.next":
 					return true // peek without claim is a read; claiming needs edit access (covered by card tests)
 				case "filter.create":

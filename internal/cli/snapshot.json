@@ -1281,6 +1281,24 @@
   ]
  },
  {
+  "name": "board.subscribe",
+  "tag": "board",
+  "summary": "Watch a board: get notified about every card on it (created, moved, closed or re-opened, commented on, due date changed)",
+  "method": "PUT",
+  "path": "/boards/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/subscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   }
+  ]
+ },
+ {
   "name": "board.template.get",
   "tag": "board",
   "summary": "Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields",
@@ -1397,6 +1415,24 @@
     "type": "string",
     "required": false,
     "desc": "comma separated list ids to restrict the tree to"
+   }
+  ]
+ },
+ {
+  "name": "board.unsubscribe",
+  "tag": "board",
+  "summary": "Stop watching a board (card and column watches stay)",
+  "method": "DELETE",
+  "path": "/boards/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/unsubscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
    }
   ]
  },
@@ -2320,7 +2356,7 @@
  {
   "name": "card.options",
   "tag": "card",
-  "summary": "Lists, board members and labels available to a card (drives the card modal pickers)",
+  "summary": "Lists, board members and labels available to a card, and the caller's watch state (drives the card modal pickers)",
   "method": "GET",
   "path": "/cards/{id}/options",
   "auth": "user",
@@ -2499,7 +2535,7 @@
  {
   "name": "card.subscribe",
   "tag": "card",
-  "summary": "Subscribe to card notifications",
+  "summary": "Watch a card: get notified when it is moved, closed or re-opened, commented on or its due date changes (also clears a mute)",
   "method": "PUT",
   "path": "/cards/{id}/subscription",
   "auth": "user",
@@ -2559,7 +2595,7 @@
  {
   "name": "card.unsubscribe",
   "tag": "card",
-  "summary": "Unsubscribe from card notifications",
+  "summary": "Stop watching a card and mute it: no notifications about it even through a watched column or board, and creating, commenting or being added never re-watches it (card.subscribe undoes)",
   "method": "DELETE",
   "path": "/cards/{id}/subscription",
   "auth": "user",
@@ -4474,6 +4510,40 @@
   ]
  },
  {
+  "name": "list.subscribe",
+  "tag": "list",
+  "summary": "Watch a column: get notified about cards created in it or moved in or out, and comments, close/re-open and due-date changes on its cards",
+  "method": "PUT",
+  "path": "/lists/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/subscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "list.unsubscribe",
+  "tag": "list",
+  "summary": "Stop watching a column",
+  "method": "DELETE",
+  "path": "/lists/{id}/subscription",
+  "auth": "user",
+  "ui": "POST /ui/lists/{id}/unsubscribe",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ {
   "name": "list.update",
   "tag": "list",
   "summary": "Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position",
@@ -5443,6 +5513,24 @@
     "type": "string",
     "required": true,
     "desc": "Recipient of the test message"
+   }
+  ]
+ },
+ {
+  "name": "subscription.list",
+  "tag": "subscription",
+  "summary": "What you watch: boards, columns and cards (newest first), and the cards you muted; only boards you can still view",
+  "method": "GET",
+  "path": "/users/me/subscriptions",
+  "auth": "user",
+  "ui": "GET /ui/settings/watching",
+  "fields": [
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "cards and muted cards to return, most recently changed first (default 100, max 500)"
    }
   ]
  },

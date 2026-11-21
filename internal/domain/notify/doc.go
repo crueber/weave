@@ -30,15 +30,18 @@
 //	"item"       the entity as sent to clients/webhooks ({id, boardId, projectId, ...})
 //	"prevData"   previous state (webhook "prevData")
 //	"projectId"/"boardId"   scope for webhook filtering when not derivable from BoardID
-//	commentCreate:         "commentId", "text" (raw markdown with @[Name](userId) mentions), "cardName"
+//	commentCreate:         "commentId", "text" (raw markdown with @[Name](userId) mentions)
 //	cardMembershipCreate:  "userId" (the member added)
-//	cardMove / cardUpdate: "fromList", "toList" as {id,name,type} (differing ids => moveCard notifications)
+//	cardMove:              "fromListId", "toListId" (differing ids => a move; into/out of a closed column => close/reopen)
+//	cardUpdate:            "changed" []string of the fields the update set ("isClosed", "dueDate" notify)
+//	cardCreate:            "draft": true for inbox drafts (silent)
 //
-// Planka notification rules implemented: commentCreate -> mentionInComment for
-// mentioned users who can view the board (not the author), commentCard for card and
-// board subscribers (not the author, not already mentioned); cardMembershipCreate ->
-// addMemberToCard; list change -> moveCard for card/board subscribers. Every
-// notification is pushed to realtime room user:<id> as event "notification",
+// Notification rules (planNotifications; see docs/DESIGN.md "Watching and notifications"): watchers of the card,
+// its column(s) and the board hear createCard, moveCard, closeCard, reopenCard, setCardDueDate and commentCard;
+// mentioned viewers get mentionInComment; the added member gets addMemberToCard. At most one notification per
+// user per event (reason in data.via), never the actor, never a muted card, only users who can view the board
+// (authz.ViewersAmong). subscription.list (op) and Settings > Watching (/ui/settings/watching) are the read side.
+// Every notification is pushed to realtime room user:<id> as event "notification",
 // delivered to that user's notification services and (when SMTP is configured) by
 // e-mail; board services are additionally told about new comments.
 //

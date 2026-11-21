@@ -460,6 +460,8 @@ func impFromDoc(d *exportDoc) impBoard {
 	ib := impBoard{FieldGroups: d.CustomFields}
 	str := func(k string) string { s, _ := d.Board[k].(string); return s }
 	flag := func(k string) bool { b, _ := d.Board[k].(bool); return b }
+	// A file that does not say (templates, Trello/CSV, old exports) gets the default: card counters on.
+	flagOn := func(k string) bool { b, ok := d.Board[k].(bool); return b || !ok }
 	ib.Name = str("name")
 	// Colours from a file are untrusted: anything that does not validate is dropped, never stored.
 	ib.Color, _ = NormalizeColor(str("color"))
@@ -476,7 +478,7 @@ func impFromDoc(d *exportDoc) impBoard {
 	// Older exports also carry defaultCardType/limitCardTypesToDefault (and cards a "type"): card types were
 	// removed, so those keys are read past and ignored.
 	ib.Flags = impFlags{AlwaysCreator: flag("alwaysDisplayCardCreator"), ExpandTasks: flag("expandTaskListsByDefault"),
-		CardCounter: flag("showCardCounter"), CardAges: flag("showCardAges"), Inbox: flag("hasInbox")}
+		CardCounter: flagOn("showCardCounter"), CardAges: flag("showCardAges"), Inbox: flag("hasInbox")}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
 		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position, WIP: l.WIPLimit})
@@ -560,7 +562,7 @@ func parseTrello(data []byte) (impBoard, error) {
 	if len(t.Lists) == 0 {
 		return impBoard{}, fmt.Errorf("not a Trello board export (no lists)")
 	}
-	ib := impBoard{Name: t.Name}
+	ib := impBoard{Name: t.Name, Flags: impFlags{CardCounter: true}}
 	sort.SliceStable(t.Lists, func(i, j int) bool { return t.Lists[i].Pos < t.Lists[j].Pos })
 	closedList := map[string]bool{}
 	for i, l := range t.Lists {
@@ -644,7 +646,7 @@ func parseCSV(data []byte) (impBoard, error) {
 		}
 		return strings.TrimSpace(row[i])
 	}
-	ib := impBoard{}
+	ib := impBoard{Flags: impFlags{CardCounter: true}}
 	lists, labels := map[string]bool{}, map[string]bool{}
 	for _, row := range rows[1:] {
 		name := get(row, cName)

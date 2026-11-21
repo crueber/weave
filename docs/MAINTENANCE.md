@@ -59,3 +59,29 @@ installer does this): decode the signature (`openssl base64 -d -A`) and run
 
 Forks that sign with their own key pass `WEAVE_RELEASE_PUBKEY=/path/pub.pem` to `install.sh` /
 `install.ps1`, and `--pubkey` to `weave verify-release`.
+
+## Project website (GitHub Pages)
+
+The site lives in `site/` (static HTML/CSS and two tiny scripts, no external requests). `scripts/site-stage.sh`
+copies it and `docs/demo.webm` (kept once, in `docs/`) into one directory; `make site` stages to `dist/site`,
+`make site-preview` also serves it on http://localhost:8099/. The GitHub workflow `scripts/publish/pages.yml`
+runs the same script, so the preview is what deploys. It is installed on the GitHub mirror by
+`scripts/publish-to-github.sh` like the other `scripts/publish/*.yml` templates; it does not run on Forgejo.
+
+Maintainer steps (once):
+
+1. On GitHub: repository **Settings -> Pages -> Source: GitHub Actions**. Do this before the next publish,
+   otherwise the first Pages run fails at `configure-pages`; if that happens, enable it and re-run the
+   workflow (Actions -> pages -> Run workflow).
+2. Publish from Forgejo as usual (Actions -> publish to github). The site goes live at
+   https://crueber.github.io/weave/ after that publish: the squash commit touches `site/**`, which triggers
+   the workflow. Later changes deploy whenever a publish changes `site/**` or `docs/demo.webm`.
+
+The workflow also lists `release: published` and `workflow_dispatch`. A release created by another workflow
+with the built-in `GITHUB_TOKEN` does not start new runs, so in practice the push trigger (the publish) and
+the manual button are what deploy.
+
+Screenshots: `scripts/site/seed.sh` seeds a throwaway instance with fictional data, `scripts/site/shots.mjs`
+shoots it, `scripts/site/webp.py SHOTS site/img` converts (see each file's header). Read every image before
+committing: no real names, hosts, paths or keys. `python3 scripts/site/check-contrast.py` checks the site
+tokens (copied from `internal/web/static/weave.css`; keep them in sync by hand).

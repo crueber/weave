@@ -21,7 +21,7 @@
     var t = tileFocused() || hovered, c = t && t.closest('.boards-col'); if (c) return c;
     var a = document.activeElement; c = a && a.closest && a.closest('.boards-col'); if (c) return c;
     var h = document.querySelector('.boards-col:hover'); if (h) return h;
-    return document.querySelector('.boards-col:not(.is-collapsed)');
+    return document.querySelector('.boards-col:not(.is-collapsed):not(.boards-inbox)');
   }
 
   document.addEventListener('click', function (e) {
@@ -152,7 +152,7 @@
       case '/':
         var f = document.querySelector('[data-filter-input]'); if (f) { e.preventDefault(); f.focus(); f.select(); } break;
       case 'e':
-        var t = tileFocused() || hovered; if (t && B.canEdit()) { e.preventDefault(); B.openQuick(t); } break;
+        var t = tileFocused() || hovered; if (t && !t.classList.contains('boards-draft') && B.canEdit()) { e.preventDefault(); B.openQuick(t); } break;
       case 'j': e.preventDefault(); moveFocus(1); break;
       case 'k': e.preventDefault(); moveFocus(-1); break;
       case 'l': e.preventDefault(); moveFocus(1, true); break;

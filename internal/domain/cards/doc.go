@@ -12,7 +12,11 @@
 //	                                                    custom fields when a card is duplicated, spawned by
 //	                                                    recurrence or created from a template
 //	MarkNotificationsRead func(e, cardID) (int64, error) notify may replace the default implementation
+//	AutoWatchComment(e, cardID, userID)                 "Watch when I comment": watch unless muted/agent/pref off (cardextras)
 //	IdleAfter                                           edit-lock idle threshold (60s)
+//
+// Installs boards.LoadDrafts (the Inbox column on the board page reads drafts through it; the panel's UI routes
+// are registered by boards).
 //
 // Contract with boards: card rows with is_draft=1 or is_template=1 must be excluded from
 // list/kanban rendering (card.list already does). Card tiles open the modal with

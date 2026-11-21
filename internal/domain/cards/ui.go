@@ -121,7 +121,6 @@ func init() {
 		{"POST /ui/cards/{id}/recurrence/run", "card.recurrence.run"},
 		{"POST /ui/cards/{id}/members", "card.member.add"}, {"POST /ui/cards/{id}/members/{userId}/remove", "card.member.remove"},
 		{"POST /ui/cards/{id}/labels", "card.label.add"}, {"POST /ui/cards/{id}/labels/{labelId}/remove", "card.label.remove"},
-		{"POST /ui/cards/{id}/subscribe", "card.subscribe"}, {"POST /ui/cards/{id}/unsubscribe", "card.unsubscribe"},
 		{"POST /ui/cards/{id}/share", "card.share.create"}, {"POST /ui/cards/{id}/share/revoke", "card.share.revoke"},
 		{"POST /ui/cards/{id}/template", "card.template.save"},
 	} {
@@ -130,6 +129,19 @@ func init() {
 			if _, err := c.Do(op); err != nil {
 				return err
 			}
+			return renderModal(c, c.R.PathValue("id"), "view", nil)
+		})
+	}
+	for _, m := range []struct{ pat, op, msg string }{
+		{"POST /ui/cards/{id}/subscribe", "card.subscribe", "Watching this card"},
+		{"POST /ui/cards/{id}/unsubscribe", "card.unsubscribe", "Card muted: no notifications about it"},
+	} {
+		op, msg := m.op, m.msg
+		web.Route(m.pat, func(c *web.Ctx) error {
+			if _, err := c.Do(op); err != nil {
+				return err
+			}
+			c.Toast(msg)
 			return renderModal(c, c.R.PathValue("id"), "view", nil)
 		})
 	}
@@ -258,20 +270,8 @@ func init() {
 		return nil
 	})
 
-	// inbox + templates
-	web.Route("GET /ui/boards/{boardId}/inbox", func(c *web.Ctx) error { return renderInbox(c, c.R.PathValue("boardId")) })
-	web.Route("POST /ui/boards/{boardId}/inbox", func(c *web.Ctx) error {
-		if _, err := c.Do("card.draft.create"); err != nil {
-			return err
-		}
-		return renderInbox(c, c.R.PathValue("boardId"))
-	})
-	web.Route("POST /ui/boards/{boardId}/inbox/settings", func(c *web.Ctx) error {
-		if _, err := c.Do("card.inbox.set"); err != nil {
-			return err
-		}
-		return renderInbox(c, c.R.PathValue("boardId"))
-	})
+	// inbox: the panel and its routes live on the board page (boards/inbox.go); drafts load through boards.LoadDrafts
+	// templates
 	web.Route("GET /ui/projects/{projectId}/card-templates", func(c *web.Ctx) error {
 		out, err := ops.Typed[TemplatesOut](c.Env, "card.template.list", TemplatesIn{c.R.PathValue("projectId")})
 		if err != nil {
@@ -392,25 +392,15 @@ func uiUpdate(c *web.Ctx) error {
 	return renderModal(c, id, "view", nil)
 }
 
-func renderInbox(c *web.Ctx, boardID string) error {
-	out, err := ops.Typed[InboxOut](c.Env, "card.inbox.list", InboxIn{boardID})
-	if err != nil {
-		return err
+// inboxCount is the number of drafts for the "Inbox (N)" pointer on the calendar and map pages: only when the board
+// has the inbox on and the caller is a member (drafts are not shown to people who only see a public board).
+func inboxCount(c *web.Ctx, b boards.Board) int {
+	if !b.HasInbox || c.Env.User == nil || !authz.IsBoardMember(c.Env, b.ID) {
+		return 0
 	}
-	data := map[string]any{"Enabled": out.Enabled, "Items": out.Items, "BoardID": boardID,
-		"CanManage": authz.BoardLevel(c.Env, boardID) >= authz.Manage, "Lists": []ListOpt{}}
-	if len(out.Items) > 0 {
-		if o, err := ops.Typed[Options](c.Env, "card.options", IDIn{out.Items[0].ID}); err == nil {
-			var ls []ListOpt
-			for _, l := range o.Lists {
-				if l.BoardID == boardID {
-					ls = append(ls, l)
-				}
-			}
-			data["Lists"] = ls
-		}
-	}
-	return c.RenderBlock("cards_inbox.html", "cards_inbox", data)
+	var n int
+	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT COUNT(*) FROM cards WHERE board_id=? AND is_draft=1 AND is_template=0`, b.ID).Scan(&n)
+	return n
 }
 
 type calDay struct {
@@ -447,6 +437,7 @@ func uiCalendar(c *web.Ctx) error {
 	return c.Render("cards_calendar.html", map[string]any{
 		"Board": cr.Board, "ProjectName": cr.ProjectName, "BoardID": board, "Title": first.Format("January 2006"), "Prev": first.AddDate(0, -1, 0).Format("2006-01"), "Next": first.AddDate(0, 1, 0).Format("2006-01"),
 		"Weekdays": []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}, "Days": days, "Unscheduled": out.Unscheduled,
+		"Inbox": inboxCount(c, cr.Board),
 	})
 }
 
@@ -467,7 +458,8 @@ func uiMap(c *web.Ctx) error {
 	if err != nil {
 		return err
 	}
-	data := map[string]any{"Board": cr.Board, "ProjectName": cr.ProjectName, "BoardID": board, "W": W, "H": H, "Points": []mapPt{}, "Grid": []mapLine{}}
+	data := map[string]any{"Board": cr.Board, "ProjectName": cr.ProjectName, "BoardID": board, "W": W, "H": H, "Points": []mapPt{}, "Grid": []mapLine{},
+		"Inbox": inboxCount(c, cr.Board)}
 	if len(out.Points) > 0 {
 		minLat, maxLat, minLng, maxLng := 90.0, -90.0, 180.0, -180.0
 		for _, p := range out.Points {

@@ -305,7 +305,7 @@ func OIDCLogin(e *ops.Env, subject string, claims map[string]any) (LoginOut, err
 			}
 		}
 		a.ID = db.NewID()
-		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO users(id,email,username,name,role,is_sso,is_email_verified,oidc_sub,created_at) VALUES(?,?,?,?,?,1,1,?,?)`,
+		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO users(id,email,username,name,role,is_sso,is_email_verified,oidc_sub,subscribe_own_cards,created_at) VALUES(?,?,?,?,?,1,1,?,1,?)`, // people watch the cards they create by default (migration 0102)
 			a.ID, email, un, name, role, subject, db.Now()); err != nil {
 			return LoginOut{}, err
 		}

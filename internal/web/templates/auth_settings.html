@@ -25,6 +25,11 @@
       {{template "auth_set_profile_in" .}}
       {{template "auth_set_appearance_in" .}}
       {{template "auth_set_workspace_in" .}}
+      {{/* owned by the notify domain (subscription.list), loaded lazily so auth does not depend on it */}}
+      <section id="set-watching" class="boards-sec bs-panel" data-panel="watching" aria-labelledby="set-watching-h" hx-get="/ui/settings/watching" hx-trigger="load" hx-swap="outerHTML">
+        <div class="bs-sec-head"><h2 id="set-watching-h">Watching</h2></div>
+        <p class="bs-empty-row">Loading&hellip;</p>
+      </section>
       {{template "auth_set_apikey_in" .}}
       {{template "auth_set_sessions_in" .}}
     </div>
@@ -82,8 +87,8 @@
       <select id="as-order" name="defaultProjectsOrder">{{range $o := .Orders}}<option value="{{$o}}"{{if eq $u.DefaultProjectsOrder $o}} selected{{end}}>{{$o}}</option>{{end}}</select></div>
     <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-idle">Auto sign-out</label></b><small>Minutes of inactivity before you are signed out. 0 means never.</small></span>
       <input id="as-idle" type="number" min="0" name="autoLogoutMinutes" value="{{if $u.AutoLogoutMinutes}}{{$u.AutoLogoutMinutes}}{{else}}0{{end}}" class="as-narrow"></div>
-    {{template "bs_toggle" dict "ID" "as-sub-own" "Name" "subscribeOwnCards" "Title" "Subscribe to cards I create" "Help" "Get notified about activity on cards you create." "On" $u.SubscribeOwnCards}}
-    {{template "bs_toggle" dict "ID" "as-sub-com" "Name" "subscribeToCardWhenCommenting" "Title" "Subscribe when I comment" "Help" "Follow a card automatically after you comment on it." "On" $u.SubscribeToCardWhenCommenting}}
+    {{template "bs_toggle" dict "ID" "as-sub-own" "Name" "subscribeOwnCards" "Title" "Watch cards I create" "Help" "Get notified when a card you create is moved, closed, commented on or its due date changes." "On" $u.SubscribeOwnCards}}
+    {{template "bs_toggle" dict "ID" "as-sub-com" "Name" "subscribeToCardWhenCommenting" "Title" "Watch when I comment" "Help" "Watch a card automatically after you comment on it. Cards you muted stay muted." "On" $u.SubscribeToCardWhenCommenting}}
     {{template "bs_toggle" dict "ID" "as-hl" "Name" "turnOffRecentCardHighlighting" "Title" "Turn off recent-card highlighting" "Help" "Stop marking cards that changed since you last looked." "On" $u.TurnOffRecentCardHighlighting}}
     {{template "bs_toggle" dict "ID" "as-fav" "Name" "enableFavoritesByDefault" "Title" "Favourite new projects" "Help" "Pin every project you join or create to your favourites." "On" $u.EnableFavoritesByDefault}}
   </form>

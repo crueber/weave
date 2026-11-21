@@ -156,6 +156,35 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 	return out
 }
 
+// ViewersAmong returns the users among userIDs who can view the board (BoardLevel >= View for each of them), in one
+// query whatever the number of users. Same rules as BoardLevel, applied to the stored account: the user must exist, not
+// be deleted and not be deactivated; then admin, a manager of the board's project, a direct or group board membership,
+// or a public board. The notification planner uses it to drop watchers who lost access.
+func ViewersAmong(e *ops.Env, boardID string, userIDs []string) map[string]bool {
+	out := map[string]bool{}
+	if len(userIDs) == 0 {
+		return out
+	}
+	in, args := placeholders(userIDs)
+	q := `SELECT u.id FROM users u JOIN boards b ON b.id=? WHERE u.id IN (` + in + `) AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+		u.role='admin' OR b.is_public=1 OR
+		EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
+		EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
+			(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))`
+	rows, err := e.DB.QueryContext(e.Ctx, q, append([]any{boardID}, args...)...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 func placeholders(ids []string) (string, []any) {
 	args := make([]any, len(ids))
 	for i, id := range ids {

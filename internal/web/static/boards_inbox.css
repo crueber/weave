@@ -1,0 +1,33 @@
+/* Board Inbox (templates/_boards_inbox.html): the pinned first column of drafts. It reuses the column layout
+   (.boards-col) but reads as a holding area, not a stage of the workflow: no fill, a dashed outline, no accent bar. */
+.boards-inbox{background:transparent;border:1px dashed var(--border-strong);box-shadow:none}
+.boards-inbox:hover{background:transparent}
+.boards-inbox .boards-inbox-head{border-top:0;padding-top:.55rem}
+.boards-inbox-ico{flex:0 0 auto;width:1rem;height:1rem;color:var(--muted)}
+.boards-inbox-title{cursor:default}
+.boards-inbox-title:hover{background:none}
+.boards-inbox-cap{margin:-.3rem 0 .35rem;padding:0 .85rem 0 2.55rem;font-size:var(--text-xs);color:var(--muted);line-height:1.3}
+.boards-inbox.is-collapsed .boards-inbox-cap{display:none}
+.boards-inbox.is-collapsed .boards-inbox-ico{order:-1}
+.boards-inbox-empty{border:0;padding:.75rem .5rem;text-align:left;line-height:1.45}
+.boards-inbox-empty strong{display:block;color:var(--fg-2);font-weight:600;margin-bottom:.1rem}
+
+/* drafts: ordinary tiles, with who captured it, how long ago, and the move control */
+.boards-draft-meta{flex-wrap:nowrap;gap:.45rem}
+.boards-draft-av{width:18px;height:18px;border-radius:50%;flex:0 0 auto;background:var(--surface-3);display:block}
+.boards-draft-age{white-space:nowrap;font-variant-numeric:tabular-nums}
+.boards-draft-move{margin-left:auto}
+.boards-draft-movebtn{list-style:none;display:inline-flex;align-items:center;padding:.1rem .5rem;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--surface);color:var(--fg-2);font-size:var(--text-xs);line-height:1.5;cursor:pointer;white-space:nowrap}
+.boards-draft-movebtn::-webkit-details-marker{display:none}
+.boards-draft-movebtn:hover,.boards-draft-move[open]>.boards-draft-movebtn{border-color:var(--border-strong);color:var(--fg);background:var(--surface-2)}
+@media(min-width:641px){.boards-draft-pop{width:15rem}}
+.boards-draft-h{padding:.35rem .55rem .25rem}
+.boards-draft-publish .boards-menuitem{display:flex;align-items:center;gap:.5rem}
+.boards-draft-dot{flex:0 0 auto;width:.55rem;height:.55rem;border-radius:50%}
+@media (hover:hover){.boards-draft .boards-draft-movebtn{opacity:.75}.boards-draft:hover .boards-draft-movebtn,.boards-draft:focus-within .boards-draft-movebtn{opacity:1}}
+
+/* list / grid view pointer to the Inbox */
+.boards-inbox-link{display:inline-flex;align-items:center;gap:.4rem;margin:0 0 var(--space-3);padding:.3rem .7rem;border:1px dashed var(--border-strong);border-radius:var(--radius-pill);color:var(--fg-2);font-size:var(--text-sm);text-decoration:none}
+.boards-inbox-link:hover{color:var(--fg);background:var(--surface-2)}
+.boards-inbox-link .boards-count{margin:0}
+.boards-inbox-link-hint{color:var(--muted);font-size:var(--text-xs)}

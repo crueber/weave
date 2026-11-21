@@ -47,7 +47,7 @@ func scanNotif(r interface{ Scan(...any) error }) (NotificationOut, error) {
 			n.CardName = str(c, "name")
 		}
 	}
-	n.Summary = summaryOf(n)
+	n.Summary, n.Reason = summaryOf(n), Reason(n)
 	return n, err
 }
 

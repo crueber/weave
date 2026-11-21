@@ -1,0 +1,53 @@
+{{/* The board Inbox (boards/inbox.go): a pinned first column of drafts, shown when the board has the inbox on and the
+   caller is a member. It is a .boards-col so the live merge, composer, collapse and phone swipe treat it like a column;
+   boards_dnd.js / boards_keys.js / boards_inbox.js special-case .boards-inbox where it must differ (no card drops,
+   no list drag, publish instead of move). Args: PageData. */}}
+{{define "boards_inbox_ico"}}<svg class="ico boards-inbox-ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M2 9.5 4.2 3h7.6L14 9.5V13H2V9.5zm0 0h3.6l1 1.6h2.8l1-1.6H14"/></svg>{{end}}
+
+{{define "boards_inbox"}}{{$p := .}}<section class="boards-col boards-inbox" id="col-inbox" data-id="inbox-{{.Board.ID}}" data-list-type="inbox" role="listitem" aria-labelledby="inbox-h" aria-describedby="inbox-cap">
+  <header class="boards-col-head boards-inbox-head">
+    <button type="button" class="boards-iconbtn boards-col-collapse" data-collapse aria-expanded="true" aria-label="Collapse the Inbox"><svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    {{template "boards_inbox_ico"}}
+    <h2 class="boards-col-title boards-inbox-title" id="inbox-h">Inbox</h2>
+    <span class="boards-count" title="{{len .Drafts}} draft{{if ne (len .Drafts) 1}}s{{end}} in the Inbox"><span data-count>{{len .Drafts}}</span></span>
+  </header>
+  <p class="boards-inbox-cap" id="inbox-cap">Ideas not yet on the board</p>
+  <div class="boards-cards boards-inbox-items" role="list" aria-label="Drafts in the Inbox" data-list="inbox">
+    {{range .Drafts}}{{template "boards_draft" dict "D" . "P" $p}}{{end}}
+    <p class="boards-empty-list boards-inbox-empty" role="note"><strong>Nothing in the inbox.</strong> {{if .CanEdit}}Jot ideas down here, then move them to a column when they are ready.{{else}}Ideas wait here until an editor moves them onto the board.{{end}}</p>
+  </div>
+  {{if .CanEdit}}<div class="boards-composer boards-addcard" data-composer="card" data-list="inbox">
+    <button type="button" class="boards-add-open" data-open aria-label="Capture an idea in the Inbox"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Capture an idea</button>
+    <form class="boards-composer-form" method="post" action="/ui/boards/{{.Board.ID}}/inbox">
+      <textarea name="name" rows="1" required maxlength="4096" placeholder="What&rsquo;s the idea?" aria-label="New idea for the Inbox" autocomplete="off" data-composer-input></textarea>
+      <div class="boards-composer-actions"><button class="btn btn-primary boards-btn-primary">Add idea</button><button type="button" class="boards-x" data-close aria-label="Close composer">&times;</button><span class="boards-composer-hint">Enter to add &middot; Esc to close</span></div>
+    </form>
+  </div>{{end}}
+</section>{{end}}
+
+{{/* One draft. Opens the card sheet on click/Enter like any tile; editors get "Move to column" (a portaled menu,
+   never clipped; a bottom sheet on phones). Args: D (Draft), P (PageData). */}}
+{{define "boards_draft"}}{{$d := .D}}{{$p := .P}}<article class="boards-tile boards-draft" id="tile-{{$d.ID}}" data-id="{{$d.ID}}" data-draft role="listitem">
+  <div class="boards-tile-name"><a class="boards-tile-link" href="/cards/{{$d.ID}}" data-open-card="{{$d.ID}}">{{$d.Name}}</a></div>
+  <div class="boards-tile-meta boards-draft-meta">
+    {{if $d.CreatorID}}<img class="avatar boards-draft-av" src="/avatars/{{$d.CreatorID}}" alt="" title="Captured by {{$d.CreatorName}}{{if $d.CreatorIsAgent}} (agent){{end}}" width="18" height="18" loading="lazy" decoding="async"><span class="boards-sr">Captured by {{$d.CreatorName}}.</span>{{end}}
+    {{if $d.Age}}<time class="boards-meta boards-draft-age" datetime="{{$d.CreatedAt}}" title="Captured {{$d.AgeTitle}}">{{$d.Age}}</time>{{end}}
+    {{if $d.HasDescription}}<span class="boards-meta" title="Has a description"><svg class="ico" aria-hidden="true"><use href="#i-desc"/></svg><span class="boards-sr">Has a description</span></span>{{end}}
+    {{if and $p.CanEdit $p.Columns}}<details class="boards-menu boards-draft-move"><summary class="boards-draft-movebtn" aria-label="Move {{$d.Name}} to a column" title="Move to a column">Move to&hellip;</summary>
+      <div class="boards-menu-pop boards-draft-pop" data-sheet="1" role="menu" aria-label="Move {{$d.Name}} to a column">
+        <form method="post" action="/ui/boards/{{$p.Board.ID}}/inbox/publish" class="boards-menu-scroll boards-draft-publish" data-publish>
+          <span class="boards-menu-h boards-draft-h">Move to column</span>
+          <input type="hidden" name="id" value="{{$d.ID}}">
+          {{range $p.Columns}}<button class="boards-menuitem" role="menuitem" name="listId" value="{{.List.ID}}"><span class="boards-draft-dot" style="background:{{boardsColor .List.Color}}" aria-hidden="true"></span>{{deref .List.Name}}</button>{{end}}
+        </form>
+      </div>
+    </details>{{end}}
+  </div>
+</article>{{end}}
+
+{{/* fragments: new draft tiles (composer answer) and the whole panel */}}
+{{define "boards_drafts"}}{{$p := .Data.P}}{{range .Data.Drafts}}{{template "boards_draft" dict "D" . "P" $p}}{{end}}{{end}}
+{{define "boards_inbox_frag"}}{{template "boards_inbox" .Data}}{{end}}
+
+{{/* list and grid views: a quiet pointer to the Inbox, which lives on the Kanban view */}}
+{{define "boards_inbox_link"}}<a class="boards-inbox-link" href="{{boardsHref .PageURL "kanban" .Query}}" title="The Inbox is the first column of the Kanban view">{{template "boards_inbox_ico"}}Inbox <span class="boards-count">{{len .Drafts}}</span><span class="boards-inbox-link-hint">on the Kanban view</span></a>{{end}}

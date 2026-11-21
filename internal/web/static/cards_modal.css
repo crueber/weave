@@ -255,3 +255,25 @@ button.cm-lab{cursor:pointer}
 /* ---- share + inbox ---- */
 .cards-share{max-width:46rem;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5) var(--space-6);box-shadow:var(--shadow-1)}
 .cards-inbox{background:var(--surface-2);border:1px dashed var(--border-strong);border-radius:var(--radius);padding:var(--space-3) var(--space-4)}.cards-inbox-list{list-style:none;padding:0;margin:var(--space-2) 0;display:flex;flex-direction:column;gap:var(--space-2)}
+/* ---- watching (card sheet + column sheet top bars): an outline bell when off, a filled accent bell when on ---- */
+.cm-watch{display:inline-flex;align-items:center;gap:.35rem;height:2rem;padding:0 .6rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--fg-2);font:inherit;font-size:var(--text-sm);font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;list-style:none;box-shadow:none}
+.cm-watch:hover{background:var(--surface-3);color:var(--fg)}
+.cm-watch .watch-ico{width:1rem;height:1rem;flex:none}
+.cm-watch.is-on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.cm-watch.is-on:hover{background:var(--accent-soft);color:var(--accent-hover);border-color:var(--accent-hover)}
+.cm-watch.is-muted{border-style:dashed;color:var(--muted)}
+.cm-watch small{font-weight:500;color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;max-width:10rem;display:inline-block;vertical-align:bottom}
+.cm-watch.is-on small{color:var(--accent)}
+.cm-watchpop{flex:none}
+.cm .cm-watchpop .cards-popbody{width:17rem}
+.cm-watch-why{margin:0;padding:.25rem .5rem;font-size:var(--text-sm);color:var(--fg-2)}
+.cm-watch-panel .cm-mi{flex-wrap:wrap;gap:.15rem .5rem}
+.cm-watch-panel .cm-mi .watch-ico{width:1rem;height:1rem;color:var(--fg-2)}
+.cm-watch-panel .cm-mi small{flex-basis:100%;padding-left:1.5rem;font-size:var(--text-xs);color:var(--muted)}
+.cm-watch-badge{gap:.25rem}
+@media (max-width:760px){
+  .cm-watch span,.cm-watch .cm-chev{display:none}
+  .cm-watch{width:2rem;justify-content:center;padding:0}
+  /* the watch button takes the room of the project and board crumbs (they shrank to a letter): keep the column switcher */
+  .cm-crumb>a,.cm-crumb>.cm-sep{display:none}
+}

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Weave: the kanban board your whole team can work</title>
+<meta name="description" content="Weave is a self-hosted kanban board for people and AI agents: one small server with SQLite, OIDC sign-in, a calm board in light and dark, a CLI and an MCP connector for agents. MIT licensed.">
+<script src="theme-init.js"></script>
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#top" aria-label="Weave, back to top">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l4.5 12L16 13l4.5 9L25 10"/></svg></span>
+      <span class="brand-word">Weave</span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#use-cases">Use cases</a>
+      <a href="#agents">Agents</a>
+      <a href="#self-host">Self-host</a>
+      <a href="#screens">Screens</a>
+    </nav>
+    <div class="top-end">
+      <a class="gh" href="https://github.com/crueber/weave">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <div class="theme" role="group" aria-label="Colour theme">
+        <button type="button" data-theme-set="light" aria-pressed="false" title="Light theme"><span class="sr-only">Light</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+        <button type="button" data-theme-set="system" aria-pressed="true" title="Follow the system"><span class="sr-only">System</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></button>
+        <button type="button" data-theme-set="dark" aria-pressed="false" title="Dark theme"><span class="sr-only">Dark</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg></button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ============================================================ hero -->
+  <section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="wrap">
+      <p class="eyebrow">Self-hosted kanban for people and AI agents</p>
+      <h1 id="hero-title">The kanban board your whole team can work, including the agents.</h1>
+      <p class="lede">Self-hosted. One small server. A calm, fast board for people, and a first-class CLI and MCP connector for the agents working beside them.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#self-host">Get started</a>
+        <a class="btn" href="https://github.com/crueber/weave">View on GitHub</a>
+      </div>
+      <figure class="video">
+        <video data-autoplay muted loop playsinline controls preload="none" poster="img/demo-poster.webp" width="1280" height="720" aria-describedby="video-cap">
+          <source src="demo.webm" type="video/webm">
+          <a href="demo.webm">Download the demo video (WebM)</a>
+        </video>
+        <figcaption id="video-cap">A one-minute tour: adding cards, drag and drop, the card sheet, WIP limits, filters, the list, calendar and map views, the template gallery, Connect an agent, settings, then the dark theme and a phone. No sound.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============================================================ trust strip -->
+  <section class="trust" aria-label="At a glance">
+    <ul class="wrap trust-list">
+      <li><strong>Self-hosted</strong> on your own machine</li>
+      <li><strong>One small server</strong> one container or binary</li>
+      <li><strong>SQLite</strong> built in, nothing else to run</li>
+      <li><strong>OIDC sign-in</strong> through your identity provider</li>
+      <li><strong>MIT licence</strong></li>
+      <li><strong>CLI</strong> for Linux, macOS and Windows</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ use cases -->
+  <section class="section" id="use-cases" aria-labelledby="uc-title">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Use cases</p>
+        <h2 id="uc-title">One board, many kinds of work</h2>
+        <p class="sec-lede">A family's week, a startup's launch plan and an engineering team's sprint all fit the same simple idea: columns, cards and a clear next step. Start from a blank board or a library of starter boards.</p>
+      </header>
+
+      <article class="case">
+        <div class="case-text">
+          <div class="case-intro">
+          <h3>Plan your week</h3>
+          <p>Put each day in a column and drop in what has to happen: the dentist on Tuesday, groceries on Wednesday, a long run at the weekend, and a someday column for the things that can wait. Labels tell work, home and health apart at a glance, checklists hold the shopping list, and a due date puts the card on the calendar.</p>
+          </div>
+          <div class="case-detail">
+          <ul class="ticks">
+            <li>Press Enter to add a card and keep typing; paste a list to add many at once.</li>
+            <li>Recurring cards bring back the weekly jobs by themselves.</li>
+            <li>Share the board with the household; live updates never overwrite what someone is typing.</li>
+          </ul>
+          <p class="start">Start from <strong>Weekly planner</strong>: Mon to Fri, Weekend and Someday columns, with Work, Home and Health labels. Also try <strong>Home &amp; chores</strong> and <strong>Meal planning</strong>.</p>
+          </div>
+        </div>
+        <div class="case-media">
+          <img class="shot shot-l" src="img/week-light-1280.webp" srcset="img/week-light-640.webp 640w, img/week-light-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="381" loading="lazy" decoding="async" alt="A board called My week with columns Mon to Fri: gym before work, the dentist at 9:30, groceries with a shopping checklist, booking flights, pizza night and a yoga class, each with a coloured label.">
+          <img class="shot shot-d" src="img/week-dark-1280.webp" srcset="img/week-dark-640.webp 640w, img/week-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="381" loading="lazy" decoding="async" alt="The My week board in the dark theme: columns Mon to Fri with personal and work cards.">
+        </div>
+      </article>
+
+      <article class="case">
+        <div class="case-text">
+          <div class="case-intro">
+          <h3>Plan a software project timeline</h3>
+          <p>Weave has no Gantt chart, and it does not pretend to. A timeline here is a plain board: one column per phase (Plan, Build, Beta, Launch), a due date on every card, and a <em>Milestone</em> label for the dates that matter. The calendar view lays the cards out by day, and you drag a card to another day to reschedule it.</p>
+          </div>
+          <div class="case-detail">
+          <ul class="ticks">
+            <li>The list view shows every card with its column, labels, members and due date in one table.</li>
+            <li>Sort any column by due date, and filter the board by label, member or due date.</li>
+            <li>Overdue and due-soon dates stand out on the board and on the project page.</li>
+          </ul>
+          <p class="start">Start from a <strong>Blank board</strong> with your own phases, or from <strong>Product roadmap</strong> (Now, Next, Later, Shipped) when direction matters more than dates.</p>
+          </div>
+        </div>
+        <div class="case-media">
+          <img class="shot shot-l" src="img/calendar-light-1280.webp" srcset="img/calendar-light-640.webp 640w, img/calendar-light-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="Calendar view of the Apollo 2.0 timeline board: a month with dated cards such as API v2 endpoints, Beta opens to 50 teams, Release candidate and Apollo 2.0 general availability.">
+          <img class="shot shot-d" src="img/calendar-dark-1280.webp" srcset="img/calendar-dark-640.webp 640w, img/calendar-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="Calendar view of the Apollo 2.0 timeline in the dark theme.">
+          <img class="shot shot-l" src="img/timeline-list-light-1280.webp" srcset="img/timeline-list-light-640.webp 640w, img/timeline-list-light-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="List view of the same board: each card with its column (Plan, Build, Beta, Launch, Done), labels such as Milestone and Engineering, members and due dates.">
+          <img class="shot shot-d" src="img/timeline-list-dark-1280.webp" srcset="img/timeline-list-dark-640.webp 640w, img/timeline-list-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="List view of the Apollo 2.0 timeline in the dark theme.">
+        </div>
+      </article>
+
+      <article class="case">
+        <div class="case-text">
+          <div class="case-intro">
+          <h3>Run a software project board</h3>
+          <p>The team's sprint in one place: a backlog, the sprint, work in progress, review and done. Soft WIP limits show in the column header when a column is full, checklists show progress on the card, and every card says who is on it. When an agent claims a card, the board shows which agent holds it and until when.</p>
+          </div>
+          <div class="case-detail">
+          <ul class="ticks">
+            <li>Drag with a mouse or move cards from the keyboard; <kbd>?</kbd> shows every shortcut.</li>
+            <li>Card details open only when you ask: description, checklists, comments with mentions, attachments, custom fields and time tracking.</li>
+            <li>The project page gives each board a Pulse card (see <a href="#screens">Screens</a>): open cards per column, what is overdue or due this week, what is claimed and which agents are listening.</li>
+          </ul>
+          <p class="start">Start from <strong>Sprint (Scrum)</strong>: Backlog, Sprint, In progress and Review with WIP limits, Done, and Bug, Feature, Chore and Spike labels. Pair it with <strong>Bug tracker</strong> and <strong>Software release checklist</strong>.</p>
+          </div>
+        </div>
+        <div class="case-media stack">
+          <img class="shot shot-l" src="img/platform-light-1280.webp" srcset="img/platform-light-640.webp 640w, img/platform-light-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board: Backlog, Sprint, In progress at its limit of 4, Review at 2 of 3, and Done. A card called Triage new crash reports shows it is claimed by Triage agent.">
+          <img class="shot shot-d" src="img/platform-dark-1280.webp" srcset="img/platform-dark-640.webp 640w, img/platform-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board in the dark theme, with WIP limits and an agent's claim.">
+        </div>
+      </article>
+
+      <h3 class="more-title">More starter boards</h3>
+      <p class="more-lede">Each one opens with its columns and labels ready, sample cards if you want them, and a preview before you create it. Publish your own boards as templates for yourself, a group or everyone.</p>
+      <ul class="tpl-grid">
+        <li class="tpl"><h4>Kanban basics</h4><p>Backlog, To do, Doing with a WIP limit, Done. The simplest board that works.</p></li>
+        <li class="tpl"><h4>Bug tracker</h4><p>New, Triaged, Fixing, Verify, Closed, with severity and area labels.</p></li>
+        <li class="tpl"><h4>Software release checklist</h4><p>Prep, Verify, Ship and Post-release: a repeatable path from code freeze, with a rollback plan.</p></li>
+        <li class="tpl"><h4>Product roadmap</h4><p>Now, Next, Later and Shipped, with Growth, Platform and Delight labels.</p></li>
+        <li class="tpl"><h4>Content calendar</h4><p>Ideas to Published for blog posts, social, email and video; opens in the calendar view.</p></li>
+        <li class="tpl"><h4>CRM / sales pipeline</h4><p>Lead to Won or Lost, with a deal value and a source field on every card.</p></li>
+        <li class="tpl"><h4>Hiring pipeline</h4><p>Applied, Screen, Interview, Offer, Hired: one card per candidate.</p></li>
+        <li class="tpl"><h4>OKRs</h4><p>Objectives and measurable key results, labelled by quarter.</p></li>
+        <li class="tpl"><h4>Event planning</h4><p>From first ideas to the run sheet for the day, with vendor cost and deposit fields.</p></li>
+        <li class="tpl"><h4>Study / reading list</h4><p>Books, courses and articles, from wanting to read them to notes you keep.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ agents -->
+  <section class="section section-alt" id="agents" aria-labelledby="ag-title">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">For AI agents</p>
+        <h2 id="ag-title">Agents are teammates, not integrations</h2>
+        <p class="sec-lede">Point an agent at a column and it works the board the way a person does. It hears when cards arrive, claims one (a lease, so two agents never grab the same card and a crashed agent frees its work), does the job, comments the result and moves the card on. People see which agents listen where and who holds what.</p>
+      </header>
+
+      <div class="agent-grid">
+        <div class="agent-card">
+          <h3>The <code>weave</code> CLI</h3>
+          <p>A small download for Linux, macOS and Windows, built for scripts and agents: JSON in and out, names instead of IDs, and stable exit codes. Every feature of the browser is also a CLI command, because both run the same operations.</p>
+<pre class="code" tabindex="0" aria-label="CLI example"><code><span class="c"># the key stays in the environment</span>
+weave login --url https://weave.example.com \
+  --token "$WEAVE_TOKEN"
+<span class="c"># teach the coding agents on this machine</span>
+weave skill install
+
+<span class="c"># hear, claim, report, move on</span>
+weave listen --board "Apollo Platform" --list Sprint
+weave card claim CARD --ttl 15m   <span class="c"># exit 7: taken</span>
+weave card comment CARD "Fixed on the retry branch"
+weave card move CARD --to-list Review
+
+<span class="c"># or one command runs the loop around a script</span>
+weave agent run --board "Apollo Platform" \
+  --listen Sprint --claim-move-to "In progress" \
+  --done-list Review -- ./handle-card.sh
+
+<span class="c"># bulk: one card per line of NDJSON</span>
+jq -c '.steps[] | {name: .title}' plan.json |
+  weave card create --board "Apollo Platform" \
+    --list Backlog --from-stdin</code></pre>
+          <ul class="ticks">
+            <li><code>weave listen</code> resumes exactly where it stopped; <code>weave next --claim</code> pulls one card and exits 10 when the queue is empty.</li>
+            <li><code>weave skill install</code> detects Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Copilot and more, and teaches each one how to use Weave.</li>
+            <li><strong>Connect an agent</strong> in the browser hands you a ready-to-paste prompt for a project, a board, a column or an unattended runner. It never contains a key.</li>
+          </ul>
+        </div>
+
+        <div class="agent-card">
+          <h3>The Weave MCP bridge</h3>
+          <p><code>weave mcp</code> is a Model Context Protocol server built into the same CLI. Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI and other MCP clients get typed tools instead of shell commands, with the same permissions as your key and nothing more.</p>
+          <ul class="ticks">
+            <li>A curated set of tools for daily work (board tree, cards, comments, claims, checklists, labels, search, attachments), plus <code>weave_ops</code> to find any other operation and <code>weave_call</code> to run it. Destructive calls need an explicit <code>confirm</code>.</li>
+            <li>The Connect-an-agent prompts arrive as MCP prompts, and boards and cards as <code>weave://board/{id}</code> and <code>weave://card/{id}</code> resources.</li>
+            <li>Guarded file uploads: only from allowed folders, never from credential paths such as <code>.ssh</code> or <code>.env</code>. Downloads go to a file, not into the chat.</li>
+            <li>The API key is never written into the client's config; the bridge reads your <code>weave login</code> profile.</li>
+          </ul>
+<pre class="code" tabindex="0" aria-label="MCP setup example"><code><span class="c"># print the entry for your client (claude-desktop,</span>
+<span class="c"># claude, cursor, vscode, gemini, codex...)</span>
+weave mcp --print-config claude-desktop
+<span class="c"># or merge it into the client's config for you</span>
+weave skill install --target cursor --mcp</code></pre>
+<pre class="code" tabindex="0" aria-label="Printed MCP configuration"><code>{
+  "mcpServers": {
+    "weave": {
+      "args": ["mcp"],
+      "command": "/path/to/weave"
+    }
+  }
+}</code></pre>
+          <p class="note">MCP here is request and response. For an agent that should wait for new cards, keep <code>weave listen</code> or <code>weave agent run</code>.</p>
+        </div>
+      </div>
+
+      <figure class="agent-shot">
+        <img class="shot shot-l" src="img/claim-light-1280.webp" srcset="img/claim-light-640.webp 640w, img/claim-light-1280.webp 1280w" sizes="(min-width: 1100px) 1040px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The card sheet of Triage new crash reports: claimed by Triage agent until a set time, with the note grouping reports by stack trace, and the agent's comment reporting its progress.">
+        <img class="shot shot-d" src="img/claim-dark-1280.webp" srcset="img/claim-dark-640.webp 640w, img/claim-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1040px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The same card sheet in the dark theme, showing the agent's claim and comment.">
+        <figcaption>A claimed card: who holds it, until when, and what the agent said it is doing.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============================================================ features -->
+  <section class="section" id="features" aria-labelledby="ft-title">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Why Weave</p>
+        <h2 id="ft-title">Everything a serious board needs</h2>
+        <p class="sec-lede">The full feature set of a mature kanban tool, in a board that stays out of your way. Minimal and flat, polished in light and dark.</p>
+      </header>
+      <ul class="feat-grid">
+        <li class="feat"><h3>Views</h3><p>Kanban, list, grid, calendar (drag to reschedule) and a map of cards with a location. Number keys switch between them.</p></li>
+        <li class="feat"><h3>Templates</h3><p>A gallery of starter boards with previews and sample cards, and your own boards published as templates.</p></li>
+        <li class="feat"><h3>Custom fields</h3><p>Text, number, date, checkbox, select and link fields, on the card face if you like, including repeating groups.</p></li>
+        <li class="feat"><h3>Recurring cards</h3><p>Daily, weekly on chosen days, monthly or yearly, counted from the due date or from completion.</p></li>
+        <li class="feat"><h3>Notifications and webhooks</h3><p>In-app, email and chat services such as Slack, Discord, Telegram, Matrix and ntfy. Signed webhooks with retries and a delivery log.</p></li>
+        <li class="feat"><h3>Search</h3><p>Full-text search across cards, comments, boards and projects, limited to what you are allowed to see.</p></li>
+        <li class="feat"><h3>Import</h3><p>Bring boards over from Trello, a CSV file or another Weave export.</p></li>
+        <li class="feat"><h3>Export</h3><p>A board or a card as a standalone HTML page, ready to print or save as PDF.</p></li>
+        <li class="feat"><h3>Secure defaults</h3><p>Strict Content-Security-Policy, CSRF protection, rate limits, SHA-256 checksums on every release and a hardened read-only container.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ self-host -->
+  <section class="section section-alt" id="self-host" aria-labelledby="sh-title">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Self-host</p>
+        <h2 id="sh-title">Running in a few steps</h2>
+        <p class="sec-lede">One container (or one binary) and one data volume. Run a single replica: live updates and SQLite live in that one process.</p>
+      </header>
+      <div class="host-grid">
+        <ol class="steps">
+          <li><h3>Register Weave with your identity provider</h3><p>Sign-in is OpenID Connect only, with no local passwords. Create a client with the redirect URI <code>https://weave.example.com/auth/oidc/callback</code>. Groups such as <code>weave-admins</code> and <code>weave-users</code> decide each person's role. <a href="https://github.com/crueber/weave#identity-provider-setup-oidc-is-the-only-way-to-sign-in">Identity provider setup</a></p></li>
+          <li><h3>Start the container</h3><p>Use the image from the GitHub Container Registry, set a secret key and your OIDC settings, and put a TLS proxy in front. <a href="https://github.com/crueber/weave#install">Install guide</a> · <a href="https://github.com/crueber/weave#configuration">all settings</a></p></li>
+          <li><h3>Sign in and invite your agents</h3><p>Create a project, start a board, then install the CLI where your agents run and give each one its own agent account. <a href="https://github.com/crueber/weave#agent-install">Agent install</a></p></li>
+        </ol>
+        <div class="host-code">
+<pre class="code" tabindex="0" aria-label="Docker Compose example"><code><span class="c"># docker-compose.yml</span>
+services:
+  weave:
+    image: ghcr.io/crueber/weave:latest
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    ports: ["8080:8080"]
+    volumes: ["weave-data:/data"]
+    environment:
+      WEAVE_BASE_URL: https://weave.example.com
+      <span class="c"># openssl rand -hex 32, keep it stable</span>
+      WEAVE_SECRET_KEY: ${WEAVE_SECRET_KEY}
+      WEAVE_OIDC_ISSUER: https://idp.example.com
+      WEAVE_OIDC_CLIENT_ID: weave
+      WEAVE_OIDC_CLIENT_SECRET: ${WEAVE_OIDC_CLIENT_SECRET}
+      WEAVE_TRUST_PROXY: "true"
+volumes:
+  weave-data:</code></pre>
+<pre class="code" tabindex="0" aria-label="CLI install example"><code><span class="c"># the CLI on Linux and macOS</span>
+<span class="c"># (Windows: install.ps1 from the same release)</span>
+curl -fsSL https://github.com/crueber/weave/releases/latest/download/install.sh \
+  | sh</code></pre>
+          <p class="note">Prefer a binary? Each <a href="https://github.com/crueber/weave/releases/latest">release</a> has Linux server binaries and CLI archives for Linux, macOS and Windows, with SHA-256 checksums.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ screens -->
+  <section class="section" id="screens" aria-labelledby="sc-title">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Screens</p>
+        <h2 id="sc-title">Light and dark, desk and phone</h2>
+      </header>
+      <div class="tabs" role="tablist" aria-label="Screenshot theme">
+        <button type="button" role="tab" id="tab-light" data-tab="light" aria-controls="panel-light" aria-selected="true">Light</button>
+        <button type="button" role="tab" id="tab-dark" data-tab="dark" aria-controls="panel-dark" aria-selected="false" tabindex="-1">Dark</button>
+      </div>
+      <div class="panel" id="panel-light" role="tabpanel" aria-labelledby="tab-light" tabindex="0">
+        <div class="gal">
+          <figure class="gal-wide"><img src="img/pulse-light-1280.webp" srcset="img/pulse-light-640.webp 640w, img/pulse-light-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="660" loading="lazy" decoding="async" alt="The project page with a Pulse card per board."><figcaption>Pulse cards on the project page</figcaption></figure>
+          <figure><img src="img/gallery-light-1280.webp" srcset="img/gallery-light-640.webp 640w, img/gallery-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The New board dialog: template categories on the left and a grid of starter boards such as Kanban basics, Sprint (Scrum), Bug tracker and Weekly planner."><figcaption>The template gallery</figcaption></figure>
+          <figure><img src="img/platform-light-1280.webp" srcset="img/platform-light-640.webp 640w, img/platform-light-1280.webp 1280w" sizes="(min-width: 800px) 530px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board in the light theme."><figcaption>A sprint board with WIP limits and an agent's claim</figcaption></figure>
+          <figure><img src="img/calendar-light-1280.webp" srcset="img/calendar-light-640.webp 640w, img/calendar-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="The calendar view of a project timeline."><figcaption>Calendar view</figcaption></figure>
+          <figure><img src="img/claim-light-1280.webp" srcset="img/claim-light-640.webp 640w, img/claim-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="A card sheet with description, checklists, attachments, comments, custom fields and time tracking."><figcaption>The card sheet</figcaption></figure>
+          <figure class="gal-phone"><img src="img/phone-light.webp" width="390" height="800" loading="lazy" decoding="async" alt="The board on a phone: one column at a time, showing In progress at its limit of 4."><figcaption>On a phone</figcaption></figure>
+        </div>
+      </div>
+      <div class="panel" id="panel-dark" role="tabpanel" aria-labelledby="tab-dark" tabindex="0">
+        <div class="gal">
+          <figure class="gal-wide"><img src="img/pulse-dark-1280.webp" srcset="img/pulse-dark-640.webp 640w, img/pulse-dark-1280.webp 1280w" sizes="(min-width: 1100px) 1072px, calc(100vw - 32px)" width="1280" height="660" loading="lazy" decoding="async" alt="The project page with Pulse cards in the dark theme."><figcaption>Pulse cards on the project page</figcaption></figure>
+          <figure><img src="img/gallery-dark-1280.webp" srcset="img/gallery-dark-640.webp 640w, img/gallery-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The template gallery in the dark theme."><figcaption>The template gallery</figcaption></figure>
+          <figure><img src="img/platform-dark-1280.webp" srcset="img/platform-dark-640.webp 640w, img/platform-dark-1280.webp 1280w" sizes="(min-width: 800px) 530px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board in the dark theme."><figcaption>A sprint board with WIP limits and an agent's claim</figcaption></figure>
+          <figure><img src="img/calendar-dark-1280.webp" srcset="img/calendar-dark-640.webp 640w, img/calendar-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="The calendar view in the dark theme."><figcaption>Calendar view</figcaption></figure>
+          <figure><img src="img/claim-dark-1280.webp" srcset="img/claim-dark-640.webp 640w, img/claim-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The card sheet in the dark theme."><figcaption>The card sheet</figcaption></figure>
+          <figure class="gal-phone"><img src="img/phone-dark.webp" width="390" height="800" loading="lazy" decoding="async" alt="The board on a phone in the dark theme."><figcaption>On a phone</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="foot-brand">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l4.5 12L16 13l4.5 9L25 10"/></svg></span>
+      <span>Weave</span>
+    </div>
+    <nav class="foot-links" aria-label="Project links">
+      <a href="https://github.com/crueber/weave">Source on GitHub</a>
+      <a href="https://github.com/crueber/weave/releases/latest">Latest release</a>
+      <a href="https://github.com/crueber/weave/pkgs/container/weave">Container package (GHCR)</a>
+      <a href="https://github.com/crueber/weave#readme">Docs</a>
+      <a href="https://github.com/crueber/weave/blob/main/docs/AGENTS.md">Agent guide</a>
+      <a href="https://github.com/crueber/weave/blob/main/docs/CLI.md">CLI guide</a>
+    </nav>
+    <div class="foot-legal">
+      <p><a href="https://github.com/crueber/weave/blob/main/LICENSE">MIT</a> © Christopher Rueber</p>
+      <p>No politics allowed — see our <a href="https://github.com/crueber/weave/blob/main/CODE_OF_CONDUCT.md">Code of Conduct</a>.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

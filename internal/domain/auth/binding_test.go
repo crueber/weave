@@ -23,7 +23,11 @@ func TestOIDCSubjectMismatchIsDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	var aliceID string
-	_ = e.DB.QueryRow(`SELECT id FROM users WHERE email='alice@x.io'`).Scan(&aliceID)
+	var own, onComment bool
+	_ = e.DB.QueryRow(`SELECT id,subscribe_own_cards,subscribe_to_card_when_commenting FROM users WHERE email='alice@x.io'`).Scan(&aliceID, &own, &onComment)
+	if !own || !onComment {
+		t.Fatalf("new people watch the cards they create and comment on by default: own=%v comment=%v", own, onComment)
+	}
 
 	// the same subject can sign in again and again
 	for i := 0; i < 2; i++ {

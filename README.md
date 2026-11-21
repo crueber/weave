@@ -3,6 +3,7 @@
 <p align="center">
   Self-hosted. One small server. A calm, fast board for people, and a first-class CLI for AI agents.
 </p>
+<p align="center"><a href="https://crueber.github.io/weave/">Website: crueber.github.io/weave</a></p>
 
 <p align="center">
   <a href="#identity-provider-setup-oidc-is-the-only-way-to-sign-in"><img src="docs/badges/auth.svg" alt="Sign-in: OpenID Connect required"></a>

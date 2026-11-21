@@ -803,3 +803,32 @@ func TestOpsUIRoutesResolve(t *testing.T) {
 		t.Errorf("expected >=40 boards ops, saw %d", mine)
 	}
 }
+
+// The "card counter" board setting decides whether a column header shows its card count; a column with a WIP
+// limit always shows its n/limit badge (that is the limit, not the plain counter). New boards start with it on.
+func TestCardCounterSetting(t *testing.T) {
+	e := fixture(t)
+	b := newBoard(t, e, "Counter")
+	l1 := addList(t, e, b.ID, "Todo")
+	l2 := addList(t, e, b.ID, "Limited")
+	addCard(t, e, b.ID, l1.ID, "c1", "One", 1, "")
+	addCard(t, e, b.ID, l2.ID, "c2", "Two", 1, "")
+	if _, err := e.DB.Exec(`UPDATE lists SET wip_limit=3 WHERE id=?`, l2.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := mux(e)
+	_, body := get(t, m, "/boards/"+b.ID, false)
+	if !strings.Contains(body, "data-count") {
+		t.Error("a new board must show the plain card count (counter defaults to on)")
+	}
+	if _, err := e.DB.Exec(`UPDATE boards SET show_card_counter=0 WHERE id=?`, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, body = get(t, m, "/boards/"+b.ID, false)
+	if strings.Contains(body, "data-count") {
+		t.Error("counter off: the plain card count must not render")
+	}
+	if !strings.Contains(body, "data-wip=\"3\"") {
+		t.Error("counter off: the WIP limit badge must still render for a column with a limit")
+	}
+}

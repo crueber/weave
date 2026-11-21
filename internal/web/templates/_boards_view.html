@@ -1,9 +1,11 @@
 {{define "boards_body_in"}}<div id="board-body" class="boards-body boards-view-{{.View}}" data-board="{{.Board.ID}}">
 {{template "boards_chips" .}}
+{{if and .HasInbox .Drafts (ne .View "kanban")}}{{template "boards_inbox_link" .}}{{end}}
 {{if eq .View "list"}}{{template "boards_table" .}}{{else if eq .View "grid"}}{{template "boards_grid" .}}{{else}}{{template "boards_kanban" .}}{{end}}
 </div>{{end}}
 
 {{define "boards_kanban"}}<div class="boards-lists" id="board-lists" data-board="{{.Board.ID}}" data-card-drop="/ui/boards/{{.Board.ID}}/cards/drop" data-list-drop="/ui/boards/{{.Board.ID}}/lists/drop"{{if .CanEdit}} data-can-edit="1"{{end}} role="list" aria-label="Lists">
+{{if .HasInbox}}{{template "boards_inbox" .}}{{end}}
 {{range .Columns}}{{template "boards_col" dict "C" . "P" $}}{{end}}
 {{if .CanEdit}}<div class="boards-addlist boards-composer" data-composer="list" data-board="{{.Board.ID}}">
   <button type="button" class="boards-add-open" data-open aria-label="Add another list"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Add another list</button>
@@ -20,12 +22,13 @@
     <button type="button" class="boards-iconbtn boards-col-collapse" data-collapse aria-expanded="true" aria-label="Collapse list {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></button>
     <h2 class="boards-col-title"{{if $p.CanEdit}} data-rename="{{$c.List.ID}}" title="Click to rename"{{end}}>{{$name}}</h2>
     {{if eq $c.List.Type "closed"}}<small class="boards-badge">closed</small>{{end}}
+    {{if $c.Watching}}<span class="boards-col-watch" role="img" aria-label="You watch this column" title="You watch this column">{{template "watch_bell" true}}</span>{{end}}
     {{if $c.Listeners}}<span class="boards-listeners" tabindex="0" role="note" aria-label="Listening to {{$name}}: {{range $i, $l := $c.Listeners}}{{if $i}}, {{end}}{{$l.Label}}{{end}}"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg>{{if gt (len $c.Listeners) 1}}<span class="boards-listeners-n">{{len $c.Listeners}}</span>{{end}}
       <span class="boards-listeners-pop" role="tooltip"><strong>Listening</strong>{{range $c.Listeners}}<span>{{if .IsAgent}}agent {{end}}{{.Label}}{{if ne .Label .Name}} <small>({{.Name}})</small>{{end}}</span>{{end}}</span></span>{{end}}
-    {{$wip := boardsInt $c.List.WIPLimit}}{{if $wip}}{{$over := gt $c.Total $wip}}<span class="boards-count boards-wip{{if $over}} is-over{{end}}" data-wip="{{$wip}}" data-total="{{$c.Total}}" data-visible="{{len $c.Cards}}" role="note" title="{{$c.Total}} of {{$wip}} cards (soft WIP limit){{if $over}}, over the limit{{end}}{{if ne (len $c.Cards) $c.Total}}; {{len $c.Cards}} shown{{end}}" aria-label="{{$c.Total}} of {{$wip}} cards, soft WIP limit{{if $over}}, over the limit{{end}}">{{if $over}}<b class="boards-wip-flag" aria-hidden="true">!</b>{{end}}<span data-wip-n>{{$c.Total}}</span>/{{$wip}}</span>
-    {{else}}<span class="boards-count" title="{{len $c.Cards}} cards"><span data-count>{{len $c.Cards}}</span>{{if ne (len $c.Cards) $c.Total}}/{{$c.Total}}{{end}}</span>{{end}}
+    {{$wip := boardsInt $c.List.WIPLimit}}{{if $wip}}{{$over := gt $c.Total $wip}}<span class="boards-count boards-wip{{if $over}} is-over{{end}}" data-wip="{{$wip}}" data-total="{{$c.Total}}" data-visible="{{len $c.Cards}}" role="note" title="{{$c.Total}} of {{$wip}} cards (soft WIP limit){{if $over}}, over the limit{{end}}{{if ne (len $c.Cards) $c.Total}}; {{len $c.Cards}} shown{{end}}" aria-label="{{$c.Total}} of {{$wip}} cards, soft WIP limit{{if $over}}, over the limit{{end}}">{{if $over}}<b class="boards-wip-flag" aria-hidden="true">!</b>{{end}}<span class="boards-wip-t"><span data-wip-n>{{$c.Total}}</span>/{{$wip}}</span></span>
+    {{else if $p.Board.ShowCardCounter}}<span class="boards-count" title="{{len $c.Cards}} cards"><span data-count>{{len $c.Cards}}</span>{{if ne (len $c.Cards) $c.Total}}/{{$c.Total}}{{end}}</span>{{end}}
     {{if $p.CanEdit}}<button type="button" class="boards-iconbtn boards-col-settings" data-list-sheet="{{$c.List.ID}}" aria-label="Column settings for {{$name}}" title="Column settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg></button>{{end}}
-    {{if $p.CanEdit}}<details class="boards-menu"><summary class="boards-iconbtn" aria-label="List actions for {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></summary>
+    {{if not $p.ReadOnly}}<details class="boards-menu"><summary class="boards-iconbtn" aria-label="List actions for {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg></summary>
       {{template "boards_list_menu" dict "C" $c "P" $p "Name" $name}}
     </details>{{end}}
   </header>
@@ -123,6 +126,7 @@
 {{- if or (not .ReadOnly) (not .Public)}}
 <div class="boards-actions">
   {{- if not .ReadOnly}}
+  {{template "boards_watch_board_btn" (dict "ID" .Board.ID "Name" .Board.Name "On" .Watching)}}
   <button type="button" class="boards-btn boards-help-btn" data-help aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="ico" aria-hidden="true"><use href="#i-keyboard"/></svg></button>{{end}}
   {{- if not .Public}}
   <button type="button" class="boards-btn boards-settings-btn boards-agent-btn" hx-get="/ui/agent-prompt?scope=board&amp;id={{.Board.ID}}" hx-target="#modal" hx-swap="innerHTML" aria-label="Connect an agent" title="Connect an agent"><svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg><span class="boards-btn-label">Connect an agent</span></button>{{end}}
@@ -130,6 +134,14 @@
   <a class="boards-btn boards-settings-btn" href="/boards/{{.Board.ID}}/settings" aria-label="Board settings" title="Board settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="boards-btn-label">Settings</span></a>{{end}}
 </div>{{end}}
 </div>{{end}}
+
+{{/* Board watch toggle (left of the shortcuts button). Distinct from the top bar's notifications bell: outline bell with
+   a plus when off, filled accent bell when on. Swaps itself (hx-swap outerHTML); the route adds a toast. Args: ID, Name, On
+   (a map from the page, or boards.WatchBtn from the route). */}}
+{{define "boards_watch_board_btn"}}<button type="button" id="board-watch" class="boards-btn boards-watch-btn{{if .On}} is-on{{end}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"
+    hx-post="/ui/boards/{{.ID}}/{{if .On}}unsubscribe{{else}}subscribe{{end}}" hx-swap="outerHTML"
+    aria-label="{{if .On}}Stop watching this board{{else}}Watch this board: get notified about all activity{{end}}"
+    title="{{if .On}}Watching this board: you are notified about all activity. Click to stop{{else}}Watch this board: get notified about all activity{{end}}">{{template "watch_bell" .On}}</button>{{end}}
 
 {{define "boards_saved"}}{{template "boards_saved_in" .Data}}{{end}}
 {{define "boards_saved_in"}}<span id="saved-filters" class="boards-saved">

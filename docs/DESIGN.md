@@ -115,6 +115,33 @@ AI agents attach to board **lists** and take work through the board; humans see 
 - `scripts/check-contrast.py` checks `--fg`/`--fg-2`/`--muted` on every preset and Planka colour on the board canvas tint, `--fg`/`--fg-2` on pill-mode column tints and filled tiles, in both themes, caps the tints (board <=10% light / <=8% dark, column <=8%) and requires the `prefers-color-scheme` tint block to equal the `[data-theme=dark]` one.
 - Popovers (list menu, card quick edit, filter dropdowns) are `position:fixed`; while open the list menu is **portaled** to `#popover-root` (a child of `<body>`) so no column, scroller or tile can paint over it. `window.WeavePop.open` (list id -> menu) keeps the live refresh from touching a column whose menu is open and sweeps menus whose column disappeared.
 
+## Watching and notifications
+- **Scopes** (all explicit opt-in): board (`board_subscriptions`, ops `board.subscribe|unsubscribe`, boards domain), column (`list_subscriptions`,
+  migration 0308, `list.subscribe|unsubscribe`, boards), card (`card_subscriptions`, `card.subscribe|unsubscribe`, cards). Anyone who can view the
+  board may watch. Toggles never call `ops.Emit` (an activity row would publish who watches what) and do not live-update other tabs.
+- **Card rows**: `card.subscribe` = explicit watch (`is_permanent=1`, clears `muted`); `card.unsubscribe` = **mute** (`muted=1`, migration 0402,
+  row kept or created). Muted rows never notify, even through a watched column or board, are never re-added by auto-watch, and are listed
+  separately. Auto-watch (`INSERT OR IGNORE`, `is_permanent=0`): creating a card (pref `subscribe_own_cards`, on by default since migration 0102;
+  card.create, duplicate, from-template, inbox draft), commenting (`subscribe_to_card_when_commenting`, via `cards.AutoWatchComment`) and being
+  added as a member. Agents (`users.is_agent`) never auto-watch. `is_permanent` only reports "watched on purpose".
+- **What notifies** (`notify.planNotifications`, the only place): `cardCreate` (not drafts) -> `createCard`; `cardMove` between columns ->
+  `moveCard`, into/out of a closed-type column -> `closeCard`/`reopenCard` (one event, one type); `cardUpdate` carries `Data.changed` (field
+  names set by the cards domain): `isClosed` -> close/reopen, `dueDate` (set or changed, not cleared) -> `setCardDueDate`; `commentCreate` ->
+  `mentionInComment` (mentioned viewers) / `commentCard`; `cardMembershipCreate` -> `addMemberToCard` (the member only). Edits, labels, tasks,
+  attachments, position changes are silent. Column watchers match the card's current column, and for a move both source and destination.
+- **De-duplication**: per event ONE query collects card, column(s) and board watchers; at most one notification per (user, event), reason in
+  `data.via` (`card` > `list` > `board`; `data.viaList` names the column, the destination when both are watched). The actor is skipped, a mention
+  beats a watch, a muted card silences every watch (not a direct mention or being added), drafts/templates never notify, and one
+  `authz.ViewersAmong` call (same rules as `BoardLevel`, plus deleted/deactivated) drops people who cannot view the event's board (for a
+  cross-board move: the destination). The planner's query count is constant in the number of watchers (test). Delivery (SSE, services, e-mail,
+  `notificationCreate` webhooks) runs once per created notification, so the plan's de-duplication covers every channel.
+- **Per-viewer flags never travel**: `card.get isSubscribed` is cleared on the card emitted in event payloads (`cards.emitKind`); `board.get
+  isSubscribed` lives on `BoardDetail` (not `Board`), `list.get isSubscribed` is set by that handler only, card watch state (`via`, `muted`) is on
+  `card.options`. Public and share views carry none of them.
+- **Read side**: `subscription.list` (notify, View-filtered with `authz.BoardLevels`) feeds Settings > Watching (`notify_watching.html`, lazily
+  loaded into `auth_settings.html`). Messages (`notify.Message`) end with the reason ("You get this because you watch the column Review.");
+  the in-app list shows it as `reason`. No rate limit or digest in v1.
+
 ## Security model
 Controls every contributor must preserve (tests: `internal/server/*_test.go`, `internal/cli/safety_test.go`, `internal/domain/auth/*_test.go`):
 - **Authentication**: OIDC only (state cookie + nonce + PKCE S256; `email_verified` false/"false" denies; userinfo claims are merged only when its `sub` equals the ID token `sub`). Sessions are browser-only; the CLI/agents use API keys (`Authorization: Bearer` or `X-API-Key`). Cookies are `HttpOnly`, `SameSite=Lax` and `Secure` whenever `WEAVE_BASE_URL` is https (never inferred from `X-Forwarded-Proto`). `safeNext` only returns same-site absolute paths.

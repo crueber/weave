@@ -117,7 +117,7 @@ func MintKey(ctx context.Context, d *db.DB, email, role string) (APIKeyOut, erro
 		}
 		name, _, _ := strings.Cut(email, "@")
 		id = db.NewID()
-		if _, err := d.ExecContext(ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,created_at) VALUES(?,?,?,?,1,1,?)`, id, email, name, role, db.Now()); err != nil {
+		if _, err := d.ExecContext(ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,subscribe_own_cards,created_at) VALUES(?,?,?,?,1,1,1,?)`, id, email, name, role, db.Now()); err != nil {
 			return APIKeyOut{}, err
 		}
 	case err != nil:

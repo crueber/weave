@@ -6,6 +6,7 @@
    Opened by static/boards_listsheet.js from the column header / menu, or on load at /lists/{id}.
    Forms post to the existing list UI routes (hx-swap="none"); the board behind refreshes by itself. */}}
 {{define "page"}}{{template "boards_list_sheet" .}}{{end}}
+{{define "boards_watch_list"}}{{template "boards_watch_list_btn" .Data}}{{end}}
 {{define "boards_list_sheet"}}{{$d := .Data}}{{$l := $d.List}}{{$edit := $d.CanEdit}}
 <div id="list-sheet" class="ls cm" data-list="{{$l.ID}}" data-board="{{$d.Board.ID}}" data-total="{{$d.Total}}" data-wip="{{$d.WIP}}" aria-label="Column: {{$d.Name}}">
   <div class="cm-top">
@@ -19,6 +20,7 @@
     </nav>
     <span class="cards-saved cm-saved" data-ls-saved role="status" aria-live="polite"></span>
     <span class="cards-nav cm-nav" role="group" aria-label="Column navigation"><button type="button" class="cards-navbtn" data-ls-nav="{{$d.PrevID}}" aria-label="Previous column" title="Previous column"{{if not $d.PrevID}} disabled{{end}}>&#8249;</button><button type="button" class="cards-navbtn" data-ls-nav="{{$d.NextID}}" aria-label="Next column" title="Next column"{{if not $d.NextID}} disabled{{end}}>&#8250;</button></span>
+    {{template "boards_watch_list_btn" (dict "ID" $l.ID "Name" $d.Name "On" $d.Watching)}}
     {{if $edit}}<details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Column actions" title="Column actions" aria-haspopup="true">&hellip;</summary>
       <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Column actions">
         <button type="button" class="cm-mi cm-warn" hx-post="/ui/lists/{{$l.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive." data-ls-archive>Archive column</button>

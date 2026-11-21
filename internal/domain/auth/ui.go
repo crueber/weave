@@ -315,7 +315,7 @@ type settingsData struct {
 
 type settingsSection struct{ ID, Title string }
 
-var settingsSections = []settingsSection{{"profile", "Profile"}, {"appearance", "Appearance"}, {"workspace", "Workspace"}, {"apikey", "API key"}, {"sessions", "Sessions"}}
+var settingsSections = []settingsSection{{"profile", "Profile"}, {"appearance", "Appearance"}, {"workspace", "Workspace"}, {"watching", "Watching"}, {"apikey", "API key"}, {"sessions", "Sessions"}}
 
 func renderSettings(c *web.Ctx, d *settingsData) error {
 	u, err := ops.Typed[*User](c.Env, "auth.me", NoInput{})

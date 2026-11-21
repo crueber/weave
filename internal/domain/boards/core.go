@@ -206,5 +206,7 @@ func init() {
 	registerListOps()
 	registerFilterOps()
 	registerImportExportOps()
+	registerWatchOps()
 	registerUI()
+	registerWatchUI()
 }

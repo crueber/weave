@@ -6,6 +6,7 @@ import (
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/cards"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -128,6 +129,7 @@ func init() {
 		if err != nil {
 			return CommentItem{}, err
 		}
+		cards.AutoWatchComment(e, in.CardID, e.User.UserID) // "Watch when I comment" (never over a mute)
 		emit(e, "commentCreate", board, in.CardID, "comment.created", map[string]any{"commentId": id, "text": clip(text, 2000)})
 		items, err := query(e.Ctx, e.DB, commentScanner(e, authz.BoardLevel(e, board)), commentSelect+` WHERE c.id=?`, id)
 		if err != nil || len(items) == 0 {

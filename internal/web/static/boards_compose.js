@@ -27,6 +27,7 @@
     o = o || {};
     closeOthers(c);
     var col = colOf(c);
+    if (col && col.classList.contains('boards-inbox')) o.top = false;   // the Inbox keeps capture order
     if (col && col.classList.contains('is-collapsed')) B.setCollapsed(col, false);
     if (c.dataset.composer === 'card') {
       var cards = col.querySelector('.boards-cards');

@@ -122,7 +122,8 @@
     m.innerHTML = '';
     var B = window.Boards;
     if (!B || !id) return;
-    if (!tileOf(id)) { B.refresh && B.refresh(true); return; }
+    var t = tileOf(id);
+    if (!t || t.classList.contains('boards-draft')) { B.refresh && B.refresh(true); return; }   // an Inbox draft may have been published
     B.refreshTile(id, true);
   }
   if (modal()) modal().addEventListener('close', onClose);

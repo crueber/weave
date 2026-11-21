@@ -24,6 +24,9 @@ type List struct {
 	WIPLimit    *int     `json:"wipLimit,omitempty" desc:"soft work-in-progress limit: how many cards this column should hold at most (advisory, nothing is blocked); absent = no limit"`
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   *string  `json:"updatedAt,omitempty"`
+	// IsSubscribed is set by list.get only: the caller's own watch state. Every other path (board.get lists, board.tree,
+	// events, exports, templates) leaves it nil, so it never travels.
+	IsSubscribed *bool `json:"isSubscribed,omitempty" desc:"list.get only: whether you watch this column"`
 }
 
 // maxListDescLen caps a column description (characters; it ends up in agent prompts).
@@ -150,6 +153,10 @@ func registerListOps() {
 		}
 		if !isFinite(l.Type) {
 			return List{}, ops.NotFound("list") // archive and trash are system lists, not columns
+		}
+		if e.User != nil {
+			w := listWatched(e, l.ID)
+			l.IsSubscribed = &w
 		}
 		return l, nil
 	})

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
@@ -148,6 +149,7 @@ type NotificationOut struct {
 	IsRead      bool           `json:"isRead"`
 	CreatedAt   string         `json:"createdAt"`
 	Summary     string         `json:"summary"`
+	Reason      string         `json:"reason,omitempty" desc:"why you got it when it came from a watch, e.g. 'You get this because you watch the column Review.'"`
 }
 
 var mentionRe = regexp.MustCompile(`@\[(.*?)\]\((.*?)\)`)
@@ -172,32 +174,6 @@ func truncate(s string, n int) string {
 	return string(r[:n-3]) + "..."
 }
 
-func userCanView(e *ops.Env, userID, boardID string) bool {
-	var role string
-	var deact bool
-	if e.DB.QueryRowContext(e.Ctx, `SELECT role,is_deactivated FROM users WHERE id=? AND deleted_at IS NULL`, userID).Scan(&role, &deact) != nil || deact {
-		return false
-	}
-	c := *e
-	c.User = &ops.Principal{UserID: userID, Role: role}
-	return authz.BoardLevel(&c, boardID) >= authz.View
-}
-
-func queryIDs(e *ops.Env, q string, args ...any) []string {
-	var out []string
-	rows, err := e.DB.QueryContext(e.Ctx, q, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var s string
-		_ = rows.Scan(&s)
-		out = append(out, s)
-	}
-	return out
-}
-
 func listRef(v any) map[string]any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -208,51 +184,198 @@ func listRef(v any) map[string]any {
 	return nil
 }
 
+func changed(ev ops.Event, field string) bool {
+	switch v := ev.Data["changed"].(type) {
+	case []string:
+		for _, s := range v {
+			if s == field {
+				return true
+			}
+		}
+	case []any:
+		for _, s := range v {
+			if s == field {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// listInfo is a column as notifications describe it.
+type listInfo struct{ ID, Name, Type string }
+
+func (l listInfo) ref() map[string]any {
+	return map[string]any{"id": l.ID, "name": l.Name, "type": l.Type}
+}
+
+// Watch reasons, most specific first (data.via of a notification).
+var viaRank = map[string]int{"board": 1, "list": 2, "card": 3}
+
+// planNotifications decides who hears about an event: at most ONE notification per user per event. The cost is a
+// constant number of queries whatever the number of watchers (card row, the source column of a move, all watchers in
+// one UNION, one bulk access check).
+//
+// What notifies (see docs/DESIGN.md "Watching and notifications"):
+//
+//	cardCreate (not drafts)                         -> createCard      card watchers (rare), column, board
+//	cardMove between columns                        -> moveCard        card, source AND destination column, board
+//	cardMove into / out of a closed-type column     -> closeCard / reopenCard (one event: never also moveCard)
+//	cardUpdate with changed isClosed                -> closeCard / reopenCard
+//	cardUpdate with changed dueDate (set, not cleared) -> setCardDueDate
+//	commentCreate                                   -> mentionInComment for mentioned viewers, commentCard for watchers
+//	cardMembershipCreate                            -> addMemberToCard for the added member only
+//
+// Rules: the actor never hears about their own action; a mention beats a watch; a muted card silences every watch
+// (card, column, board) but not a direct mention or being added; users who cannot view the board (authz.ViewersAmong:
+// deactivated, deleted, lost access) are skipped; drafts and templates never notify. data.via records the most specific
+// watch (card > list > board) and data.viaList the watched column.
 func planNotifications(e *ops.Env, ev ops.Event, actor string) []planned {
 	if ev.CardID == "" || ev.BoardID == "" {
 		return nil
 	}
-	cardName := str(ev.Data, "cardName")
-	if cardName == "" {
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM cards WHERE id=?`, ev.CardID).Scan(&cardName)
+	var name, cardBoard, dueDate string
+	var cur listInfo
+	var draft, tmpl, closed bool
+	if e.DB.QueryRowContext(e.Ctx, `SELECT c.name,c.board_id,c.list_id,COALESCE(l.name,''),l.type,c.is_draft,c.is_template,c.is_closed,COALESCE(c.due_date,'')
+		FROM cards c JOIN lists l ON l.id=c.list_id WHERE c.id=?`, ev.CardID).
+		Scan(&name, &cardBoard, &cur.ID, &cur.Name, &cur.Type, &draft, &tmpl, &closed, &dueDate) != nil || draft || tmpl || cardBoard != ev.BoardID {
+		return nil
 	}
-	subs := func() []string {
-		return queryIDs(e, `SELECT user_id FROM card_subscriptions WHERE card_id=? UNION SELECT user_id FROM board_subscriptions WHERE board_id=?`, ev.CardID, ev.BoardID)
-	}
-	var out []planned
-	switch {
-	case ev.Type == "commentCreate":
-		text := str(ev.Data, "text")
-		cid := str(ev.Data, "commentId")
-		seen := map[string]bool{actor: true}
-		d := map[string]any{"card": map[string]any{"name": cardName}, "text": text}
-		for _, id := range MentionIDs(text) {
-			if !seen[id] && userCanView(e, id, ev.BoardID) {
-				seen[id] = true
-				out = append(out, planned{id, "mentionInComment", cid, d})
-			}
-		}
-		for _, id := range subs() {
-			if !seen[id] {
-				seen[id] = true
-				out = append(out, planned{id, "commentCard", cid, d})
-			}
-		}
-	case ev.Type == "cardMembershipCreate":
-		if id := str(ev.Data, "userId"); id != "" && id != actor {
-			out = append(out, planned{id, "addMemberToCard", "", map[string]any{"card": map[string]any{"name": cardName}}})
-		}
-	case ev.Type == "cardMove" || ev.Type == "cardUpdate":
-		from, to := listRef(ev.Data["fromList"]), listRef(ev.Data["toList"])
-		if from == nil || to == nil || str(from, "id") == str(to, "id") {
+	card := map[string]any{"name": name}
+	typ, commentID := "", ""
+	lists := []listInfo{cur}
+	d := map[string]any{"card": card}
+	var mentions []string
+	switch ev.Type {
+	case "commentCreate":
+		typ, commentID = "commentCard", str(ev.Data, "commentId")
+		d["text"] = str(ev.Data, "text")
+		mentions = MentionIDs(str(ev.Data, "text"))
+	case "cardMembershipCreate":
+		id := str(ev.Data, "userId")
+		if id == "" || id == actor || !authz.ViewersAmong(e, ev.BoardID, []string{id})[id] {
 			return nil
 		}
-		d := map[string]any{"card": map[string]any{"name": cardName}, "fromList": from, "toList": to}
-		for _, id := range subs() {
-			if id != actor {
-				out = append(out, planned{id, "moveCard", "", d})
+		return []planned{{id, "addMemberToCard", "", d}}
+	case "cardCreate":
+		if ev.Data["draft"] == true {
+			return nil
+		}
+		typ = "createCard"
+		d["list"] = cur.ref()
+	case "cardMove":
+		fromID, toID := str(ev.Data, "fromListId"), str(ev.Data, "toListId")
+		if fromID == "" || toID == "" || fromID == toID || toID != cur.ID {
+			return nil // a reorder inside one column, or a stale event
+		}
+		from := listInfo{ID: fromID}
+		_ = e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(name,''),type FROM lists WHERE id=?`, fromID).Scan(&from.Name, &from.Type)
+		lists = []listInfo{cur, from} // destination first: it names the reason when both are watched
+		switch {
+		case cur.Type == "closed" && from.Type != "closed":
+			typ = "closeCard"
+		case from.Type == "closed" && cur.Type != "closed":
+			typ = "reopenCard"
+		default:
+			typ = "moveCard"
+		}
+		d["fromList"], d["toList"] = from.ref(), cur.ref()
+	case "cardUpdate":
+		switch {
+		case changed(ev, "isClosed"):
+			typ = "reopenCard"
+			if closed {
+				typ = "closeCard"
+			}
+		case changed(ev, "dueDate") && dueDate != "":
+			typ = "setCardDueDate"
+			d["dueDate"] = dueDate
+		default:
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	// every watcher of the card, its column(s) and the board in one query
+	type watch struct {
+		rank   int
+		via    string
+		list   string
+		muted  bool
+		listAt int
+	}
+	args := []any{ev.CardID}
+	q := `SELECT user_id,'card',muted,'' FROM card_subscriptions WHERE card_id=?`
+	for _, l := range lists {
+		q += ` UNION ALL SELECT user_id,'list',0,list_id FROM list_subscriptions WHERE list_id=?`
+		args = append(args, l.ID)
+	}
+	q += ` UNION ALL SELECT user_id,'board',0,'' FROM board_subscriptions WHERE board_id=?`
+	args = append(args, ev.BoardID)
+	watchers := map[string]*watch{}
+	var order []string
+	if rows, err := e.DB.QueryContext(e.Ctx, q, args...); err == nil {
+		for rows.Next() {
+			var uid, via, lid string
+			var muted bool
+			if rows.Scan(&uid, &via, &muted, &lid) != nil {
+				continue
+			}
+			w := watchers[uid]
+			if w == nil {
+				w = &watch{listAt: len(lists)}
+				watchers[uid] = w
+				order = append(order, uid)
+			}
+			if muted {
+				w.muted = true
+				continue
+			}
+			at := len(lists)
+			for i, l := range lists {
+				if l.ID == lid {
+					at = i
+				}
+			}
+			if r := viaRank[via]; r > w.rank || (r == w.rank && via == "list" && at < w.listAt) {
+				w.rank, w.via, w.list, w.listAt = r, via, lid, at
 			}
 		}
+		rows.Close()
+	}
+
+	// one access check for everyone who might hear about it
+	cand := append([]string{}, mentions...)
+	cand = append(cand, order...)
+	can := authz.ViewersAmong(e, ev.BoardID, cand)
+	seen := map[string]bool{actor: true}
+	if actor == "" {
+		seen = map[string]bool{}
+	}
+	var out []planned
+	for _, id := range mentions {
+		if !seen[id] && can[id] {
+			seen[id] = true
+			out = append(out, planned{id, "mentionInComment", commentID, d})
+		}
+	}
+	for _, id := range order {
+		w := watchers[id]
+		if seen[id] || !can[id] || w.muted || w.rank == 0 {
+			continue
+		}
+		seen[id] = true
+		nd := make(map[string]any, len(d)+2)
+		for k, v := range d {
+			nd[k] = v
+		}
+		nd["via"] = w.via
+		if w.via == "list" {
+			nd["viaList"] = lists[w.listAt].ref()
+		}
+		out = append(out, planned{id, typ, commentID, nd})
 	}
 	return out
 }
@@ -283,26 +406,92 @@ func mdEscape(s string) string {
 	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "`", "\\`", "#", "\\#").Replace(s)
 }
 
-// Message renders a notification in text, markdown or html.
+// Reason is the "because you watch ..." line of a notification that came from a watch (data.via); "" otherwise.
+func Reason(n NotificationOut) string {
+	switch str(n.Data, "via") {
+	case "card":
+		return "You get this because you watch this card."
+	case "list":
+		return "You get this because you watch the column " + listName(listRef(n.Data["viaList"])) + "."
+	case "board":
+		return "You get this because you watch the board " + n.BoardName + "."
+	}
+	return ""
+}
+
+// dueText renders a stored due date (RFC3339 UTC) for a sentence: "3 Dec 2026", or with the time when it has one.
+func dueText(s string) string {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	t = t.UTC()
+	if t.Hour() == 0 && t.Minute() == 0 {
+		return t.Format("2 Jan 2006")
+	}
+	return t.Format("2 Jan 2006 15:04 UTC")
+}
+
+// Message renders a notification in text, markdown or html, ending with the watch reason (Reason) when there is one.
 func Message(n NotificationOut, format string) (title, body string) {
+	title, body = message(n, format)
+	if r := Reason(n); r != "" && body != n.Type {
+		switch format {
+		case "markdown":
+			body += "\n\n_" + mdEscape(r) + "_"
+		case "html":
+			body += "\n\n<small>" + html.EscapeString(r) + "</small>"
+		default:
+			body += "\n\n" + r
+		}
+	}
+	return title, body
+}
+
+// message is Message without the reason line (the in-app summary shows the reason separately).
+func message(n NotificationOut, format string) (title, body string) {
 	actor, card, board := n.CreatorName, n.CardName, n.BoardName
 	if actor == "" {
 		actor = "Someone"
+		if n.CreatorID == "" {
+			actor = "Weave" // scheduler work (recurring cards, lease sweeps) has no acting user
+		}
 	}
 	link := baseURL() + "/cards/" + n.CardID
 	var sentence func(a, c, b string, extra ...string) string
 	tail := ""
+	// strong marks a list name or a date inside a sentence, escaped for the format
+	strong := func(s string) string {
+		switch format {
+		case "markdown":
+			return "**" + mdEscape(s) + "**"
+		case "html":
+			return "<b>" + html.EscapeString(s) + "</b>"
+		}
+		return s
+	}
 	switch n.Type {
 	case "moveCard":
 		title = "Card Moved"
-		from, to := listName(listRef(n.Data["fromList"])), listName(listRef(n.Data["toList"]))
+		from, to := strong(listName(listRef(n.Data["fromList"]))), strong(listName(listRef(n.Data["toList"])))
 		sentence = func(a, c, b string, x ...string) string {
-			if format == "markdown" {
-				return fmt.Sprintf("%s moved %s from **%s** to **%s** on %s", a, c, mdEscape(from), mdEscape(to), b)
-			} else if format == "html" {
-				return fmt.Sprintf("%s moved %s from <b>%s</b> to <b>%s</b> on %s", a, c, html.EscapeString(from), html.EscapeString(to), b)
-			}
 			return fmt.Sprintf("%s moved %s from %s to %s on %s", a, c, from, to, b)
+		}
+	case "createCard":
+		title = "Card Created"
+		in := strong(listName(listRef(n.Data["list"])))
+		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s created %s in %s on %s", a, c, in, b) }
+	case "closeCard":
+		title = "Card Closed"
+		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s closed %s on %s", a, c, b) }
+	case "reopenCard":
+		title = "Card Re-opened"
+		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s re-opened %s on %s", a, c, b) }
+	case "setCardDueDate":
+		title = "Due Date Changed"
+		due := strong(dueText(str(n.Data, "dueDate")))
+		sentence = func(a, c, b string, x ...string) string {
+			return fmt.Sprintf("%s set the due date of %s to %s on %s", a, c, due, b)
 		}
 	case "commentCard", "mentionInComment":
 		verb := "left a new comment to"
@@ -374,7 +563,7 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 				n.ID, n.UserID, creator, n.BoardID, n.CardID, comment, action, n.Type, string(b), n.CreatedAt); err != nil {
 				return err
 			}
-			n.Summary = summaryOf(n)
+			n.Summary, n.Reason = summaryOf(n), Reason(n)
 			created = append(created, n)
 		}
 		return nil
@@ -401,7 +590,7 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 	}
 }
 
-func summaryOf(n NotificationOut) string { _, b := Message(n, "text"); return b }
+func summaryOf(n NotificationOut) string { _, b := message(n, "text"); return b }
 
 func deliverToUser(ctx context.Context, d *db.DB, n NotificationOut) {
 	var email string

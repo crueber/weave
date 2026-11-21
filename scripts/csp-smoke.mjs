@@ -136,7 +136,7 @@ await run('anon: login + terms + healthz', async () => {
 for (const path of ['/', `/projects/${proj.id}`, `/boards/${board.id}`, `/boards/${board.id}/calendar`, `/boards/${board.id}/map`,
   `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, `/lists/${lists[0].id}`, `/ui/lists/${lists[0].id}`, '/dashboard', '/notifications', '/notification-services',
   '/search?q=card', '/settings', '/settings?section=apikey', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
-  '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', `/projects/${proj.id}/settings?section=agents`, '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`, `/ui/boards/${board.id}/inbox`]) {
+  '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', `/projects/${proj.id}/settings?section=agents`, '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`]) {   // the Inbox fragment is walked by the Inbox step (404 while the inbox is off)
   await run('page ' + path, async () => {
     if (path === '/admin/backup') { await p.request.get(BASE + path); return; } // a download, not a page
     await go(path);
@@ -223,6 +223,37 @@ await run('board: drag and drop a card to another list', async () => {
   const src = p.locator('.boards-tile').first(); const dst = p.locator('.boards-list').nth(2);
   await src.dragTo(dst, { timeout: 5000 }).catch(() => {}); await settle(p);
   await p.locator('.boards-list').first().dragTo(p.locator('.boards-list').nth(2), { timeout: 5000 }).catch(() => {}); await settle(p);
+});
+await run('board: Inbox (capture a draft, move it to a column, drag one onto a column)', async () => {
+  await api('PUT', `/boards/${board.id}/inbox`, { enabled: true });
+  try {
+    await go(`/boards/${board.id}`);
+    const inbox = p.locator('.boards-inbox');
+    if (!(await inbox.count())) throw new Error('no Inbox column with the inbox on');
+    await inbox.locator('[data-open]').click();
+    await p.keyboard.type('Smoke idea one'); await p.keyboard.press('Enter');
+    await p.keyboard.type('Smoke idea two'); await p.keyboard.press('Enter'); await settle(p);
+    if (await p.locator('#modal[open]').count()) throw new Error('capturing a draft opened the card sheet');
+    const focused = await p.evaluate(() => !!(document.activeElement && document.activeElement.closest('.boards-inbox .boards-composer')));
+    if (!focused) throw new Error('the Inbox composer lost focus after Enter');
+    if ((await inbox.locator('.boards-draft').count()) < 2) throw new Error('drafts did not appear in the Inbox');
+    await p.keyboard.press('Escape');
+    // Move to... -> first column
+    await inbox.locator('.boards-draft', { hasText: 'Smoke idea one' }).locator('.boards-draft-movebtn').click();
+    await p.locator('#popover-root .boards-draft-publish button').first().click(); await settle(p);
+    if (await inbox.locator('.boards-draft', { hasText: 'Smoke idea one' }).count()) throw new Error('published draft still in the Inbox');
+    if (!(await p.locator(`#col-${lists[0].id} .boards-tile`, { hasText: 'Smoke idea one' }).count())) throw new Error('published card not in its column');
+    // drag the other one onto the second column
+    const src = await inbox.locator('.boards-draft', { hasText: 'Smoke idea two' }).boundingBox();
+    const dst = await p.locator(`#col-${lists[1].id} .boards-cards`).boundingBox();
+    await p.mouse.move(src.x + 30, src.y + 12); await p.mouse.down(); await p.mouse.move(src.x + 60, src.y + 30, { steps: 5 });
+    await p.mouse.move(dst.x + 40, dst.y + 10, { steps: 15 }); await p.mouse.up(); await p.waitForTimeout(1500); await settle(p);
+    if (await inbox.locator('.boards-draft', { hasText: 'Smoke idea two' }).count()) throw new Error('dragged draft still in the Inbox');
+    if (!(await p.locator(`#col-${lists[1].id} .boards-tile`, { hasText: 'Smoke idea two' }).count())) throw new Error('dragged draft not published into the column');
+    await go(`/ui/boards/${board.id}/inbox`); await go(`/boards/${board.id}?view=list`); await go(`/boards/${board.id}/calendar`);
+  } finally {
+    await api('PUT', `/boards/${board.id}/inbox`, { enabled: false });
+  }
 });
 await run('board: drag the empty background to pan sideways (mouse)', async () => {
   await go(`/boards/${board.id}`);
@@ -464,6 +495,44 @@ await run('card sheet: paste / drop attachment handlers load without CSP issues'
   await go(`/boards/${board.id}`);
   await p.locator(`#tile-${card.id}`).click(); await p.waitForTimeout(1200);
   await p.evaluate(() => { const m = document.getElementById('card-modal'); m && m.dispatchEvent(new DragEvent('dragover', { bubbles: true })); });
+});
+
+// ---- watching: board bell, column menu + sheet, card sheet, settings list ------------------------
+await run('watching: board bell, column menu and sheet, card sheet watch/mute, settings list', async () => {
+  await go(`/boards/${board.id}`);
+  const bell = () => p.locator('#board-watch');
+  if ((await bell().getAttribute('aria-pressed')) !== 'false') throw new Error('board bell should start off');
+  await bell().click(); await settle(p);
+  if ((await bell().getAttribute('aria-pressed')) !== 'true') throw new Error('board bell did not turn on');
+  const order = await p.evaluate(() => [...document.querySelectorAll('.boards-actions > *')].map(e => e.id || e.className.split(' ').pop()));
+  if (order.indexOf('board-watch') < 0 || order[order.indexOf('board-watch') + 1] !== 'boards-help-btn') throw new Error('bell is not left of the shortcuts button: ' + order);
+  await bell().click(); await settle(p);
+  if ((await bell().getAttribute('aria-pressed')) !== 'false') throw new Error('board bell did not turn off');
+  // column menu: Watch column -> header bell appears after the board refresh
+  await p.locator(`#col-${lists[1].id} details.boards-menu > summary`).click(); await p.waitForTimeout(250);
+  await p.locator('#popover-root .boards-watch-item, .boards-menu[open] .boards-watch-item').first().click(); await settle(p); await settle(p);
+  if (!(await p.locator(`#col-${lists[1].id} .boards-col-watch`).count())) throw new Error('column header bell missing after Watch column');
+  // column sheet button toggles in place
+  await p.locator(`#col-${lists[1].id} button.boards-col-settings`).click(); await p.locator('#list-sheet').waitFor(); await settle(p);
+  if ((await p.locator('#ls-watch').getAttribute('aria-pressed')) !== 'true') throw new Error('column sheet should show Watching');
+  await p.locator('#ls-watch').click(); await settle(p);
+  if ((await p.locator('#ls-watch').getAttribute('aria-pressed')) !== 'false') throw new Error('column sheet watch did not toggle off');
+  await p.locator('#ls-watch').click(); await settle(p);
+  await esc(p); await settle(p);
+  // card sheet: a card watched only through its column -> "via column" popover -> mute -> watch again
+  await api('PATCH', '/users/me/preferences', { subscribeOwnCards: false });
+  const wc = await api('POST', `/lists/${lists[1].id}/cards`, { name: 'Watched through its column' });
+  await api('PATCH', '/users/me/preferences', { subscribeOwnCards: true });
+  await go(`/cards/${wc.id}`);
+  await p.locator('#card-modal summary.cm-watch.is-via').click(); await settle(p);
+  await p.locator('#card-modal .cm-watch-panel button:has-text("Mute")').click(); await settle(p);
+  await p.locator('#card-modal .cm-watch.is-muted').click(); await settle(p);
+  if (!(await p.locator('#card-modal .cm-watch.is-on[aria-pressed=true]').count())) throw new Error('card did not return to Watching');
+  // settings list: stop the card (mutes it), then watch it again from Muted
+  await go('/settings?section=watching'); await p.locator('#set-watching .nw-h').first().waitFor();
+  await p.locator('#set-watching form[hx-post$="/stop"] button').last().click(); await settle(p);
+  await p.locator('#set-watching form[hx-post$="/watch"] button').first().click(); await settle(p);
+  await p.locator('#set-watching form[hx-post$="/stop"] button').first().click(); await settle(p);
 });
 
 // ---- board settings, admin, settings pages (all sections) ----------------------------------
