@@ -459,6 +459,34 @@
     upload(files);
   });
 
+  // ---- clicking the rendered description puts the caret at that spot in the markdown editor ----
+  // The click is captured before the editor swaps in: the rendered text around the click (and how far down the text it was)
+  // is matched back to the markdown source, because the rendered text drops the markup (**, `, #, links).
+  var descClick = null;
+  document.addEventListener('click', function (e) {
+    var v = e.target && e.target.closest ? e.target.closest('.cm-desc-view') : null;
+    descClick = null; if (!v) return;
+    var node = null, off = 0;
+    if (document.caretPositionFromPoint) { var cp = document.caretPositionFromPoint(e.clientX, e.clientY); if (cp) { node = cp.offsetNode; off = cp.offset; } }
+    else if (document.caretRangeFromPoint) { var cr = document.caretRangeFromPoint(e.clientX, e.clientY); if (cr) { node = cr.startContainer; off = cr.startOffset; } }
+    if (!node || node.nodeType !== 3 || !v.contains(node)) return;
+    var walker = document.createTreeWalker(v, NodeFilter.SHOW_TEXT), total = 0, before = 0, n;
+    while ((n = walker.nextNode())) { if (n === node) before = total + off; total += n.data.length; }
+    descClick = { left: node.data.slice(Math.max(0, off - 24), off), right: node.data.slice(off, off + 24), frac: total ? before / total : 1, at: Date.now() };
+  }, true);
+  function descCaret(src) {
+    var c = descClick; descClick = null;
+    if (!c || Date.now() - c.at > 3000) return src.length;
+    function norm(x) { return x.replace(/\s+/g, ' '); }
+    function all(needle) { var out = [], i = -1; while (needle && (i = src.indexOf(needle, i + 1)) >= 0) out.push(i); return out; }
+    function nearest(pos, off) { var best = -1, d = 1e9; pos.forEach(function (p) { var dd = Math.abs((p + off) / Math.max(1, src.length) - c.frac); if (dd < d) { d = dd; best = p + off; } }); return best; }
+    var L = norm(c.left), R = norm(c.right), hit = -1;
+    // longest left context that occurs in the source, then the right context, then a position by proportion
+    for (var n = L.length; n >= 4 && hit < 0; n = n > 12 ? n - 6 : n - 2) { var h = nearest(all(L.slice(L.length - n)), n); if (h >= 0) hit = h; }
+    for (var m = R.length; m >= 4 && hit < 0; m = m > 12 ? m - 6 : m - 2) { var h2 = nearest(all(R.slice(0, m)), 0); if (h2 >= 0) hit = h2; }
+    return hit >= 0 ? hit : Math.max(0, Math.min(src.length, Math.round(c.frac * src.length)));
+  }
+
   // ---- description editor grows with its text (up to 80% of the window; then it scrolls inside) ----
   function growDesc(ta) {
     if (!ta || !ta.matches || !ta.matches('#card-desc textarea')) return;
@@ -482,7 +510,10 @@
     var d = document.getElementById('card-desc');
     if (!d || !e.target || (e.target !== d && !d.contains(e.target) && !e.target.contains(d))) return;
     var ta = d.querySelector('textarea');
-    if (ta && document.activeElement !== ta && !ta.dataset.focused) { ta.dataset.focused = '1'; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
+    /* the textarea carries autofocus, so it may already be focused with the caret at 0: place the caret either way */
+    if (ta && !ta.dataset.focused) { ta.dataset.focused = '1'; var pos = descCaret(ta.value); ta.focus(); ta.setSelectionRange(pos, pos); growDesc(ta);
+      if (ta.scrollHeight > ta.clientHeight + 2) ta.scrollTop = Math.max(0, Math.min(ta.scrollHeight - ta.clientHeight, (pos / Math.max(1, ta.value.length)) * ta.scrollHeight - ta.clientHeight / 2));
+      try { ta.scrollIntoView({ block: 'nearest' }); } catch (x) { /* */ } }
   });
   document.addEventListener('focusout', function (e) {
     var ta = e.target; if (!ta.matches || !ta.matches('[data-autosave]')) return;
