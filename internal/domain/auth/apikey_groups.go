@@ -78,7 +78,7 @@ func ownerOnly(e *ops.Env, id string) (string, error) {
 
 // setAPIKey stores a fresh hashed API key for the user and returns it.
 // expiresInDays 0 means the key never expires.
-func setAPIKey(ctx context.Context, d *db.DB, id string, expiresInDays int) (APIKeyOut, error) {
+func setAPIKey(ctx context.Context, d auditExec, id string, expiresInDays int) (APIKeyOut, error) {
 	exp, err := keyExpiry(expiresInDays)
 	if err != nil {
 		return APIKeyOut{}, err
@@ -173,14 +173,32 @@ func init() {
 				return nil, ops.Invalid("name is required")
 			}
 			id := db.NewID()
-			if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO user_groups(id,name,created_at) VALUES(?,?,?)`, id, name, db.Now()); err != nil {
-				if db.IsUnique(err) {
-					return nil, ops.Conflict("a group with this name exists")
+			// the group and its initial members in one transaction; every member added is audited like group.member.add
+			var audits []AuditEntry
+			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				audits = nil
+				if _, err := tx.ExecContext(e.Ctx, `INSERT INTO user_groups(id,name,created_at) VALUES(?,?,?)`, id, name, db.Now()); err != nil {
+					if db.IsUnique(err) {
+						return ops.Conflict("a group with this name exists")
+					}
+					return err
 				}
+				for _, uid := range in.MemberIDs {
+					au, err := addGroupMember(e, tx, id, uid)
+					if err != nil {
+						return err
+					}
+					if au != nil {
+						audits = append(audits, *au)
+					}
+				}
+				return nil
+			})
+			if err != nil {
 				return nil, err
 			}
-			for _, uid := range in.MemberIDs {
-				_, _ = e.DB.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_group_members(group_id,user_id) SELECT ?,id FROM users WHERE id=?`, id, uid)
+			for _, a := range audits {
+				logAudit(a)
 			}
 			e.Hub.Publish(realtime.Event{Name: "group.created", Room: "global", Data: map[string]any{"id": id}})
 			return ops.Typed[*Group](e, "group.get", GroupIDIn{ID: id})
@@ -229,8 +247,17 @@ func init() {
 			if _, err := loadUser(e, in.UserID); err != nil {
 				return nil, err
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_group_members(group_id,user_id) VALUES(?,?)`, in.ID, in.UserID); err != nil {
+			var au *AuditEntry
+			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				var err error
+				au, err = addGroupMember(e, tx, in.ID, in.UserID)
+				return err
+			})
+			if err != nil {
 				return nil, err
+			}
+			if au != nil {
+				logAudit(*au)
 			}
 			e.Hub.Publish(realtime.Event{Name: "group.updated", Room: "global", Data: map[string]any{"id": in.ID}})
 			return ops.Typed[*Group](e, "group.get", GroupIDIn{ID: in.ID})
@@ -248,6 +275,35 @@ func init() {
 			e.Hub.Publish(realtime.Event{Name: "group.updated", Room: "global", Data: map[string]any{"id": in.ID}})
 			return ops.Typed[*Group](e, "group.get", GroupIDIn{ID: in.ID})
 		})
+}
+
+// addGroupMember adds an existing, not deleted user to a group inside tx and writes the audit row in the same
+// transaction (an admin adding themself is flagged self). Adding someone who is already a member, or an unknown
+// user, changes nothing and records nothing (nil entry). Used by group.member.add and group.create's memberIds.
+func addGroupMember(e *ops.Env, tx *sql.Tx, groupID, userID string) (*AuditEntry, error) {
+	var u struct {
+		name, email string
+		agent       bool
+	}
+	if err := tx.QueryRowContext(e.Ctx, `SELECT name,email,is_agent FROM users WHERE id=? AND deleted_at IS NULL`, userID).Scan(&u.name, &u.email, &u.agent); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r, err := tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_group_members(group_id,user_id) VALUES(?,?)`, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return nil, nil
+	}
+	var gname string
+	_ = tx.QueryRowContext(e.Ctx, `SELECT name FROM user_groups WHERE id=?`, groupID).Scan(&gname)
+	a := AuditEntry{Action: AuditGroupMemberAdd, TargetKind: map[bool]string{true: "agent", false: "user"}[u.agent], TargetID: userID, TargetName: u.name, TargetEmail: u.email,
+		Details: map[string]any{"groupId": groupID, "groupName": gname, "self": e.User != nil && e.User.UserID == userID}, Source: auditSource(e)}
+	auditActor(e.Ctx, tx, e.User, &a)
+	return &a, writeAudit(e.Ctx, tx, &a)
 }
 
 func listGroups(e *ops.Env, only string) (GroupList, error) {

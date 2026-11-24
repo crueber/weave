@@ -4,20 +4,20 @@
    import form. The search box and the rail share #tg-form, so every request carries the words and the category.
    No inline script or handlers: everything is hx-* attributes; sample cards use the checkbox + hidden "false" pattern. */}}
 {{define "boards_gallery"}}{{with .Data}}{{$g := .}}<link rel="stylesheet" href="/static/boards_gallery.css">
-<div class="tg" id="tg" data-project="{{.ProjectID}}">
+<div class="tg" id="tg" data-project="{{.ProjectID}}"{{if .BoardID}} data-board="{{.BoardID}}"{{end}}>
   <div class="tg-top">
-    <h2 class="tg-h">New board</h2>
+    {{if .BoardID}}<h2 class="tg-h">Apply a template <span class="tg-hsub">to {{.BoardName}}</span></h2>{{else}}<h2 class="tg-h">New board</h2>{{end}}
     <input id="tg-q" class="tg-search" type="search" form="tg-form" name="q" value="{{.Query}}" placeholder="Search templates: kanban, hiring, recipes..." aria-label="Search templates" autocomplete="off"
       hx-get="/ui/board-templates" hx-trigger="keyup changed delay:200ms, input changed delay:200ms, search" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-include="#tg-form" hx-sync="this:replace">
     <form method="dialog" class="tg-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
   </div>
   <div class="tg-body">
     <form id="tg-form" class="tg-rail" hx-get="/ui/board-templates" hx-trigger="submit, change" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-include="#tg-q" hx-sync="this:replace" role="radiogroup" aria-label="Template categories">
-      <input type="hidden" name="projectId" value="{{.ProjectID}}">
+      {{if .BoardID}}<input type="hidden" name="boardId" value="{{.BoardID}}">{{else}}<input type="hidden" name="projectId" value="{{.ProjectID}}">{{end}}
       <label class="tg-cat"><input type="radio" name="category" value=""{{if eq .Category ""}} checked{{end}}><span>All templates</span></label>
       {{range .Categories}}<label class="tg-cat"><input type="radio" name="category" value="{{.ID}}"{{if eq $g.Category .ID}} checked{{end}}><span>{{.Name}}</span></label>
       {{end}}{{if .HasPublished}}<label class="tg-cat tg-cat-mine"><input type="radio" name="category" value="published"{{if eq .Category "published"}} checked{{end}}><span>From your team</span></label>
-      {{end}}<button type="button" class="tg-cat tg-cat-import" hx-get="/ui/projects/{{.ProjectID}}/boards/new/import" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span>Import a file</span></button>
+      {{end}}{{if not .BoardID}}<button type="button" class="tg-cat tg-cat-import" hx-get="/ui/projects/{{.ProjectID}}/boards/new/import" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span>Import a file</span></button>{{end}}
     </form>
     <div class="tg-main" id="tg-main">{{template "boards_tpl_grid_in" .}}</div>
   </div>
@@ -30,13 +30,13 @@
       <span class="tg-strip tg-strip-blank" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="tg-name">Blank board</span><span class="tg-sum">Start empty and add your own columns.</span>
       <span class="tg-meta"><span class="tg-chip">Start here</span></span></button>{{end}}
-    {{range .Builtins}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID}}{{end}}
+    {{range .Builtins}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID "B" $.BoardID}}{{end}}
   </div>{{end}}
   {{if .Published}}<h3 class="tg-sec">From your team</h3>
-  <div class="tg-grid" role="list">{{range .Published}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID}}{{end}}</div>{{end}}
+  <div class="tg-grid" role="list">{{range .Published}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID "B" $.BoardID}}{{end}}</div>{{end}}
 {{end}}{{end}}
 
-{{define "boards_tpl_tile"}}{{$t := .T}}<button type="button" role="listitem" class="tg-tile" hx-get="/ui/board-templates/{{$t.ID}}?projectId={{.P}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
+{{define "boards_tpl_tile"}}{{$t := .T}}<button type="button" role="listitem" class="tg-tile" hx-get="/ui/board-templates/{{$t.ID}}?{{if .B}}boardId={{.B}}{{else}}projectId={{.P}}{{end}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
   <span class="tg-strip" aria-hidden="true">{{range $t.Columns}}<i{{boardsListAttr .Color}}></i>{{end}}</span>
   <span class="tg-name">{{$t.Name}}</span>
   <span class="tg-sum">{{if $t.Summary}}{{$t.Summary}}{{else}}{{len $t.Columns}} columns{{if $t.IncludesSampleCards}}, with cards{{end}}.{{end}}</span>
@@ -58,7 +58,7 @@
 
   <section class="tg-stubwrap" aria-label="Layout of the board">
     <div class="tg-stub">{{range .Cols}}<div class="tg-col"{{boardsListAttr .Color}}>
-      <div class="tg-colhead"><b>{{.Name}}</b>{{if .WIPLimit}}<span class="tg-wip" title="Work-in-progress limit">{{.WIPLimit}}</span>{{end}}</div>
+      <div class="tg-colhead"><b>{{if .Closed}}<span class="tg-closes" role="img" aria-label="Closes cards that land here" title="Closes cards that land here">{{template "closed_mark_ico"}}</span>{{end}}{{.Name}}</b>{{if .ArchiveAfter}}<span class="tg-keep" role="img" aria-label="Keeps the newest {{.ArchiveAfter}} cards" title="Keeps the newest {{.ArchiveAfter}} cards; older cards are archived automatically">{{template "archive_after_ico"}}</span>{{end}}{{if .WIPLimit}}<span class="tg-wip" title="Work-in-progress limit">{{.WIPLimit}}</span>{{end}}</div>
       {{range .Cards}}<div class="tg-card"><span class="tg-ctitle">{{.Name}}</span>{{if or .Dots .Tasks .HasDue}}<span class="tg-cmeta">{{range .Dots}}<i class="tg-dot"{{boardsListAttr .}}></i>{{end}}{{if .Tasks}}<span>{{.Tasks}} tasks</span>{{end}}{{if .HasDue}}<span>due in {{.Due}}d</span>{{end}}</span>{{end}}</div>{{end}}
     </div>{{end}}</div>
   </section>
@@ -67,15 +67,50 @@
     {{if $t.Labels}}<section class="tg-note"><h4>Labels</h4><div class="tg-labels">{{range $t.Labels}}<span class="tg-label"><i{{boardsListAttr .Color}}></i>{{.Name}}{{if .Group}}<small>{{.Group}}</small>{{end}}</span>{{end}}</div>
       {{if $t.LabelGroups}}<p class="tg-hint">{{range $i, $g := $t.LabelGroups}}{{if $i}}, {{end}}{{$g}}{{end}}: a card takes only one of these.</p>{{end}}</section>{{end}}
     {{if $t.CustomFields}}<section class="tg-note"><h4>Custom fields</h4>{{range $t.CustomFields}}<p class="tg-fields"><b>{{.Name}}</b>{{range .Fields}}<span class="tg-chip">{{.}}</span>{{end}}</p>{{end}}</section>{{end}}
+    {{$closing := false}}{{range .Cols}}{{if .Closed}}{{$closing = true}}{{end}}{{end}}{{if $closing}}<section class="tg-note"><h4>Columns that close cards</h4><p class="tg-closing">{{range .Cols}}{{if .Closed}}<span class="tg-chip tg-chip-closes">{{template "closed_mark_ico"}}{{.Name}}</span>{{end}}{{end}}</p>
+      <p class="tg-hint">Cards moved or added to these columns are marked closed; moving them to another column re-opens them. Change it in the column settings.</p></section>{{end}}
     {{$any := false}}{{range .Cols}}{{if .Description}}{{$any = true}}{{end}}{{end}}{{if $any}}<section class="tg-note tg-note-cols"><h4>What each column is for</h4><dl class="tg-how">{{range .Cols}}{{if .Description}}<div><dt>{{.Name}}</dt><dd>{{.Description}}</dd></div>{{end}}{{end}}</dl></section>{{end}}
   </div>
 
-  <form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards/from-template" hx-disabled-elt="find button.primary">
+  {{if .BoardID}}<form class="tg-create" hx-post="/ui/boards/{{.BoardID}}/template/apply" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-disabled-elt="find button.primary">
+    <input type="hidden" name="templateId" value="{{$t.ID}}"><input type="hidden" name="dryRun" value="true">
+    {{template "boards_tpl_apply_opts" dict "T" $t "Settings" false "Samples" false "Remove" true}}
+    <button class="primary tg-go">Preview changes</button>
+  </form>{{else}}<form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards/from-template" hx-disabled-elt="find button.primary">
     <input type="hidden" name="templateId" value="{{$t.ID}}">
     <label class="tg-f tg-f-name"><span>Board name</span><input name="name" required maxlength="128" autocomplete="off" placeholder="Name your board (not &ldquo;{{$t.Name}}&rdquo;)"></label>
     <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}"{{if eq . $t.DefaultView}} selected{{end}}>{{.}}</option>{{end}}</select></label>
     <label class="tg-check"><input type="checkbox" name="sampleCards" value="true"{{if $t.SampleCardsDefault}} checked{{end}}{{if not $t.IncludesSampleCards}} disabled{{end}}><input type="hidden" name="sampleCards" value="false"><span class="tg-checktext"><b>Include sample cards</b><small>{{if $t.IncludesSampleCards}}{{len $t.Cards}} to show how it works{{else}}none in this template{{end}}</small></span></label>
     <button class="primary tg-go">Create board</button>
+  </form>{{end}}
+</div>{{end}}{{end}}
+
+{{/* ---- apply to an existing board (board.template.apply) ---- */}}
+{{define "boards_tpl_apply_opts"}}{{$t := .T}}<label class="tg-check"><input type="checkbox" name="removeOldColumns" value="true"{{if .Remove}} checked{{end}}><input type="hidden" name="removeOldColumns" value="false"><span class="tg-checktext"><b>Remove the old columns (they will be empty)</b><small>Their own settings (WIP limit, auto-close, auto-archive) and column watches go with them. Untick to keep them, emptied, on the right.</small></span></label>
+    <label class="tg-check"><input type="checkbox" name="applySettings" value="true"{{if .Settings}} checked{{end}}><input type="hidden" name="applySettings" value="false"><span class="tg-checktext"><b>Also apply the template's board settings</b><small>Colour, card colouring, counters, default view. Never the agent prompt.</small></span></label>
+    <label class="tg-check"><input type="checkbox" name="includeSampleCards" value="true"{{if .Samples}} checked{{end}}{{if not $t.IncludesSampleCards}} disabled{{end}}><input type="hidden" name="includeSampleCards" value="false"><span class="tg-checktext"><b>Include sample cards</b><small>{{if $t.IncludesSampleCards}}{{len $t.Cards}} added to the template's columns{{else}}none in this template{{end}}</small></span></label>{{end}}
+
+{{/* The preview of an apply: exactly what board.template.apply with dryRun returned, the warnings, then the confirm.
+   Ticking an option re-runs the preview (the form posts dryRun=true on change); "Apply template" posts confirm=true. */}}
+{{define "boards_tpl_apply"}}{{with .Data}}{{$o := .Out}}{{$t := .T}}<div class="tg-pv tg-ap">
+  <button type="button" class="tg-back" hx-get="/ui/board-templates/{{$t.ID}}?boardId={{.BoardID}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top"><span aria-hidden="true">&larr;</span> {{$t.Name}}</button>
+  <header class="tg-pvhead">
+    <h3>Preview: apply &ldquo;{{$o.TemplateName}}&rdquo;</h3>
+    <p class="tg-pvsum">Nothing has changed yet. This is what applying the template to <b>{{.BoardName}}</b> will do.</p>
+  </header>
+  {{if $o.Warnings}}<section class="tg-warns" aria-label="Before you apply"><h4>Before you apply</h4><ul>{{range $o.Warnings}}<li>{{.}}</li>{{end}}</ul></section>{{end}}
+  <ul class="tg-diff">
+    <li><span class="tg-dk">Columns</span><span class="tg-dv"><b>+{{len $o.ColumnsAdded}} on the left:</b> {{range $i, $c := $o.ColumnsAdded}}{{if $i}}, {{end}}{{$c.Name}}{{end}}{{if $o.ColumnsKept}}<small>Your {{len $o.ColumnsKept}} column{{if ne (len $o.ColumnsKept) 1}}s stay{{else}} stays{{end}} on the right, emptied: {{range $i, $c := $o.ColumnsKept}}{{if $i}}, {{end}}{{$c}}{{end}}.</small>{{end}}{{if $o.ColumnsRemoved}}<small class="tg-removed" data-columns-removed="{{len $o.ColumnsRemoved}}"><b>{{len $o.ColumnsRemoved}} old column{{if ne (len $o.ColumnsRemoved) 1}}s{{end}} will be removed</b>, empty once the cards have moved: {{range $i, $c := $o.ColumnsRemoved}}{{if $i}}, {{end}}{{$c}}{{end}}. Their settings, column watches and column Activity go with them; each card keeps its own history.</small>{{end}}</span></li>
+    <li><span class="tg-dk">Cards</span><span class="tg-dv"><b>{{$o.CardsMoved}} card{{if ne $o.CardsMoved 1}}s{{end}} move to {{$o.TargetColumn.Name}}</b>{{if $o.ClosedCardsMoved}}<small>{{$o.ClosedCardsMoved}} of them {{if eq $o.ClosedCardsMoved 1}}is{{else}}are{{end}} closed and stay{{if eq $o.ClosedCardsMoved 1}}s{{end}} closed.</small>{{end}}<small>Archived, trashed and inbox cards stay where they are.{{if $o.SampleCardsAdded}} Plus {{$o.SampleCardsAdded}} sample card{{if ne $o.SampleCardsAdded 1}}s{{end}}.{{end}}</small></span></li>
+    <li><span class="tg-dk">Labels</span><span class="tg-dv">{{if $o.LabelsAdded}}<b>+{{len $o.LabelsAdded}}:</b> {{range $i, $l := $o.LabelsAdded}}{{if $i}}, {{end}}{{$l}}{{end}}{{else}}<b>None added</b>{{end}}{{if $o.LabelsReused}}<small>Already here, used as they are: {{range $i, $l := $o.LabelsReused}}{{if $i}}, {{end}}{{$l}}{{end}}.</small>{{end}}{{if $o.LabelGroupsAdded}}<small>New label groups: {{range $i, $l := $o.LabelGroupsAdded}}{{if $i}}, {{end}}{{$l}}{{end}}.</small>{{end}}</span></li>
+    {{if or $o.FieldGroupsAdded $o.FieldGroupsSkipped}}<li><span class="tg-dk">Custom fields</span><span class="tg-dv">{{if $o.FieldGroupsAdded}}<b>+{{range $i, $l := $o.FieldGroupsAdded}}{{if $i}}, {{end}}{{$l}}{{end}}</b>{{else}}<b>None added</b>{{end}}{{if $o.FieldGroupsSkipped}}<small>Skipped, this board already has a group with the name: {{range $i, $l := $o.FieldGroupsSkipped}}{{if $i}}, {{end}}{{$l}}{{end}}.</small>{{end}}</span></li>{{end}}
+    <li><span class="tg-dk">Board settings</span><span class="tg-dv">{{if $o.SettingsChanged}}<b>Changed:</b> {{range $i, $l := $o.SettingsChanged}}{{if $i}}, {{end}}{{$l}}{{end}}{{else}}<b>Unchanged</b>{{if $o.SettingsAvailable}}<small>Ticking the option below would change: {{range $i, $l := $o.SettingsAvailable}}{{if $i}}, {{end}}{{$l}}{{end}}.</small>{{end}}{{end}}</span></li>
+  </ul>
+  <form class="tg-create tg-apply" hx-post="/ui/boards/{{.BoardID}}/template/apply" hx-trigger="change" hx-target="#tg-main" hx-swap="innerHTML" hx-disabled-elt="find button.primary">
+    <input type="hidden" name="templateId" value="{{$t.ID}}"><input type="hidden" name="dryRun" value="true">
+    <p class="tg-undo" role="note"><b>{{$o.CardsMoved}} card{{if ne $o.CardsMoved 1}}s{{end}} will move into {{$o.TargetColumn.Name}}{{if $o.ColumnsRemoved}} and {{len $o.ColumnsRemoved}} old column{{if ne (len $o.ColumnsRemoved) 1}}s{{end}} will be removed{{end}}.</b> This cannot be undone automatically; <a href="/ui/boards/{{.BoardID}}/export?format=json" download>export the board first</a> (JSON).</p>
+    <div class="tg-apopts">{{template "boards_tpl_apply_opts" dict "T" $t "Settings" .In.ApplySettings "Samples" .In.IncludeSampleCards "Remove" $o.RemoveOldColumns}}</div>
+    <button type="button" class="primary tg-go" hx-post="/ui/boards/{{.BoardID}}/template/apply" hx-include="closest form" hx-disabled-elt="this" hx-vals='{"dryRun":"false","confirm":"true"}' hx-confirm="Apply {{$o.TemplateName}}, move {{$o.CardsMoved}} card{{if ne $o.CardsMoved 1}}s{{end}} into {{$o.TargetColumn.Name}}{{if $o.ColumnsRemoved}} and remove {{len $o.ColumnsRemoved}} old column{{if ne (len $o.ColumnsRemoved) 1}}s{{end}}{{end}}? This cannot be undone automatically.">Apply template</button>
   </form>
 </div>{{end}}{{end}}
 

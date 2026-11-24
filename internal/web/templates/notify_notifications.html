@@ -12,14 +12,17 @@
   {{if not .IsRead}}<button class="notify-btn" hx-post="/ui/notifications/{{.ID}}/read" hx-target="#notify-list" hx-swap="outerHTML" title="Mark as read">Mark read</button>{{end}}
 </li>{{end}}</ul>
 </div>{{end}}
-{{define "notify_list_oob"}}{{template "notify_list" .}}<a id="notif-badge" href="/notifications" hx-swap-oob="innerHTML:#notif-badge">{{template "notify_badge" .}}</a>{{end}}
+{{define "notify_head_n"}}{{if .Data.L.UnreadCount}}<span class="notify-count">{{.Data.L.UnreadCount}}</span>{{end}}{{end}}
+{{define "notify_list_oob"}}{{template "notify_list" .}}<a id="notif-badge" href="/notifications" hx-swap-oob="innerHTML:#notif-badge">{{template "notify_badge" .}}</a><span id="notify-head-count" class="notify-head-count" hx-swap-oob="true">{{template "notify_head_n" .}}</span>{{end}}
 {{define "page"}}<link rel="stylesheet" href="/static/notify_ui.css">
 <section class="notify-page">
-<div class="notify-head"><h1>Notifications{{if .Data.L.UnreadCount}} <span class="notify-count">{{.Data.L.UnreadCount}}</span>{{end}}</h1>
+<div class="notify-head"><h1>Notifications <span id="notify-head-count" class="notify-head-count">{{template "notify_head_n" .}}</span></h1>
   <div class="notify-actions">
     {{if .Data.Unread}}<a href="/notifications">Show all</a>{{else}}<a href="/notifications?unread=1">Only unread</a>{{end}}
     <a href="/notification-services">Notification services</a>
     <button class="notify-btn" hx-post="/ui/notifications/read-all" hx-target="#notify-list" hx-swap="outerHTML">Mark all as read</button>
   </div></div>
+<button type="button" id="notify-fresh" class="notify-fresh" hidden hx-get="/ui/notifications/list{{if .Data.Unread}}?unread=1{{end}}" hx-target="#notify-list" hx-swap="outerHTML">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7-7 7 7"/></svg>New notifications<span class="notify-fresh-cta">Show</span></button>
 {{template "notify_list" .}}
 </section>{{end}}

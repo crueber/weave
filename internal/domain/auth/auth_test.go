@@ -369,8 +369,12 @@ func TestOIDCGroups(t *testing.T) {
 		return err
 	}
 	// highest-ranked role group wins
-	if err := login("s1", "a@x.io", "weave-guests", "weave-project-owners", "weave-users"); err != nil || role("a@x.io") != "projectOwner" {
-		t.Fatalf("owner: %v %s", err, role("a@x.io"))
+	if err := login("s1", "a@x.io", "weave-guests", "weave-workers", "weave-users"); err != nil || role("a@x.io") != "boardUser" {
+		t.Fatalf("highest: %v %s", err, role("a@x.io"))
+	}
+	// the old project-owner group grants nothing any more: such users fall back to the default role
+	if err := login("s9", "legacy@x.io", "weave-project-owners"); err != nil || role("legacy@x.io") != "boardUser" {
+		t.Fatalf("legacy owner group: %v %s", err, role("legacy@x.io"))
 	}
 	// IdP owns roles: promote and demote on later logins
 	_ = login("s1", "a@x.io", "weave-admins")
@@ -429,14 +433,14 @@ func TestMintKey(t *testing.T) {
 		t.Fatalf("minted key does not authenticate as admin: %+v", c.User)
 	}
 	// re-minting rotates the key and may change the role
-	out2, err := MintKey(e.Ctx, e.DB, "boss@x.io", "projectOwner")
+	out2, err := MintKey(e.Ctx, e.DB, "boss@x.io", "worker")
 	if err != nil || out2.Key == out.Key {
 		t.Fatalf("remint: %v", err)
 	}
 	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out.Key) }).User != nil {
 		t.Fatal("old key still valid")
 	}
-	if c := reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out2.Key) }); c.User == nil || c.User.Role != "projectOwner" {
+	if c := reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out2.Key) }); c.User == nil || c.User.Role != "worker" {
 		t.Fatalf("role not updated: %+v", c.User)
 	}
 	if _, err := MintKey(e.Ctx, e.DB, "bad", ""); err == nil {

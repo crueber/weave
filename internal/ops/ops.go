@@ -69,7 +69,7 @@ func bindErr(err error, what string) *Error {
 // Principal is the authenticated caller. Nil means anonymous.
 type Principal struct {
 	UserID string
-	Role   string // admin | projectOwner | boardUser
+	Role   string // admin | boardUser | worker | guest
 	Name   string
 	// IsAgent marks service accounts (AI agents) that authenticate with an API key only.
 	IsAgent bool

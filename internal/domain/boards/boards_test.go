@@ -23,7 +23,7 @@ var (
 	nobody = &ops.Principal{UserID: "u-none", Role: "boardUser", Name: "No Body"}
 )
 
-// fixture creates users + a project and returns the env acting as admin.
+// fixture creates users + two projects managed by the admin persona and returns the env acting as admin.
 func fixture(t testing.TB) *ops.Env {
 	t.Helper()
 	e := testutil.Env(t, admin)
@@ -33,6 +33,10 @@ func fixture(t testing.TB) *ops.Env {
 		}
 	}
 	if _, err := e.DB.Exec(`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','2024-01-01T00:00:00Z'),('p2','Proj2','2024-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	// the admin persona manages both projects as a real project manager: the admin role alone gives no content access
+	if _, err := e.DB.Exec(`INSERT INTO project_managers(id,project_id,user_id,created_at) VALUES('pm-admin-p1','p1','u-admin','2024-01-01T00:00:00Z'),('pm-admin-p2','p2','u-admin','2024-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	return e

@@ -53,6 +53,9 @@ func TestBuiltinTemplatesAreValid(t *testing.T) {
 				if l.WIPLimit != 0 && (l.WIPLimit < 1 || l.WIPLimit > MaxWIPLimit) {
 					t.Errorf("list %q WIP %d out of range", l.Name, l.WIPLimit)
 				}
+				if l.ArchiveAfter != 0 && (l.ArchiveAfter < 1 || l.ArchiveAfter > MaxArchiveAfter) {
+					t.Errorf("list %q archiveAfter %d out of range", l.Name, l.ArchiveAfter)
+				}
 				if l.Name == "" || lists[l.ID] || len(l.Description) > 400 {
 					t.Errorf("list %q: bad name/id/description", l.Name)
 				}

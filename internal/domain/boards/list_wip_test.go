@@ -145,7 +145,7 @@ func TestListSheetRoutes(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("fragment: %d %s", code, body)
 	}
-	for _, want := range []string{`id="list-sheet"`, `class="ls cm"`, `data-ls-form="name"`, `data-ls-form="desc"`, `data-ls-form="type"`, `data-ls-form="wip"`, `data-ls-form="sort"`, `data-ls-form="move"`, `hx-get="/ui/agent-prompt?scope=list&amp;id=` + l.ID + `"`, `data-ls-delete`, `data-ls-archive`,
+	for _, want := range []string{`id="list-sheet"`, `class="ls cm"`, `data-ls-form="name"`, `data-ls-form="desc"`, `data-pop="closes"`, `/ui/lists/` + l.ID + `/type-preview?type=closed&amp;ctx=sheet`, `data-ls-form="wip"`, `data-ls-form="sort"`, `data-ls-form="move"`, `hx-get="/ui/agent-prompt?scope=list&amp;id=` + l.ID + `"`, `data-ls-delete`, `data-ls-archive`,
 		`value="` + other.ID + `"`, "WIP 2/1, over the limit", `class="cards-badge ls-wipchip cards-badge-warn is-over"`, `data-ls-nav="` + other.ID + `"`, `hx-get="/ui/lists/` + l.ID + `/activity"`, `data-ls-desc-edit`, `cm-desc-view is-editable`, `&lt;b&gt;carefully&lt;/b&gt;`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sheet lacks %q", want)

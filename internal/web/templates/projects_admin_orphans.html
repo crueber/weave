@@ -1,0 +1,37 @@
+{{define "title"}}Orphaned projects - Weave{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "orphans" "Crumb" .User.Name}}{{template "orphans-body" .}}{{template "admin_bottom"}}{{end}}
+
+{{/* Ownerless projects (no active manager) and the audited way to give them a new one. Only ids, names, counts and
+   former managers are shown: never board or card names. The whole body re-renders after a reassignment. */}}
+{{define "orphans-body"}}{{with .Data}}<div id="adm-orphans" class="adm-orphans">
+<section class="boards-sec" aria-labelledby="adm-orphans-h">
+  <div class="bs-sec-head"><h2 id="adm-orphans-h">Orphaned projects</h2>{{template "adm_status" dict "Done" (ne .Flash "") "Text" .Flash}}</div>
+  {{template "adm_error" .Error}}
+  <p class="bs-desc">A project is orphaned when none of its managers is active any more: their accounts were deactivated or deleted. Give it a new manager here; they can then add others. You see only the project's name, size and former managers, never its boards or cards.</p>
+  <ul class="bs-members adm-orph-list">
+  {{range .Orphans}}<li class="adm-orph">
+    <div class="adm-orph-head">
+      <span class="bs-member-t"><b>{{.Name}}</b><small>Created {{projects_when .CreatedAt false}} &middot; {{.Boards}} {{if eq .Boards 1}}board{{else}}boards{{end}}{{if .BoardsWithoutOwner}}, {{.BoardsWithoutOwner}} without an active owner{{end}}</small></span>
+      <span class="boards-badge is-warn">No active manager</span>
+    </div>
+    <p class="adm-orph-former"><span class="adm-orph-k">Former managers</span>
+      {{range .FormerManagers}}<span class="adm-orph-fm"><span>{{.Name}}</span>{{if .Email}} <small>{{.Email}}</small>{{end}} <span class="boards-badge is-bad">{{.State}}</span></span>{{else}}<span class="adm-orph-none">None left: their accounts were deleted.</span>{{end}}</p>
+    <form class="bs-add adm-orph-form" hx-post="/ui/admin/orphans/{{.ID}}/reassign" hx-target="#adm-orphans" hx-swap="outerHTML" hx-confirm="Make the chosen person a manager of {{.Name}}? This is recorded in the recovery log with your name and the time." method="post" action="/ui/admin/orphans/{{.ID}}/reassign">
+      {{template "bs_combo" dict "ID" (print "orph-" .ID) "Label" (print "New manager for " .Name) "ListLabel" "People" "Placeholder" "Choose a new manager..." "Users" $.Data.Candidates}}
+      <button class="primary" type="submit" disabled data-add>Reassign</button>
+    </form>
+  </li>{{else}}<li class="adm-orph-empty"><b>No orphaned projects</b><small>Every project has at least one active manager.</small></li>{{end}}
+  </ul>
+  {{if .Orphans}}<p class="bs-hint">Reassigning is audited: who, which project, to whom and when go to the recovery log below and the server log. A project that still has an active manager cannot be reassigned.</p>{{end}}
+</section>
+<section class="boards-sec" aria-labelledby="adm-recoveries-h">
+  <div class="bs-sec-head"><h2 id="adm-recoveries-h">Recovery log</h2></div>
+  <p class="bs-desc">Every recovery, from this page, the API (<code>project.reassign</code>) or the host command <code>weave admin adopt</code>. Entries cannot be edited or removed.</p>
+  <ul class="bs-members">
+  {{range .Recoveries}}<li class="bs-member adm-rec">
+    <span class="bs-member-t"><b>{{.ProjectName}}</b><small>To {{.UserName}}{{if .UserEmail}} ({{.UserEmail}}){{end}} &middot; by {{if eq .Source "host"}}the host command{{else}}{{.ActorName}}{{if .ActorEmail}} ({{.ActorEmail}}){{end}}{{end}}</small></span>
+    <time class="adm-rec-t" datetime="{{.CreatedAt}}">{{projects_when .CreatedAt true}}</time>
+  </li>{{else}}<li class="bs-empty-row">No recoveries yet.</li>{{end}}
+  </ul>
+</section>
+</div>{{end}}{{end}}

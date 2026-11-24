@@ -939,7 +939,7 @@ func (s *mcpServer) readBoard(ctx context.Context, req *mcp.ReadResourceRequest)
 			}
 		}
 		col := map[string]any{"id": lid, "name": l["name"], "cardCount": counts[lid], "claimedCount": claimed[lid]}
-		for _, k := range []string{"type", "wipLimit", "color"} {
+		for _, k := range []string{"type", "wipLimit", "archiveAfter", "color"} {
 			if l[k] != nil {
 				col[k] = l[k]
 			}

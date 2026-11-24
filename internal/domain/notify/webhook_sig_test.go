@@ -41,7 +41,7 @@ func TestPostSendsBothSignaturesWithSameTimestamp(t *testing.T) {
 	defer func() { HTTPClient = old }()
 
 	payload := `{"event":"cardCreate"}`
-	if st, _, errMsg, _ := post(context.Background(), srv.URL, "", "s3cret", "cardCreate", "d1", payload); st != 200 || errMsg != "" {
+	if st, _, errMsg, _ := post(context.Background(), HTTPClient, srv.URL, "", "s3cret", "cardCreate", "d1", payload); st != 200 || errMsg != "" {
 		t.Fatalf("post: %d %s", st, errMsg)
 	}
 	if body != payload {
@@ -67,7 +67,7 @@ func TestPostSendsBothSignaturesWithSameTimestamp(t *testing.T) {
 
 	// no secret and no token: nothing is signed
 	hdr = nil
-	post(context.Background(), srv.URL, "", "", "ping", "d2", payload)
+	post(context.Background(), HTTPClient, srv.URL, "", "", "ping", "d2", payload)
 	if hdr.Get("X-Weave-Signature") != "" || hdr.Get("X-Weave-Signature-V2") != "" {
 		t.Fatal("unsigned webhook must carry no signature")
 	}

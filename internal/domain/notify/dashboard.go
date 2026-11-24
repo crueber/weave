@@ -104,27 +104,52 @@ func panelCfgs(c dashCfg) []PanelCfg {
 	return out
 }
 
+// dashCards lists the caller's cards for a panel: one row per card (never once per board it is on), shown on its
+// context board (authz.CardAccesses: the home when viewable, else the board with the most access), with that
+// board's column. Only placements in an active column count; hidden placements are never named. Constant queries:
+// one candidates query, one placements query and one BoardLevels call.
 func dashCards(e *ops.Env, where string, order string, args []any, limit int) []DashCard {
-	q := `SELECT c.id,c.name,c.board_id,b.name,p.name,COALESCE(l.name,l.type),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0)
-	 FROM cards c JOIN lists l ON l.id=c.list_id JOIN boards b ON b.id=c.board_id JOIN projects p ON p.id=b.project_id
-	 WHERE c.is_closed=0 AND c.is_draft=0 AND c.is_template=0 AND l.type='active' AND (` + where + `) ORDER BY ` + order + ` LIMIT ?`
-	rows, err := e.DB.QueryContext(e.Ctx, q, append(args, limit*5)...)
+	q := `SELECT c.id,c.name,p.board_id,b.name,pr.name,COALESCE(l.name,l.type),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0)
+	 FROM cards c JOIN card_placements p ON p.card_id=c.id JOIN lists l ON l.id=p.list_id JOIN boards b ON b.id=p.board_id JOIN projects pr ON pr.id=b.project_id
+	 WHERE c.is_closed=0 AND c.is_draft=0 AND c.is_template=0 AND l.type='active' AND (` + where + `) ORDER BY ` + order + `, p.is_home DESC, p.placed_at, p.board_id LIMIT ?`
+	rows, err := e.DB.QueryContext(e.Ctx, q, append(args, limit*10)...)
 	out := []DashCard{}
 	if err != nil {
 		return out
 	}
-	defer rows.Close()
-	level := map[string]bool{}
-	for rows.Next() && len(out) < limit {
+	var ids []string
+	cands := map[string][]DashCard{}
+	for rows.Next() {
 		var c DashCard
-		_ = rows.Scan(&c.ID, &c.Name, &c.BoardID, &c.BoardName, &c.Project, &c.List, &c.DueDate, &c.Completed)
-		ok, seen := level[c.BoardID]
-		if !seen {
-			ok = authz.BoardLevel(e, c.BoardID) >= authz.View
-			level[c.BoardID] = ok
+		if rows.Scan(&c.ID, &c.Name, &c.BoardID, &c.BoardName, &c.Project, &c.List, &c.DueDate, &c.Completed) != nil {
+			continue
 		}
-		if ok {
-			out = append(out, c)
+		if _, ok := cands[c.ID]; !ok {
+			ids = append(ids, c.ID)
+		}
+		cands[c.ID] = append(cands[c.ID], c)
+	}
+	rows.Close()
+	access := authz.CardAccesses(e, ids, "")
+	for _, id := range ids {
+		if len(out) >= limit {
+			break
+		}
+		a, ok := access[id]
+		if !ok {
+			continue
+		}
+		var pick *DashCard
+		for i, c := range cands[id] { // the context board's row, else the first viewable one (home first)
+			if _, ok := a.Boards[c.BoardID]; ok && (pick == nil || c.BoardID == a.BoardID) {
+				pick = &cands[id][i]
+				if c.BoardID == a.BoardID {
+					break
+				}
+			}
+		}
+		if pick != nil {
+			out = append(out, *pick)
 		}
 	}
 	return out
@@ -154,8 +179,9 @@ func dashActivity(e *ops.Env, limit int) []DashActivity {
 	out := []DashActivity{}
 	cursor := "zzzz" // ids are hex: sorts after every id
 	level := map[string]bool{}
+	shown := map[string]bool{} // logical events already listed: an event recorded on several boards shows once
 	for page := 0; page < 6 && len(out) < limit; page++ {
-		rows, err := e.DB.QueryContext(e.Ctx, `SELECT a.id,a.type,COALESCE(u.name,''),COALESCE(a.card_id,''),COALESCE(c.name,''),a.board_id,COALESCE(b.name,''),a.created_at
+		rows, err := e.DB.QueryContext(e.Ctx, `SELECT a.id,a.type,COALESCE(u.name,''),COALESCE(a.card_id,''),COALESCE(c.name,''),a.board_id,COALESCE(b.name,''),a.created_at,COALESCE(a.origin_id,a.id)
 		 FROM actions a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN cards c ON c.id=a.card_id LEFT JOIN boards b ON b.id=a.board_id
 		 WHERE a.id<? ORDER BY a.id DESC LIMIT 100`, cursor)
 		if err != nil {
@@ -164,7 +190,8 @@ func dashActivity(e *ops.Env, limit int) []DashActivity {
 		n := 0
 		for rows.Next() {
 			var a DashActivity
-			_ = rows.Scan(&a.ID, &a.Type, &a.User, &a.CardID, &a.CardName, &a.BoardID, &a.BoardName, &a.CreatedAt)
+			var origin string
+			_ = rows.Scan(&a.ID, &a.Type, &a.User, &a.CardID, &a.CardName, &a.BoardID, &a.BoardName, &a.CreatedAt, &origin)
 			cursor = a.ID
 			n++
 			ok, seen := level[a.BoardID]
@@ -172,9 +199,11 @@ func dashActivity(e *ops.Env, limit int) []DashActivity {
 				ok = authz.BoardLevel(e, a.BoardID) >= authz.View
 				level[a.BoardID] = ok
 			}
-			if !ok || len(out) >= limit {
+			// the access filter first, then the dedupe: a copy on a hidden board never hides the event (nor names it)
+			if !ok || len(out) >= limit || shown[origin] {
 				continue
 			}
+			shown[origin] = true
 			who := a.User
 			if who == "" {
 				who = "Someone"

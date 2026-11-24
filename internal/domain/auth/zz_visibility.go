@@ -6,7 +6,7 @@ import (
 
 // Directory visibility. Guests and workers (agents) only learn about accounts they work with:
 // users and groups are visible to them when they are themselves or share at least one board
-// (directly, through a group, or as project manager). Admins, project owners and board users
+// (directly, through a group, or as project manager). Admins and board users
 // keep seeing everyone. The names shown in activity, comments and notifications are not
 // affected: they are attached to content the caller can already read.
 

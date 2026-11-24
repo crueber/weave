@@ -299,10 +299,11 @@ func init() {
 
 	attRef := func(e *ops.Env, id string, min authz.Level) (cardID, board, file, name string, err error) {
 		var f sql.NullString
-		if e.DB.QueryRowContext(e.Ctx, `SELECT a.card_id,c.board_id,a.file,a.name FROM attachments a JOIN cards c ON c.id=a.card_id WHERE a.id=?`, id).Scan(&cardID, &board, &f, &name) != nil {
+		if e.DB.QueryRowContext(e.Ctx, `SELECT card_id,file,name FROM attachments WHERE id=?`, id).Scan(&cardID, &f, &name) != nil {
 			return "", "", "", "", ops.NotFound("attachment")
 		}
-		return cardID, board, f.String, name, authz.RequireBoard(e, board, min)
+		board, err = authz.RequireCard(e, cardID, min)
+		return cardID, board, f.String, name, err
 	}
 
 	ops.Register(ops.Op{Name: "attachment.update", Summary: "Rename an attachment", Method: "PATCH", Path: "/attachments/{id}",
@@ -373,12 +374,11 @@ func init() {
 
 	serve := func(e *ops.Env, id string, thumb bool) (*ops.Stream, error) {
 		var cardID, file, name, mime sql.NullString
-		var board string
-		if e.DB.QueryRowContext(e.Ctx, `SELECT a.card_id,c.board_id,a.file,a.name,a.mime FROM attachments a JOIN cards c ON c.id=a.card_id WHERE a.id=? AND a.type='file'`, id).
-			Scan(&cardID, &board, &file, &name, &mime) != nil {
+		if e.DB.QueryRowContext(e.Ctx, `SELECT card_id,file,name,mime FROM attachments WHERE id=? AND type='file'`, id).
+			Scan(&cardID, &file, &name, &mime) != nil {
 			return nil, ops.NotFound("attachment")
 		}
-		if err := authz.RequireBoard(e, board, authz.View); err != nil {
+		if _, err := authz.RequireCard(e, cardID.String, authz.View); err != nil {
 			return nil, ops.NotFound("attachment")
 		}
 		rel, ct := file.String, mime.String
@@ -417,7 +417,7 @@ func init() {
 		if err := authz.RequireBoard(e, in.BoardID, authz.View); err != nil {
 			return nil, err
 		}
-		q := attSelect + ` WHERE c.board_id=?`
+		q := attSelect + ` WHERE a.card_id IN (SELECT card_id FROM card_placements WHERE board_id=?)` // every card placed on the board
 		switch in.Type {
 		case "", "all":
 		case "image":

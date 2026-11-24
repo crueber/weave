@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/config"
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/domain/projects"
@@ -36,7 +37,7 @@ func setup(t *testing.T) (*ops.Env, *ops.Principal, *ops.Principal, *ops.Princip
 	e := testutil.Env(t, nil)
 	e.Svc["config"] = config.Config{DataDir: t.TempDir()}
 	admin := addUser(t, e, "admin1", "admin")
-	owner := addUser(t, e, "owner1", "projectOwner")
+	owner := addUser(t, e, "owner1", "boardUser")
 	plain := addUser(t, e, "plain1", "boardUser")
 	return testutil.As(e, owner), admin, owner, plain
 }
@@ -63,7 +64,8 @@ func wantErr(t *testing.T, e *ops.Env, op string, in any, status int) {
 
 func TestProjectLifecycle(t *testing.T) {
 	e, admin, owner, plain := setup(t)
-	wantErr(t, testutil.As(e, plain), "project.create", projects.CreateIn{Name: "x"}, 403)
+	guest := addUser(t, e, "guest1", "guest")
+	wantErr(t, testutil.As(e, guest), "project.create", projects.CreateIn{Name: "x"}, 403)
 	wantErr(t, e, "project.create", projects.CreateIn{Name: "  "}, 422)
 
 	p := call[projects.Project](t, e, "project.create", projects.CreateIn{Name: "Alpha", Description: "d"})
@@ -92,10 +94,11 @@ func TestProjectLifecycle(t *testing.T) {
 	if len(l) != 1 {
 		t.Fatal("hidden project missing with hidden=true")
 	}
-	// admin sees all
-	if l = call[[]projects.Project](t, testutil.As(e, admin), "project.list", projects.ListIn{Hidden: true}); len(l) != 1 {
-		t.Fatal("admin should see all projects")
+	// an admin who neither manages the project nor is a member of one of its boards does not see it
+	if l = call[[]projects.Project](t, testutil.As(e, admin), "project.list", projects.ListIn{Hidden: true}); len(l) != 0 {
+		t.Fatalf("admin without membership sees projects: %v", l)
 	}
+	wantErr(t, testutil.As(e, admin), "project.get", projects.IDIn{ID: p.ID}, 404)
 	// favorites
 	f := call[projects.Project](t, e, "project.favorite", projects.IDIn{ID: p.ID})
 	if !f.IsFavorite {
@@ -198,10 +201,12 @@ func TestBackgroundImages(t *testing.T) {
 
 func TestManagers(t *testing.T) {
 	e, admin, _, plain := setup(t)
-	owner2 := addUser(t, e, "owner2", "projectOwner")
+	owner2 := addUser(t, e, "owner2", "worker") // any person but a guest or an agent can be a manager
+	guest := addUser(t, e, "guest2", "guest")
 	p := call[projects.Project](t, e, "project.create", projects.CreateIn{Name: "P"})
 
-	wantErr(t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: plain.UserID}, 422) // role not allowed
+	wantErr(t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: guest.UserID}, 422) // guests cannot manage
+	_ = plain
 	wantErr(t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: "ghost"}, 404)
 	m := call[projects.Manager](t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: owner2.UserID})
 	wantErr(t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: owner2.UserID}, 409)
@@ -212,13 +217,52 @@ func TestManagers(t *testing.T) {
 	if len(ms) != 2 || !ms[0].IsOwner {
 		t.Fatalf("%+v", ms)
 	}
-	// non-owner manager cannot remove the owning manager
+	// non-owner manager cannot remove the active owning manager; an admin who is not a manager cannot touch it at all
 	wantErr(t, testutil.As(e, owner2), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: ms[0].ID}, 403)
+	wantErr(t, testutil.As(e, admin), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: ms[0].ID}, 404)
 	call[projects.DeleteOut](t, e, "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: m.ID})
-	// last manager cannot be removed
-	wantErr(t, testutil.As(e, admin), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: ms[0].ID}, 409)
+	// last manager cannot be removed (not even by themself)
+	wantErr(t, e, "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: ms[0].ID}, 409)
 	// removed manager loses access
 	wantErr(t, testutil.As(e, owner2), "project.get", projects.IDIn{ID: p.ID}, 404)
+}
+
+// TestOwningManagerRemoval: the owning manager steps down themself; a co-manager removes them only once their
+// account is inactive (deactivated); an administrator who is also a co-manager has no extra power over the owner.
+func TestOwningManagerRemoval(t *testing.T) {
+	e, admin, _, _ := setup(t)
+	co := addUser(t, e, "co1", "boardUser")
+	p := call[projects.Project](t, e, "project.create", projects.CreateIn{Name: "Owned"})
+	call[projects.Manager](t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: co.UserID})
+	call[projects.Manager](t, e, "project.manager.add", projects.ManagerAddIn{ID: p.ID, UserID: admin.UserID})
+	ms := call[[]projects.Manager](t, e, "project.manager.list", projects.IDIn{ID: p.ID})
+	if !ms[0].IsOwner {
+		t.Fatalf("%+v", ms)
+	}
+	owner := ms[0].ID
+	if authz.Project(testutil.As(e, admin), p.ID).CanRemoveOwnerManager || authz.Project(testutil.As(e, co), p.ID).CanRemoveOwnerManager {
+		t.Fatal("co-managers (an admin included) may not remove an active owner")
+	}
+	wantErr(t, testutil.As(e, admin), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: owner}, 403)
+	wantErr(t, testutil.As(e, co), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: owner}, 403)
+	if !authz.Project(e, p.ID).CanRemoveOwnerManager {
+		t.Fatal("the owner may step down")
+	}
+	// once the owner's account is deactivated, a co-manager may tidy up the stale row
+	if _, err := e.DB.Exec(`UPDATE users SET is_deactivated=1 WHERE id='owner1'`); err != nil {
+		t.Fatal(err)
+	}
+	call[projects.DeleteOut](t, testutil.As(e, co), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: owner})
+	ms = call[[]projects.Manager](t, testutil.As(e, co), "project.manager.list", projects.IDIn{ID: p.ID})
+	if len(ms) != 2 || !ms[0].IsOwner || ms[0].UserID != co.UserID {
+		t.Fatalf("ownership passes to the next manager: %+v", ms)
+	}
+	// the new owner steps down themself; ownership moves on
+	call[projects.DeleteOut](t, testutil.As(e, co), "project.manager.remove", projects.ManagerRemoveIn{ID: p.ID, ManagerID: ms[0].ID})
+	ms = call[[]projects.Manager](t, testutil.As(e, admin), "project.manager.list", projects.IDIn{ID: p.ID})
+	if len(ms) != 1 || !ms[0].IsOwner || ms[0].UserID != admin.UserID {
+		t.Fatalf("after stepping down: %+v", ms)
+	}
 }
 
 func TestBaseCustomFields(t *testing.T) {
@@ -283,7 +327,7 @@ func TestUI(t *testing.T) {
 			t.Fatalf("code %d, want %q in %s", w.Code, want, w.Body.String())
 		}
 	}
-	ok(do("GET", "/", nil, false), "You have no projects yet")
+	ok(do("GET", "/", nil, false), "Create your first project")
 	ok(do("GET", "/ui/projects/new", nil, true), "Create project")
 	w := do("POST", "/ui/projects", url.Values{"name": {"UI Proj"}}, true)
 	loc := w.Header().Get("HX-Redirect")

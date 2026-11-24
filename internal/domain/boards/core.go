@@ -43,12 +43,19 @@ func emit(e *ops.Env, typ, name, boardID string, data map[string]any) {
 // emitCard publishes a card-scoped event raised by a list operation (bulk moves,
 // clears). kind overrides the event-stream type (e.g. card.archived).
 func emitCard(e *ops.Env, typ, name, kind, boardID, cardID string, data map[string]any) {
+	emitCardOn(e, typ, name, kind, boardID, cardID, data, nil)
+}
+
+// emitCardOn is emitCard with an explicit board scope (ops.Event.Boards; see there): the boards of a card read
+// before a write that removes them, or ONE board for an event about that board's placement only (an auto-archive,
+// a column archived or deleted, a card taken off a board by emptying its trash).
+func emitCardOn(e *ops.Env, typ, name, kind, boardID, cardID string, data map[string]any, boards []string) {
 	if data == nil {
 		data = map[string]any{}
 	}
 	data["id"] = cardID
 	if ops.EmitHook != nil {
-		ops.Emit(e, ops.Event{Type: typ, Kind: kind, BoardID: boardID, CardID: cardID, Name: name, Data: data})
+		ops.Emit(e, ops.Event{Type: typ, Kind: kind, BoardID: boardID, CardID: cardID, Name: name, Data: data, Boards: boards})
 		return
 	}
 	e.Hub.Publish(realtime.Event{Name: name, Room: "board:" + boardID, Data: data})

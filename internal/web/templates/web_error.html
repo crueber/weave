@@ -1,0 +1,7 @@
+{{define "title"}}{{.Data.Title}} - Weave{{end}}
+{{define "page"}}{{with .Data}}<div class="web-error"><div class="empty-state">
+  <svg class="web-error-i" viewBox="0 0 24 24" width="48" height="48" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  <h2>{{.Msg}}</h2>
+  <p>{{if .NotFound}}It may have been deleted, or you are not a member. Projects and boards belong to the people who run them: ask one of them to invite you.{{else}}Ask a manager of this project or board for the access you need.{{end}}</p>
+  <a class="boards-btn" href="/">Go to your projects</a>
+</div></div>{{end}}{{end}}

@@ -119,10 +119,11 @@ func timeSummary(e *ops.Env, cardID string) (TimeSummary, error) {
 }
 
 func entryCard(e *ops.Env, id string, min authz.Level) (cardID, board string, err error) {
-	if e.DB.QueryRowContext(e.Ctx, `SELECT t.card_id,c.board_id FROM time_entries t JOIN cards c ON c.id=t.card_id WHERE t.id=?`, id).Scan(&cardID, &board) != nil {
+	if e.DB.QueryRowContext(e.Ctx, `SELECT card_id FROM time_entries WHERE id=?`, id).Scan(&cardID) != nil {
 		return "", "", ops.NotFound("time entry")
 	}
-	return cardID, board, authz.RequireBoard(e, board, min)
+	board, err = authz.RequireCard(e, cardID, min)
+	return cardID, board, err
 }
 
 func init() {

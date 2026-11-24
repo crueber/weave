@@ -58,15 +58,17 @@ func commentScanner(e *ops.Env, level authz.Level) func(*sql.Rows) (CommentItem,
 	}
 }
 
-// commentRef loads a comment's card/board/author for permission checks.
-func commentRef(e *ops.Env, id string) (cardID, boardID string, author sql.NullString, err error) {
-	if e.DB.QueryRowContext(e.Ctx, `SELECT c.card_id,k.board_id,c.user_id FROM comments c JOIN cards k ON k.id=c.card_id WHERE c.id=?`, id).Scan(&cardID, &boardID, &author) != nil {
-		return "", "", author, ops.NotFound("comment")
+// commentRef loads a comment's card, author and the caller's card access (authz.CardAccessFor: the level is the
+// maximum over the placements the caller can view, boardID the context board) for permission checks.
+func commentRef(e *ops.Env, id string) (cardID, boardID string, level authz.Level, author sql.NullString, err error) {
+	if e.DB.QueryRowContext(e.Ctx, `SELECT card_id,user_id FROM comments WHERE id=?`, id).Scan(&cardID, &author) != nil {
+		return "", "", authz.None, author, ops.NotFound("comment")
 	}
-	if authz.BoardLevel(e, boardID) == authz.None {
-		return "", "", author, ops.NotFound("comment")
+	a, err := authz.CardAccessFor(e, cardID, "")
+	if err != nil {
+		return "", "", authz.None, author, ops.NotFound("comment")
 	}
-	return
+	return cardID, a.BoardID, a.Level, author, nil
 }
 
 func clip(s string, n int) string {
@@ -140,11 +142,10 @@ func init() {
 
 	ops.Register(ops.Op{Name: "comment.update", Summary: "Edit a comment (author only)", Method: "PATCH", Path: "/comments/{id}",
 		UI: "POST /ui/comments/{id}"}, func(e *ops.Env, in CommentUpdateIn) (CommentItem, error) {
-		cardID, board, author, err := commentRef(e, in.ID)
+		cardID, board, level, author, err := commentRef(e, in.ID)
 		if err != nil {
 			return CommentItem{}, err
 		}
-		level := authz.BoardLevel(e, board)
 		if !author.Valid || author.String != e.User.UserID {
 			return CommentItem{}, ops.Forbidden()
 		}
@@ -168,11 +169,10 @@ func init() {
 
 	ops.Register(ops.Op{Name: "comment.delete", Summary: "Delete a comment (author, or a project manager/admin)", Method: "DELETE", Path: "/comments/{id}",
 		UI: "POST /ui/comments/{id}/delete"}, func(e *ops.Env, in IDIn) (DeletedOut, error) {
-		cardID, board, author, err := commentRef(e, in.ID)
+		cardID, board, level, author, err := commentRef(e, in.ID)
 		if err != nil {
 			return DeletedOut{}, err
 		}
-		level := authz.BoardLevel(e, board)
 		mine := author.Valid && author.String == e.User.UserID && level >= authz.Comment
 		if !mine && level < authz.Manage {
 			return DeletedOut{}, ops.Forbidden()

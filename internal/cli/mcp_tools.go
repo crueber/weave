@@ -16,7 +16,7 @@ import (
 var mcpCurated = []string{
 	"auth.whoami",
 	"project.list", "board.list", "board.tree", "list.list",
-	"card.list", "card.get", "card.create", "card.update", "card.move",
+	"card.list", "card.get", "card.create", "card.update", "card.move", "card.place",
 	"comment.list", "comment.create",
 	"card.next", "card.claim", "card.renew", "card.release",
 	"search.query",

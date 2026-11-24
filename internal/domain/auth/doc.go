@@ -12,7 +12,7 @@
 //
 // Config keys read: oidc.issuer, oidc.clientId, oidc.clientSecret,
 // oidc.scopes, oidc.emailClaim, oidc.nameClaim, oidc.usernameClaim, oidc.groupsClaim,
-// oidc.adminGroup, oidc.ownerGroup, oidc.userGroup, oidc.workerGroup, oidc.guestGroup, oidc.requireGroup, oidc.teamPrefix, oidc.autoProvision, terms.text, auth.secret.
+// oidc.adminGroup, oidc.userGroup, oidc.workerGroup, oidc.guestGroup, oidc.requireGroup, oidc.teamPrefix, oidc.autoProvision, terms.text, auth.secret.
 //
 // Web routes: /login, /logout, /settings, /admin/users, /admin/groups, /admin/sso,
 // /avatars/{id}, /auth/oidc/login, /auth/oidc/callback. The presence heartbeat

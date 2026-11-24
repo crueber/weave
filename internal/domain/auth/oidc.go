@@ -47,7 +47,6 @@ type OIDCSettings struct {
 	UsernameClaim string   `json:"usernameClaim"`
 	GroupsClaim   string   `json:"groupsClaim" desc:"ID-token claim holding the user's groups (default groups)"`
 	AdminGroup    string   `json:"adminGroup" desc:"group granting the admin role (default weave-admins)"`
-	OwnerGroup    string   `json:"ownerGroup" desc:"group granting projectOwner (default weave-project-owners)"`
 	UserGroup     string   `json:"userGroup" desc:"group granting boardUser (default weave-users)"`
 	WorkerGroup   string   `json:"workerGroup" desc:"group granting worker (default weave-workers)"`
 	GuestGroup    string   `json:"guestGroup" desc:"group granting guest (default weave-guests)"`
@@ -67,7 +66,6 @@ type OIDCSettingsIn struct {
 	UsernameClaim *string `json:"usernameClaim"`
 	GroupsClaim   *string `json:"groupsClaim"`
 	AdminGroup    *string `json:"adminGroup"`
-	OwnerGroup    *string `json:"ownerGroup"`
 	UserGroup     *string `json:"userGroup"`
 	WorkerGroup   *string `json:"workerGroup"`
 	GuestGroup    *string `json:"guestGroup"`
@@ -177,18 +175,17 @@ func claimStrings(c map[string]any, key string) []string {
 }
 
 // roleRank orders Weave roles; the highest-ranked matching group wins.
-var roleRank = map[string]int{"guest": 1, "worker": 2, "boardUser": 3, "projectOwner": 4, "admin": 5}
+var roleRank = map[string]int{"guest": 1, "worker": 2, "boardUser": 3, "admin": 4}
 
 // groupAccess derives the Weave role and team-group names from the IdP groups claim.
 // ok=false means sign-in must be denied (requireGroup set and no role group matched).
 func groupAccess(e *ops.Env, claims map[string]any) (role string, teams []string, ok bool) {
 	groups := claimStrings(claims, cfgDefault(e, "oidc.groupsClaim", "groups"))
 	byGroup := map[string]string{
-		cfgDefault(e, "oidc.adminGroup", "weave-admins"):         "admin",
-		cfgDefault(e, "oidc.ownerGroup", "weave-project-owners"): "projectOwner",
-		cfgDefault(e, "oidc.userGroup", "weave-users"):           "boardUser",
-		cfgDefault(e, "oidc.workerGroup", "weave-workers"):       "worker",
-		cfgDefault(e, "oidc.guestGroup", "weave-guests"):         "guest",
+		cfgDefault(e, "oidc.adminGroup", "weave-admins"):   "admin",
+		cfgDefault(e, "oidc.userGroup", "weave-users"):     "boardUser",
+		cfgDefault(e, "oidc.workerGroup", "weave-workers"): "worker",
+		cfgDefault(e, "oidc.guestGroup", "weave-guests"):   "guest",
 	}
 	prefix := cfgDefault(e, "oidc.teamPrefix", "weave-team-")
 	seen := map[string]bool{}
@@ -354,11 +351,11 @@ func settingsOut(e *ops.Env) OIDCSettings {
 		HasSecret: GetConfig(e, "oidc.clientSecret") != "", Scopes: cfgDefault(e, "oidc.scopes", "openid profile email groups"),
 		EmailClaim: cfgDefault(e, "oidc.emailClaim", "email"), NameClaim: cfgDefault(e, "oidc.nameClaim", "name"),
 		UsernameClaim: cfgDefault(e, "oidc.usernameClaim", "preferred_username"), GroupsClaim: cfgDefault(e, "oidc.groupsClaim", "groups"), AdminGroup: cfgDefault(e, "oidc.adminGroup", "weave-admins"),
-		OwnerGroup: cfgDefault(e, "oidc.ownerGroup", "weave-project-owners"), UserGroup: cfgDefault(e, "oidc.userGroup", "weave-users"),
+		UserGroup:   cfgDefault(e, "oidc.userGroup", "weave-users"),
 		WorkerGroup: cfgDefault(e, "oidc.workerGroup", "weave-workers"), GuestGroup: cfgDefault(e, "oidc.guestGroup", "weave-guests"),
 		RequireGroup: cfgBool(e, "oidc.requireGroup", false), TeamPrefix: cfgDefault(e, "oidc.teamPrefix", "weave-team-"),
 		AutoProvision: cfgBool(e, "oidc.autoProvision", true), RedirectURL: redirectURL(e), FromEnv: []string{}}
-	for _, k := range []string{"issuer", "clientId", "clientSecret", "scopes", "emailClaim", "nameClaim", "usernameClaim", "groupsClaim", "adminGroup", "ownerGroup", "userGroup", "workerGroup", "guestGroup", "requireGroup", "teamPrefix", "autoProvision"} {
+	for _, k := range []string{"issuer", "clientId", "clientSecret", "scopes", "emailClaim", "nameClaim", "usernameClaim", "groupsClaim", "adminGroup", "userGroup", "workerGroup", "guestGroup", "requireGroup", "teamPrefix", "autoProvision"} {
 		if envSet("oidc." + k) {
 			s.FromEnv = append(s.FromEnv, k)
 		}
@@ -463,7 +460,7 @@ func init() {
 				in.ClientSecret = nil // blank keeps the stored secret
 			}
 			for _, err := range []error{set("issuer", in.Issuer), set("clientId", in.ClientID), set("clientSecret", in.ClientSecret), set("scopes", in.Scopes),
-				set("emailClaim", in.EmailClaim), set("nameClaim", in.NameClaim), set("usernameClaim", in.UsernameClaim), set("groupsClaim", in.GroupsClaim), set("adminGroup", in.AdminGroup), set("ownerGroup", in.OwnerGroup), set("userGroup", in.UserGroup),
+				set("emailClaim", in.EmailClaim), set("nameClaim", in.NameClaim), set("usernameClaim", in.UsernameClaim), set("groupsClaim", in.GroupsClaim), set("adminGroup", in.AdminGroup), set("userGroup", in.UserGroup),
 				set("workerGroup", in.WorkerGroup), set("guestGroup", in.GuestGroup), setB("requireGroup", in.RequireGroup), set("teamPrefix", in.TeamPrefix),
 				setB("autoProvision", in.AutoProvision)} {
 				if err != nil {

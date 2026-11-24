@@ -56,13 +56,14 @@ func draftAge(created string, now time.Time) (string, string) {
 // showInbox decides whether the caller sees the Inbox of a board: the board has it on, the page is not the
 // read-only public page, and the caller has real access (admin, project manager or a member). Someone who can
 // only see the board because it is public never sees drafts: they are ideas not yet on the board.
-func showInbox(e *ops.Env, b Board, readOnly bool) bool {
-	return b.HasInbox && !readOnly && LoadDrafts != nil && e.User != nil && authz.IsBoardMember(e, b.ID)
+// pd.Caps (authz.Board) already carries both: CanSeeInbox is cleared on the public page.
+func showInbox(pd *PageData) bool {
+	return pd.Board.HasInbox && LoadDrafts != nil && pd.Caps.CanSeeInbox
 }
 
-// loadInbox fills the inbox part of the page data (one membership check + one query).
+// loadInbox fills the inbox part of the page data (one query).
 func loadInbox(e *ops.Env, pd *PageData, readOnly bool) error {
-	if !showInbox(e, pd.Board, readOnly) {
+	if !showInbox(pd) {
 		return nil
 	}
 	ds, err := LoadDrafts(e, pd.Board.ID)

@@ -1,35 +1,19 @@
 {{define "title"}}Webhooks - Weave{{end}}
-{{/* Webhook fields. Args: W (webhook), Events (names), P (id prefix). Secrets are write-only: blank keeps the stored value. */}}
-{{define "notify_whform"}}{{$p := .P}}<div class="bs-form">
-  {{template "adm_field" dict "ID" (print $p "-name") "Name" "name" "Title" "Name" "Help" "A label for this endpoint." "Type" "text" "Value" .W.Name "Required" true}}
-  {{template "adm_field" dict "ID" (print $p "-url") "Name" "url" "Title" "URL" "Help" "Weave POSTs JSON here." "Type" "text" "Value" .W.URL "Placeholder" "https://example.com/hook" "Required" true}}
-  <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="{{$p}}-token">Access token</label></b><small>Sent as a Bearer token.</small></span>
-    <span class="adm-stack"><input id="{{$p}}-token" type="password" name="accessToken" value="" autocomplete="new-password" placeholder="{{if .W.HasAccessToken}}(stored) leave blank to keep{{end}}">{{if .W.HasAccessToken}}<label class="bs-inline-toggle"><input type="checkbox" name="clearAccessToken" value="1"> Clear the stored token</label>{{end}}</span></div>
-  <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="{{$p}}-secret">Signing secret</label></b><small>HMAC-SHA256 in X-Weave-Signature (falls back to the access token).</small></span>
-    <span class="adm-stack"><input id="{{$p}}-secret" type="password" name="secret" value="" autocomplete="new-password" placeholder="{{if .W.HasSecret}}(stored) leave blank to keep{{end}}">{{if .W.HasSecret}}<label class="bs-inline-toggle"><input type="checkbox" name="clearSecret" value="1"> Clear the stored secret</label>{{end}}</span></div>
-  {{template "adm_field" dict "ID" (print $p "-project") "Name" "projectId" "Title" "Project ID" "Help" "Optional: only events from this project." "Type" "text" "Value" .W.ProjectID}}
-  {{template "adm_field" dict "ID" (print $p "-board") "Name" "boardId" "Title" "Board ID" "Help" "Optional: only events from this board." "Type" "text" "Value" .W.BoardID}}
-  {{template "adm_field" dict "ID" (print $p "-user") "Name" "userId" "Title" "User ID" "Help" "Optional: only events caused by this user." "Type" "text" "Value" .W.UserID}}
-  <details class="adm-events"><summary>Only these events <span class="boards-badge">{{len .W.Events}} selected</span> <small>(none = all)</small></summary><div class="adm-pick">
-    {{$sel := .W.Events}}{{range .Events}}<label class="bs-inline-toggle"><input type="checkbox" name="events" value="{{.}}"{{if notifyHas $sel .}} checked{{end}}> {{.}}</label>{{end}}</div></details>
-  <details class="adm-events"><summary>Never send these events <span class="boards-badge">{{len .W.ExcludedEvents}} selected</span></summary><div class="adm-pick">
-    {{$exc := .W.ExcludedEvents}}{{range .Events}}<label class="bs-inline-toggle"><input type="checkbox" name="excludedEvents" value="{{.}}"{{if notifyHas $exc .}} checked{{end}}> {{.}}</label>{{end}}</div></details>
-</div>{{end}}
 {{define "page"}}{{template "admin_top" dict "Active" "webhooks" "Crumb" .User.Name}}{{with .Data}}
 <section id="adm-webhooks" class="boards-sec" aria-labelledby="adm-webhooks-h">
   <div class="bs-sec-head"><h2 id="adm-webhooks-h">Webhooks</h2>{{if .Saved}}{{template "adm_status" dict "Done" true "Text" (print "Webhook " .Saved)}}{{end}}</div>
-  <p class="bs-desc">Weave POSTs a JSON body with event, data, prevData and user to each matching webhook. Failed deliveries are retried with backoff; see the delivery log.</p>
+  <p class="bs-desc">Weave POSTs a JSON body with event, data, prevData and user to each matching webhook. Failed deliveries are retried with backoff; see the delivery log. Global and project webhooks are admin-only. Board webhooks belong to their boards: their owners and project managers manage them in Board settings, and this page lists only those of boards you manage yourself (the ones a non-admin created or changed are marked <span class="boards-badge">owner</span> and are delivered under the strict destination policy).</p>
   <ul class="bs-members adm-hooks">
   {{range .Items}}<li class="bs-member adm-item"><details class="adm-user">
     <summary>
       <span class="bs-member-t"><b>{{.Name}}</b><small class="adm-url">{{.URL}}</small></span>
-      <span class="adm-badges">{{if .HasSecret}}<span class="boards-badge">signed</span>{{end}}{{if .ProjectID}}<span class="boards-badge">project</span>{{end}}{{if .BoardID}}<span class="boards-badge">board</span>{{end}}</span>
+      <span class="adm-badges"><span class="boards-badge">{{.Scope}}</span>{{if .UserCreated}}<span class="boards-badge">owner</span>{{end}}{{if .HasSecret}}<span class="boards-badge">signed</span>{{end}}</span>
     </summary>
     <div class="adm-body">
       <div class="bs-row"><span class="bs-text"><b>Delivery log</b><small>Every attempt with status, timing and response.</small></span><span class="bs-btns"><a class="boards-btn" href="/admin/webhooks/{{.ID}}/deliveries">Deliveries</a></span></div>
       <div class="bs-row"><span class="bs-text"><b>Send a test ping</b><small>Delivers a synchronous ping event and reports the result.</small></span><span class="bs-btns"><button type="button" hx-post="/ui/admin/webhooks/{{.ID}}/test" hx-swap="none">Send ping</button></span></div>
       <form hx-post="/ui/admin/webhooks/{{.ID}}" method="post" action="/ui/admin/webhooks/{{.ID}}" class="adm-edit">
-        {{template "notify_whform" dict "W" . "Events" $.Data.Events "P" (print "wh-" .ID)}}
+        {{template "notify_whform" dict "W" . "Events" $.Data.Events "P" (print "wh-" .ID) "Admin" true "Projects" $.Data.Projects "Boards" $.Data.Boards}}
         <div class="adm-submit"><button class="primary" type="submit">Save webhook</button></div>
       </form>
       <div class="bs-row"><span class="bs-text"><b>Delete webhook</b><small>Removes the endpoint and its delivery log.</small></span><span class="bs-btns"><button type="button" class="danger" hx-post="/ui/admin/webhooks/{{.ID}}/delete" hx-confirm="Delete this webhook and its delivery log?">Delete</button></span></div>
@@ -40,7 +24,7 @@
 
   <div class="adm-block">
     <h3 class="bs-sub">New webhook</h3>
-    <form hx-post="/ui/admin/webhooks" method="post" action="/ui/admin/webhooks">{{template "notify_whform" dict "W" .Blank "Events" .Events "P" "wh-new"}}
+    <form hx-post="/ui/admin/webhooks" method="post" action="/ui/admin/webhooks">{{template "notify_whform" dict "W" .Blank "Events" .Events "P" "wh-new" "Admin" true "Projects" .Projects "Boards" .Boards}}
       <div class="adm-submit"><button class="primary" type="submit">Create webhook</button></div></form>
   </div>
 </section>

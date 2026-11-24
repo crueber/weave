@@ -187,12 +187,14 @@ func TestStatsQueryCountIsConstant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { testutil.CheckPlacements(t, d) })
 	e := fixture(t)
 	e.DB = d
 	for _, u := range []*ops.Principal{admin, editor} {
 		_, _ = e.DB.Exec(`INSERT INTO users(id,email,name,role,created_at) VALUES(?,?,?,?,'2024-01-01T00:00:00Z')`, u.UserID, u.UserID+"@x.io", u.Name, u.Role)
 	}
 	_, _ = e.DB.Exec(`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','2024-01-01T00:00:00Z')`)
+	_, _ = e.DB.Exec(`INSERT INTO project_managers(id,project_id,user_id,created_at) VALUES('pm-admin-p1','p1','u-admin','2024-01-01T00:00:00Z')`)
 	var ids []string
 	for i := 0; i < 12; i++ {
 		b := newBoard(t, e, "B")

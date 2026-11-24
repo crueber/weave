@@ -8,6 +8,7 @@ import (
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/events"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -22,8 +23,10 @@ type List struct {
 	Color       *string  `json:"color,omitempty"`
 	Description *string  `json:"description,omitempty" desc:"brief for this column: what a card here asks for (agents read it)"`
 	WIPLimit    *int     `json:"wipLimit,omitempty" desc:"soft work-in-progress limit: how many cards this column should hold at most (advisory, nothing is blocked); absent = no limit"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   *string  `json:"updatedAt,omitempty"`
+	// ArchiveAfter is the auto-archive setting (lists.archive_after); independent of the WIP limit.
+	ArchiveAfter *int    `json:"archiveAfter,omitempty" desc:"auto-archive: the column keeps at most this many cards; when more land here, the ones that have been in it longest go to the board's archive (cards with a live claim and, for now, recurring cards are skipped); absent = off"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    *string `json:"updatedAt,omitempty"`
 	// IsSubscribed is set by list.get only: the caller's own watch state. Every other path (board.get lists, board.tree,
 	// events, exports, templates) leaves it nil, so it never travels.
 	IsSubscribed *bool `json:"isSubscribed,omitempty" desc:"list.get only: whether you watch this column"`
@@ -46,11 +49,11 @@ func checkWIP(n int) (*int, error) {
 	return &n, nil
 }
 
-const listCols = `id,board_id,type,position,name,color,description,wip_limit,created_at,updated_at`
+const listCols = `id,board_id,type,position,name,color,description,wip_limit,archive_after,created_at,updated_at`
 
 func scanList(r interface{ Scan(...any) error }) (List, error) {
 	var l List
-	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.CreatedAt, &l.UpdatedAt)
+	err := r.Scan(&l.ID, &l.BoardID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.ArchiveAfter, &l.CreatedAt, &l.UpdatedAt)
 	return l, err
 }
 
@@ -98,23 +101,67 @@ type ListListIn struct {
 	BoardID string `path:"boardId"`
 }
 type ListCreateIn struct {
-	BoardID     string   `path:"boardId"`
-	Name        string   `json:"name" required:"true"`
-	Type        string   `json:"type" desc:"active (default) | closed"`
-	Color       string   `json:"color" desc:"column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"`
-	Description string   `json:"description" desc:"brief for this column: what a card that lands here asks for; agents read it"`
-	WIPLimit    *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none"`
-	Position    *float64 `json:"position"`
+	BoardID      string   `path:"boardId"`
+	Name         string   `json:"name" required:"true"`
+	Type         string   `json:"type" desc:"active (default) | closed = the column closes cards that land here: cards created in or moved to it are marked closed, moving them to an active column re-opens them"`
+	Color        string   `json:"color" desc:"column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none"`
+	Description  string   `json:"description" desc:"brief for this column: what a card that lands here asks for; agents read it"`
+	WIPLimit     *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none"`
+	ArchiveAfter *int     `json:"archiveAfter" desc:"auto-archive (1-10000): keep at most this many cards; when more land here, the ones that have been in the column longest go to the board's archive; omit or 0 for off"`
+	Position     *float64 `json:"position"`
 }
 type ListUpdateIn struct {
-	ID          string   `path:"id"`
-	Name        *string  `json:"name"`
-	Color       *string  `json:"color" desc:"column colour: #rrggbb or a preset name; empty string clears the colour"`
-	Type        *string  `json:"type" desc:"switch between active and closed"`
-	Description *string  `json:"description" desc:"brief for this column: what a card that lands here asks for; empty string clears it"`
-	WIPLimit    *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit"`
-	Position    *float64 `json:"position"`
+	ID             string   `path:"id"`
+	Name           *string  `json:"name"`
+	Color          *string  `json:"color" desc:"column colour: #rrggbb or a preset name; empty string clears the colour"`
+	Type           *string  `json:"type" desc:"closed = close cards that land here (created in or moved to the column; moving them to an active column re-opens them), active = do not; see existingCards for the cards already in the column (list.typePreview counts them)"`
+	Description    *string  `json:"description" desc:"brief for this column: what a card that lands here asks for; empty string clears it"`
+	WIPLimit       *int     `json:"wipLimit" desc:"soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit"`
+	Position       *float64 `json:"position"`
+	ArchiveAfter   *int     `json:"archiveAfter" desc:"auto-archive (1-10000): the column keeps at most this many cards; whenever more land here, the ones that have been in it longest (oldest list change first) go to the board's archive, where card.restore brings them back; cards with a live claim and, for now, cards with a recurrence rule are skipped (they still count); 0 turns it off. Setting or lowering it applies at once to the cards already here: when that would archive cards, confirmArchive=true is required (409 conflict with the count otherwise; list.archivePreview counts them)"`
+	ConfirmArchive bool     `json:"confirmArchive" desc:"with archiveAfter: confirm that the cards over the new limit are archived right now"`
+	// ExistingCards only matters when Type changes the column's closing setting.
+	ExistingCards string `json:"existingCards" desc:"when type changes: flip (default) = also close the open cards already in the column (switching to closed) or re-open its closed cards (switching to active); keep = leave them as they are, the setting applies only to cards that land from now on"`
 }
+
+// ListArchivePreviewIn asks what setting a column's archive-after to N would archive right now.
+type ListArchivePreviewIn struct {
+	ID           string `path:"id"`
+	ArchiveAfter int    `query:"archiveAfter" desc:"the setting to preview (1-10000); omit or 0 for the column's current setting"`
+}
+
+// ListArchivePreview counts what list.update archiveAfter=N would do to the cards already in the column.
+type ListArchivePreview struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Current          int    `json:"current" desc:"the column's archive-after setting now (0 = off)"`
+	Keep             int    `json:"keep" desc:"the setting previewed: the column keeps this many cards"`
+	Cards            int    `json:"cards" desc:"cards in the column (drafts and card templates are not counted; closed cards are)"`
+	WillArchive      int    `json:"willArchive" desc:"cards that would go to the archive now (oldest first); list.update needs confirmArchive=true when this is above 0"`
+	SkippedClaimed   int    `json:"skippedClaimed" desc:"cards over the limit that stay for now because they hold a live claim"`
+	SkippedRecurring int    `json:"skippedRecurring" desc:"cards over the limit that stay because they have a recurrence rule (recurring cards are never auto-archived, for now)"`
+}
+
+// ListTypePreviewIn asks what switching a column's closing setting would do to the cards already in it.
+type ListTypePreviewIn struct {
+	ID   string `path:"id"`
+	Type string `query:"type" desc:"the type to switch to: closed | active; omit for the opposite of the current type"`
+}
+
+// ListTypePreview counts the cards a list.update type switch would change (with existingCards=flip).
+type ListTypePreview struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	CurrentType string `json:"currentType" desc:"the column's type now"`
+	Type        string `json:"type" desc:"the type previewed"`
+	Cards       int    `json:"cards" desc:"cards in the column (drafts and card templates are not counted)"`
+	WillClose   int    `json:"willClose" desc:"open cards that switching to closed closes (with existingCards=flip)"`
+	WillReopen  int    `json:"willReopen" desc:"closed cards that switching to active re-opens (with existingCards=flip)"`
+}
+
+// Changes is the number of cards the previewed switch flips (0 when the type does not change).
+func (p ListTypePreview) Changes() int { return p.WillClose + p.WillReopen }
+
 type ListMoveIn struct {
 	ID       string   `path:"id"`
 	AfterID  string   `json:"afterId" desc:"list to place after"`
@@ -191,19 +238,25 @@ func registerListOps() {
 				return List{}, err
 			}
 		}
+		var keep *int
+		if in.ArchiveAfter != nil {
+			if keep, err = checkArchiveAfter(*in.ArchiveAfter); err != nil {
+				return List{}, err
+			}
+		}
 		pos := appendPos(e.Ctx, e.DB, "lists", "board_id=? AND type IN ('active','closed')", in.BoardID)
 		if in.Position != nil {
 			pos = *in.Position
 		}
 		id := db.NewID()
-		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			id, in.BoardID, typ, pos, in.Name, nullStr(color), nullStr(in.Description), wip, db.Now()); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,archive_after,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			id, in.BoardID, typ, pos, in.Name, nullStr(color), nullStr(in.Description), wip, keep, db.Now()); err != nil {
 			return List{}, err
 		}
 		emit(e, "listCreate", "list.created", in.BoardID, map[string]any{"id": id})
 		return GetList(e.Ctx, e.DB, id)
 	})
-	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position", Method: "PATCH", Path: "/lists/{id}",
+	ops.Register(ops.Op{Name: "list.update", Summary: "Rename / recolour a list, set its description (brief for agents), soft WIP limit or auto-archive (archiveAfter: keep the newest N cards), switch whether it closes cards that land here (type closed|active), or change its position", Method: "PATCH", Path: "/lists/{id}",
 		UI: ui("PATCH", "/lists/{id}")}, func(e *ops.Env, in ListUpdateIn) (List, error) {
 		l, err := requireList(e, in.ID, authz.Edit)
 		if err != nil {
@@ -212,6 +265,7 @@ func registerListOps() {
 		if !isFinite(l.Type) {
 			return l, ops.Forbidden()
 		}
+		oldType := l.Type
 		if in.Name != nil {
 			if *in.Name == "" {
 				return l, ops.Invalid("name must not be empty")
@@ -238,6 +292,12 @@ func registerListOps() {
 			}
 			l.Type = *in.Type
 		}
+		switch in.ExistingCards {
+		case "", "flip", "keep":
+		default:
+			return l, ops.Invalid("existingCards must be flip or keep")
+		}
+		keep := in.ExistingCards == "keep"
 		if in.Description != nil {
 			if err := ops.CheckLen("description", *in.Description, maxListDescLen); err != nil {
 				return l, err
@@ -253,14 +313,138 @@ func registerListOps() {
 				return l, err
 			}
 		}
+		oldKeep := l.ArchiveAfter
+		if in.ArchiveAfter != nil {
+			if l.ArchiveAfter, err = checkArchiveAfter(*in.ArchiveAfter); err != nil {
+				return l, err
+			}
+		}
 		if in.Position != nil {
 			l.Position = in.Position
 		}
-		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,wip_limit=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, l.WIPLimit, db.Now(), l.ID); err != nil {
+		var flipped, trimmed LandResult
+		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			flipped, trimmed = LandResult{}, LandResult{}
+			if _, err := tx.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,wip_limit=?,archive_after=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, l.WIPLimit, l.ArchiveAfter, db.Now(), l.ID); err != nil {
+				return err
+			}
+			// Auto-archive applies at once to the cards already in the column whenever the request names archiveAfter
+			// (setting it, lowering it, or re-sending it after a claim ended). Raising it or turning it off archives
+			// nothing. Counted inside this transaction, so the 409 count is exact.
+			if in.ArchiveAfter != nil && l.ArchiveAfter != nil {
+				p, err := planArchive(e.Ctx, tx, l.ID, *l.ArchiveAfter, nil)
+				if err != nil {
+					return err
+				}
+				if len(p.IDs) > 0 && !in.ConfirmArchive {
+					return ops.Conflict(fmt.Sprintf("archiveAfter=%d would archive %s now (the column holds %d%s); resend with confirmArchive=true to archive them", *l.ArchiveAfter, cardsN(len(p.IDs)), p.Cards, skippedNote(p)))
+				}
+				a, err := applyArchive(e.Ctx, tx, l.ID, *l.ArchiveAfter, p.IDs)
+				if err != nil {
+					return err
+				}
+				if len(a.CardIDs) > 0 {
+					trimmed.Archived = append(trimmed.Archived, a)
+				}
+			}
+			if l.Type == oldType || keep {
+				return nil
+			}
+			// A switch of the closing setting re-lands the column's cards (existingCards=flip, the default): switching
+			// to closed closes them, back to active re-opens them. With keep they stay as they are and the rule
+			// applies only to cards that land from now on.
+			var err error
+			flipped, err = relandList(e.Ctx, tx, l.ID)
+			return err
+		})
+		if err != nil {
 			return l, err
 		}
-		emit(e, "listUpdate", "list.updated", l.BoardID, map[string]any{"id": l.ID})
+		data := map[string]any{"id": l.ID}
+		if in.ArchiveAfter != nil && intOr0(oldKeep) != intOr0(l.ArchiveAfter) {
+			data["archiveAfter"] = intOr0(l.ArchiveAfter)
+		}
+		if l.Type != oldType {
+			data["type"], data["closes"] = l.Type, l.Type == "closed"
+			data["existingCards"] = map[bool]string{true: "keep", false: "flip"}[keep]
+			data["closed"], data["reopened"] = len(flipped.Closed), len(flipped.Reopened)
+		}
+		emit(e, "listUpdate", "list.updated", l.BoardID, data)
+		// One card event per flipped card (realtime, durable stream, webhooks, activity), marked quiet so the
+		// notification planner stays silent: a bulk switch must not send every watcher one close/reopen per card.
+		for _, id := range flipped.Closed {
+			emitCard(e, "cardUpdate", "card.updated", "", l.BoardID, id, map[string]any{"changed": []string{"isClosed"}, "isClosed": true, "auto": "listType", "quiet": true})
+		}
+		for _, id := range flipped.Reopened {
+			emitCard(e, "cardUpdate", "card.updated", "", l.BoardID, id, map[string]any{"changed": []string{"isClosed"}, "isClosed": false, "auto": "listType", "quiet": true})
+		}
+		EmitAutoArchived(e, trimmed) // the retroactive pass: quiet card.archived per card + one summary
 		return GetList(e.Ctx, e.DB, l.ID)
+	})
+	ops.Register(ops.Op{Name: "list.archivePreview", Summary: "Count the cards that setting the column's auto-archive (list.update archiveAfter=N) would archive right now; read-only", Method: "GET", Path: "/lists/{id}/archive-preview",
+		UI: ui("GET", "/lists/{id}/archive-preview")}, func(e *ops.Env, in ListArchivePreviewIn) (ListArchivePreview, error) {
+		l, err := requireList(e, in.ID, authz.Edit)
+		if err != nil {
+			return ListArchivePreview{}, err
+		}
+		if !isFinite(l.Type) {
+			return ListArchivePreview{}, ops.NotFound("list")
+		}
+		p := ListArchivePreview{ID: l.ID, Current: intOr0(l.ArchiveAfter), Keep: in.ArchiveAfter}
+		if l.Name != nil {
+			p.Name = *l.Name
+		}
+		if p.Keep == 0 {
+			p.Keep = p.Current
+		}
+		if _, err := checkArchiveAfter(p.Keep); err != nil {
+			return p, err
+		}
+		if p.Keep == 0 { // off: nothing is archived; still report the count
+			_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.list_id=? AND c.is_draft=0 AND c.is_template=0`, l.ID).Scan(&p.Cards)
+			return p, nil
+		}
+		plan, err := planArchive(e.Ctx, e.DB, l.ID, p.Keep, nil)
+		if err != nil {
+			return p, err
+		}
+		p.Cards, p.WillArchive, p.SkippedClaimed, p.SkippedRecurring = plan.Cards, len(plan.IDs), plan.SkippedClaimed, plan.SkippedRecurring
+		return p, nil
+	})
+	ops.Register(ops.Op{Name: "list.typePreview", Summary: "Count the cards a switch of the column's closing setting (list.update type) would close or re-open; read-only", Method: "GET", Path: "/lists/{id}/type-preview",
+		UI: ui("GET", "/lists/{id}/type-preview")}, func(e *ops.Env, in ListTypePreviewIn) (ListTypePreview, error) {
+		l, err := requireList(e, in.ID, authz.Edit)
+		if err != nil {
+			return ListTypePreview{}, err
+		}
+		if !isFinite(l.Type) {
+			return ListTypePreview{}, ops.NotFound("list")
+		}
+		p := ListTypePreview{ID: l.ID, CurrentType: l.Type, Type: in.Type}
+		if l.Name != nil {
+			p.Name = *l.Name
+		}
+		switch p.Type {
+		case "":
+			p.Type = map[bool]string{true: "active", false: "closed"}[l.Type == "closed"]
+		case "active", "closed":
+		default:
+			return p, ops.Invalid("type must be active or closed")
+		}
+		var open, closed int
+		if err := e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*), COALESCE(SUM(c.is_closed),0) FROM card_placements p JOIN cards c ON c.id=p.card_id
+			WHERE p.list_id=? AND c.is_draft=0 AND c.is_template=0`, l.ID).Scan(&p.Cards, &closed); err != nil {
+			return p, err
+		}
+		open = p.Cards - closed
+		if p.Type != l.Type {
+			if p.Type == "closed" {
+				p.WillClose = open
+			} else {
+				p.WillReopen = closed
+			}
+		}
+		return p, nil
 	})
 	ops.Register(ops.Op{Name: "list.move", Summary: "Reorder a list among the board's lists", Method: "POST", Path: "/lists/{id}/move",
 		UI: ui("POST", "/lists/{id}/move")}, func(e *ops.Env, in ListMoveIn) (List, error) {
@@ -319,7 +503,7 @@ func registerListOps() {
 			return l, ops.Invalid("order must be asc or desc")
 		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-			rows, err := tx.QueryContext(e.Ctx, `SELECT id FROM cards WHERE list_id=? ORDER BY `+order+`, id`, l.ID)
+			rows, err := tx.QueryContext(e.Ctx, `SELECT id FROM cards WHERE id IN (SELECT card_id FROM card_placements WHERE list_id=?) ORDER BY `+order+`, id`, l.ID)
 			if err != nil {
 				return err
 			}
@@ -331,7 +515,7 @@ func registerListOps() {
 			}
 			rows.Close()
 			for i, id := range ids {
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET position=? WHERE id=?`, float64(i+1)*db.PositionGap, id); err != nil {
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE card_placements SET position=? WHERE card_id=? AND list_id=?`, float64(i+1)*db.PositionGap, id, l.ID); err != nil {
 					return err
 				}
 			}
@@ -343,7 +527,7 @@ func registerListOps() {
 		emit(e, "listSort", "list.updated", l.BoardID, map[string]any{"id": l.ID, "sorted": true})
 		return l, nil
 	})
-	ops.Register(ops.Op{Name: "list.clear", Summary: "Permanently delete all cards of the trash list", Method: "POST", Path: "/lists/{id}/clear",
+	ops.Register(ops.Op{Name: "list.clear", Summary: "Empty the trash list: permanently delete its cards (a card that is also on another board is only removed from this board)", Method: "POST", Path: "/lists/{id}/clear",
 		UI: ui("POST", "/lists/{id}/clear")}, func(e *ops.Env, in ListRefIn) (List, error) {
 		l, err := requireList(e, in.ID, authz.Edit)
 		if err != nil {
@@ -352,12 +536,58 @@ func registerListOps() {
 		if l.Type != "trash" {
 			return l, ops.Forbidden()
 		}
-		gone := strs(e, `SELECT id FROM cards WHERE list_id=?`, l.ID)
-		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM cards WHERE list_id=?`, l.ID); err != nil {
+		// A card whose only placement is in this trash is deleted. A card that also lives on another board is only
+		// taken off this one (card.unplace's rules: a home here moves to its oldest other placement), never deleted.
+		var gone, unplaced []string
+		rehomed := map[string]string{}
+		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			gone, unplaced, rehomed = nil, nil, map[string]string{}
+			rows, err := tx.QueryContext(e.Ctx, `SELECT p.card_id,(SELECT COUNT(*) FROM card_placements o WHERE o.card_id=p.card_id) FROM card_placements p
+				WHERE p.list_id=? ORDER BY p.position, p.card_id`, l.ID)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id string
+				var n int
+				if err := rows.Scan(&id, &n); err != nil {
+					rows.Close()
+					return err
+				}
+				if n > 1 && RemoveFromBoards != nil {
+					unplaced = append(unplaced, id)
+				} else {
+					gone = append(gone, id)
+				}
+			}
+			rows.Close()
+			for _, id := range unplaced {
+				h, err := RemoveFromBoards(e, tx, id, []string{l.BoardID})
+				if err != nil {
+					return err
+				}
+				if h != "" {
+					rehomed[id] = h
+				}
+			}
+			for _, id := range gone {
+				if _, err := tx.ExecContext(e.Ctx, `DELETE FROM cards WHERE id=?`, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
 			return l, err
 		}
-		for _, id := range gone {
-			emitCard(e, "cardDelete", "card.deleted", "", l.BoardID, id, map[string]any{"listId": l.ID, "cleared": true})
+		for _, id := range gone { // the card was on this board only (its one placement was here)
+			emitCardOn(e, "cardDelete", "card.deleted", "", l.BoardID, id, map[string]any{"listId": l.ID, "cleared": true}, []string{l.BoardID})
+		}
+		for _, id := range unplaced { // removed from this board; it stays on its other boards
+			emitCardOn(e, events.TypeUnplace, events.StreamUnplaced, "", l.BoardID, id, map[string]any{"listId": l.ID, "cleared": true}, []string{l.BoardID})
+			if h := rehomed[id]; h != "" {
+				emitCard(e, "cardUpdate", "card.updated", "", h, id, map[string]any{"changed": []string{"home"}})
+			}
 		}
 		emit(e, "listClear", "list.updated", l.BoardID, map[string]any{"id": l.ID, "cleared": true})
 		return l, nil
@@ -375,23 +605,27 @@ func registerListOps() {
 		if dst.ID == l.ID {
 			return ListMoveCardsOut{}, ops.Invalid("target list must differ")
 		}
-		moved, err := moveAll(e, l.ID, dst.ID)
+		moved, landed, err := moveAll(e, l.ID, dst.ID)
 		if err != nil {
 			return ListMoveCardsOut{}, err
 		}
 		n := len(moved)
 		emitMoved(e, l.BoardID, l.ID, dst.ID, dst.Type, moved)
+		EmitClosedElsewhere(e, l.BoardID, landed) // closed is per card: the cards' other boards show the new state
 		emit(e, "listMoveCards", "list.updated", l.BoardID, map[string]any{"id": l.ID, "targetId": dst.ID})
+		EmitAutoArchived(e, landed) // the target's archive-after rule (a batch larger than N keeps its newest N)
 		return ListMoveCardsOut{n}, nil
 	})
 }
 
-// moveAll appends every card of src to dst keeping order.
-func moveAll(e *ops.Env, srcID, dstID string) ([]string, error) {
+// moveAll appends every card of src to dst keeping order. The LandResult carries what dst's archive-after rule
+// archived (emit it with EmitAutoArchived after the moved events).
+func moveAll(e *ops.Env, srcID, dstID string) ([]string, LandResult, error) {
 	var ids []string
+	var res LandResult
 	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		base := maxPos(e.Ctx, tx, "cards", "list_id=?", dstID)
-		rows, err := tx.QueryContext(e.Ctx, `SELECT id FROM cards WHERE list_id=? ORDER BY position, id`, srcID)
+		base := maxPos(e.Ctx, tx, "card_placements", "list_id=?", dstID)
+		rows, err := tx.QueryContext(e.Ctx, `SELECT card_id FROM card_placements WHERE list_id=? ORDER BY position, card_id`, srcID)
 		if err != nil {
 			return err
 		}
@@ -403,15 +637,21 @@ func moveAll(e *ops.Env, srcID, dstID string) ([]string, error) {
 		}
 		rows.Close()
 		now := db.Now()
+		lands := make([]Landing, 0, len(ids))
 		for i, id := range ids {
-			if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET list_id=?,prev_list_id=?,position=?,list_changed_at=?,updated_at=? WHERE id=?`,
-				dstID, srcID, base+float64(i+1)*db.PositionGap, now, now, id); err != nil {
+			if _, err := tx.ExecContext(e.Ctx, `UPDATE card_placements SET list_id=?,prev_list_id=?,position=?,list_changed_at=? WHERE card_id=? AND list_id=?`,
+				dstID, srcID, base+float64(i+1)*db.PositionGap, now, id, srcID); err != nil {
 				return err
 			}
+			if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, id); err != nil {
+				return err
+			}
+			lands = append(lands, Landing{CardID: id, ListID: dstID})
 		}
-		return nil
+		res, err = Landed(e.Ctx, tx, lands...) // into a closed column closes, into an active one re-opens, archive/trash keep
+		return err
 	})
-	return ids, err
+	return ids, res, err
 }
 
 // emitMoved announces each card moved by a bulk list operation, so agents listening
@@ -422,6 +662,9 @@ func emitMoved(e *ops.Env, boardID, from, to, toType string, ids []string) {
 		kind = "card.archived"
 	}
 	for _, id := range ids {
+		// a column operation moves this board's placements only: a placement event (events.PlacementScoped) recorded
+		// on this board; the card's other boards get the card.placement.changed nudge, and a close or re-open it
+		// causes still notifies everyone following the card (closed is per card)
 		emitCard(e, "cardMove", "card.moved", kind, boardID, id, map[string]any{"fromListId": from, "toListId": to, "trash": toType == "trash"})
 	}
 }
@@ -438,7 +681,7 @@ func retire(e *ops.Env, id, sysType string) (Deleted, error) {
 	if err != nil {
 		return Deleted{}, err
 	}
-	moved, err := moveAll(e, l.ID, dst)
+	moved, _, err := moveAll(e, l.ID, dst) // into archive/trash: no archive-after rule there
 	if err != nil {
 		return Deleted{}, err
 	}
@@ -448,4 +691,26 @@ func retire(e *ops.Env, id, sysType string) (Deleted, error) {
 	}
 	emit(e, "listDelete", "list.deleted", l.BoardID, map[string]any{"id": l.ID})
 	return Deleted{l.ID}, nil
+}
+
+// skippedNote words the cards over the limit that stay (for the 409 message): "" when none.
+func skippedNote(p archivePlan) string {
+	var parts []string
+	if p.SkippedClaimed > 0 {
+		parts = append(parts, fmt.Sprintf("%d over the limit stay while claimed", p.SkippedClaimed))
+	}
+	if p.SkippedRecurring > 0 {
+		parts = append(parts, fmt.Sprintf("%d recurring %s over the limit", p.SkippedRecurring, map[bool]string{true: "card stays", false: "cards stay"}[p.SkippedRecurring == 1]))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(parts, ", ")
+}
+
+func intOr0(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

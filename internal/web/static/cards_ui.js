@@ -10,6 +10,11 @@
   function root() { return document.getElementById('card-modal'); }
   function modal() { return document.getElementById('modal'); }
   function cardInModal() { var c = root(); return c ? c.dataset.card : ''; }
+  // the board the sheet shows the card on (a card may be on several boards; the server resolved it: #card-modal data-board)
+  function ctxBoard() { var c = root(); return c ? (c.dataset.board || '') : ''; }
+  // the sheet's address: /cards/{id}, plus ?board= when the card is on several boards the caller can see
+  function sheetURL() { var c = root(); if (!c) return ''; return '/cards/' + c.dataset.card + (c.dataset.multi && c.dataset.board ? '?board=' + encodeURIComponent(c.dataset.board) : ''); }
+  var pageURL = location.pathname + location.search;   // the page under the sheet (the sheet pushes /cards/{id})
   function tileOf(id) { return document.getElementById('tile-' + id); }
   function sheetActive() { var cm = root(); if (!cm) return false; var d = cm.closest('dialog'); return !d || d.open; }
   function toast(msg, err) { if (window.Boards && Boards.toast) Boards.toast(msg, { error: !!err }); }
@@ -90,11 +95,15 @@
   function flashSaved(msg) { var el = document.getElementById('cards-saved'); if (!el) return; el.textContent = ''; setTimeout(function () { el.textContent = msg || 'Saved'; }, 20); }
 
   var CardSheet = window.CardSheet = {
+    // o.board: the board to show the card on (default: the board page under the sheet); the server falls back to the
+    // card's default board when the card is not on it or the caller cannot see it
     open: function (id, o) {
       o = o || {};
-      if (!window.htmx) { location.href = '/cards/' + id; return; }
+      var board = o.board || (window.Boards && Boards.boardId && Boards.boardId()) || '';
+      var q = board ? '?board=' + encodeURIComponent(board) : '';
+      if (!window.htmx) { location.href = '/cards/' + id + q; return; }
       st.fromPop = !!o.fromPop; st.nav = !!o.replace;
-      htmx.ajax('GET', '/ui/cards/' + id, { target: '#modal', swap: 'innerHTML' });
+      htmx.ajax('GET', '/ui/cards/' + id + q, { target: '#modal', swap: 'innerHTML' });
     },
     close: function () { var m = modal(); if (m && m.open) m.close(); }
   };
@@ -104,11 +113,12 @@
     var id = cardInModal(); if (!id) return;
     if (!m.open) m.showModal();
     m.setAttribute('tabindex', '-1');
+    var url = sheetURL(), board = ctxBoard();
     if (st.fromPop) { st.pushed = true; }
-    else if (location.pathname !== '/cards/' + id) {
-      // one history entry per sheet session: further swaps (next/prev, duplicate, publish...) replace it
-      if (st.pushed) history.replaceState({ card: id }, '', '/cards/' + id);
-      else { history.pushState({ card: id }, '', '/cards/' + id); st.pushed = true; }
+    else if (location.pathname + location.search !== url) {
+      // one history entry per sheet session: further swaps (next/prev, duplicate, publish, another board...) replace it
+      if (st.pushed) history.replaceState({ card: id, board: board }, '', url);
+      else { history.pushState({ card: id, board: board }, '', url); st.pushed = true; }
     }
     st.fromPop = false; st.nav = false; st.id = id;
     if (!m.contains(document.activeElement) || document.activeElement === m) m.focus({ preventScroll: true });
@@ -120,18 +130,30 @@
     var id = st.id; st.id = '';
     if (st.pushed) { st.pushed = false; history.back(); }
     m.innerHTML = '';
+    // calendar: redraw the month (the card may have been closed, re-opened, renamed or rescheduled in the sheet)
+    if (id && document.getElementById('cards-cal') && window.htmx) htmx.ajax('GET', pageURL, { target: '#cards-cal', select: '#cards-cal', swap: 'outerHTML' });
     var B = window.Boards;
     if (!B || !id) return;
     var t = tileOf(id);
     if (!t || t.classList.contains('boards-draft')) { B.refresh && B.refresh(true); return; }   // an Inbox draft may have been published
     B.refreshTile(id, true);
   }
-  if (modal()) modal().addEventListener('close', onClose);
+  // capture on document: pages that load this script before the layout's <dialog id=modal> (calendar) get it too
+  document.addEventListener('close', function (e) { if (e.target === modal()) onClose(); }, true);
   window.addEventListener('popstate', function (e) {
     var m = modal();
     if (m && m.open) { st.pushed = false; if (window.ListSheet) ListSheet.popped(); m.close(); }
-    else if (e.state && e.state.card && window.Boards) CardSheet.open(e.state.card, { fromPop: true });
+    else if (e.state && e.state.card && window.Boards) CardSheet.open(e.state.card, { fromPop: true, board: e.state.board });
     else if (e.state && e.state.list && window.ListSheet) ListSheet.open(e.state.list, { fromPop: true });
+  });
+
+  // ---- the board switcher (a card on several boards): show the card on another board in place, keeping the sheet ----
+  // (a plain link on the full /cards/{id} page, where there is no dialog: it navigates)
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('#card-modal a[data-card-ctx]'); if (!a) return;
+    var m = modal(); if (!m || !m.open || !window.htmx || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    CardSheet.open(cardInModal(), { board: a.dataset.cardCtx, replace: true });
   });
 
   // ---- popovers: <details class="cards-pop" data-pop> (rail, list switcher, menu) and <details class="x-pop"> (fragments) ----
@@ -380,7 +402,7 @@
     st.focusTask = form.dataset.addTask;
     lines.reduce(function (p, line) {
       return p.then(function () {
-        var v = { name: line }; for (var k in extra) v[k] = extra[k];
+        var v = { name: line, board: ctxBoard() }; for (var k in extra) v[k] = extra[k];
         return htmx.ajax('POST', url, { target: '#x-tasks', swap: 'outerHTML', values: v });
       });
     }, Promise.resolve()).then(function () { toast(lines.length + ' items added'); });
@@ -388,7 +410,7 @@
 
   // ---- attachments: file picker (several files), drop on the sheet, paste an image ----
   function postFile(id, f) {
-    var fd = new FormData(); fd.append('file', f, f.name);
+    var fd = new FormData(); fd.append('file', f, f.name); if (ctxBoard()) fd.append('board', ctxBoard());
     return fetch('/ui/cards/' + id + '/attachments', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
       .then(function (r) { if (!r.ok) throw new Error('Could not attach ' + f.name); return r.text(); })
       .then(function (html) {
@@ -437,6 +459,20 @@
     upload(files);
   });
 
+  // ---- description editor grows with its text (up to 80% of the window; then it scrolls inside) ----
+  function growDesc(ta) {
+    if (!ta || !ta.matches || !ta.matches('#card-desc textarea')) return;
+    ta.style.height = 'auto';
+    var max = Math.max(240, Math.round(window.innerHeight * 0.8)), want = ta.scrollHeight + 2;
+    ta.style.height = Math.min(want, max) + 'px';
+    ta.style.overflowY = want > max ? 'auto' : 'hidden';
+  }
+  document.addEventListener('input', function (e) { growDesc(e.target); });
+  window.addEventListener('resize', function () { growDesc(document.querySelector('#card-desc textarea')); });
+  function growDescSoon() { var ta = document.querySelector('#card-desc textarea'); if (ta) { growDesc(ta); requestAnimationFrame(function () { growDesc(ta); }); } }
+  document.body.addEventListener('htmx:afterSettle', growDescSoon);
+  document.body.addEventListener('htmx:afterSwap', growDescSoon);
+
   // ---- description: Ctrl+Enter saves; focus the editor when it opens; save when focus leaves it ----
   document.addEventListener('keydown', function (e) {
     var ta = e.target; if (!ta.matches || !ta.matches('#card-desc textarea')) return;
@@ -469,8 +505,9 @@
     var B = window.Boards;
     if (!m || !e.detail.successful || !B) return;
     var id = m[1], trash = (el.getAttribute('hx-vals') || '').indexOf('true') > 0;
+    var cm = root(), n = cm ? (parseInt(cm.dataset.others || '0', 10) || 0) : 0;   // a card on other boards: archived on all of them
     CardSheet.close();
-    B.toast(trash ? 'Card moved to trash' : 'Card archived', { action: 'Undo', onAction: function () {
+    B.toast((trash ? 'Card moved to trash' : 'Card archived') + (n ? ' (on all ' + (n + 1) + ' boards it is on)' : ''), { action: 'Undo', onAction: function () {
       B.post('/ui/cards/' + id + '/quick/restore', {}).then(function () { B.refresh(true); });
     } });
   });
@@ -513,12 +550,14 @@
   // ---- single-key shortcuts while the sheet is open (never while typing) ----
   document.addEventListener('keydown', function (e) {
     if (!sheetActive() || typing(e.target) || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (document.querySelector('dialog.boards-confirm[open]')) return;   // a confirm over the sheet (boards_cardkeys.js) owns the keys
     var tag = e.target && e.target.tagName; if (tag === 'SUMMARY' && (e.key === ' ' || e.key === 'Enter')) return;
     var k = e.key, cm = root();
     if (k === 'j' || k === 'ArrowRight') { if (k === 'ArrowRight' && e.target.closest && e.target.closest('[role=tablist]')) return; e.preventDefault(); go(1); }
     else if (k === 'k' || k === 'ArrowLeft') { if (k === 'ArrowLeft' && e.target.closest && e.target.closest('[role=tablist]')) return; e.preventDefault(); go(-1); }
     else if (k === 'm') { e.preventDefault(); togglePop('members'); }
-    else if (k === 'l') { e.preventDefault(); togglePop('labels'); }
+    else if (k === 'l' || k === 'L') { e.preventDefault(); togglePop('labels'); }
+    else if (k === 'p') { e.preventDefault(); togglePop('location'); }
     else if (k === 'd') { e.preventDefault(); togglePop('due'); }
     else if (k === 'a') { e.preventDefault(); var fi = cm.querySelector('[data-attach-input]'); if (fi) fi.click(); }
     else if (k === 't') { e.preventDefault(); focusTaskInput(); }

@@ -39,6 +39,7 @@ func init() {
 	})
 	web.Route("GET /notifications", pageNotifications)
 	web.Route("GET /ui/notifications/badge", uiBadge)
+	web.Route("GET /ui/notifications/list", uiNotifList)
 	web.Route("POST /ui/notifications/{id}/read", uiNotifRead)
 	web.Route("POST /ui/notifications/read-all", uiNotifReadAll)
 
@@ -49,13 +50,7 @@ func init() {
 	web.Route("POST /ui/notification-services/{id}/delete", uiServiceDelete)
 	web.Route("POST /ui/notification-services/{id}/test", uiServiceTest)
 
-	web.Route("GET /admin/webhooks", pageWebhooks)
-	web.Route("POST /ui/admin/webhooks", uiWebhookCreate)
-	web.Route("POST /ui/admin/webhooks/{id}", uiWebhookUpdate)
-	web.Route("POST /ui/admin/webhooks/{id}/delete", uiWebhookDelete)
-	web.Route("POST /ui/admin/webhooks/{id}/test", uiWebhookTest)
-	web.Route("GET /admin/webhooks/{id}/deliveries", pageDeliveries)
-	web.Route("POST /ui/admin/webhook-deliveries/{id}/retry", uiDeliveryRetry)
+	registerWebhookUI()
 
 	web.Route("GET /admin/config", pageConfig)
 	web.Route("POST /ui/admin/config", uiConfigSave)
@@ -108,6 +103,16 @@ func badgeData(c *web.Ctx) int {
 
 func uiBadge(c *web.Ctx) error {
 	return c.RenderBlock("notify_notifications.html", "notify_badge", map[string]any{"Count": badgeData(c), "OOB": false})
+}
+
+// uiNotifList re-renders the list (plus the bell badge and heading count, out of band) for the
+// "New notifications" button the live bell shows on /notifications.
+func uiNotifList(c *web.Ctx) error {
+	d, err := listData(c)
+	if err != nil {
+		return err
+	}
+	return c.RenderBlock("notify_notifications.html", "notify_list_oob", map[string]any{"L": d, "Count": d.UnreadCount, "Unread": c.R.URL.Query().Get("unread") == "1"})
 }
 
 func uiNotifRead(c *web.Ctx) error {
@@ -181,107 +186,6 @@ func uiServiceTest(c *web.Ctx) error {
 	return nil
 }
 
-// ---- webhooks --------------------------------------------------------------
-
-func formList(c *web.Ctx, name string) {
-	_ = c.R.ParseForm()
-	b, _ := json.Marshal(append([]string{}, c.R.Form[name]...))
-	c.R.Form.Set(name, string(b))
-}
-
-func pageWebhooks(c *web.Ctx) error {
-	l, err := ops.Typed[WebhookListOut](c.Env, "webhook.list", NoInput{})
-	if err != nil {
-		return err
-	}
-	ev, _ := ops.Typed[EventsOut](c.Env, "webhook.events", NoInput{})
-	return c.Render("notify_webhooks.html", map[string]any{"Items": l.Items, "Events": ev.Items, "Blank": WebhookOut{Events: []string{}, ExcludedEvents: []string{}}, "Saved": c.R.URL.Query().Get("saved")})
-}
-
-func uiWebhookCreate(c *web.Ctx) error {
-	formList(c, "events")
-	formList(c, "excludedEvents")
-	if _, err := c.Do("webhook.create"); err != nil {
-		return err
-	}
-	c.Redirect("/admin/webhooks?saved=created")
-	return nil
-}
-
-// keepWriteOnly makes blank write-only fields (secret, accessToken) mean "unchanged" in the
-// edit form; the "clear" checkbox empties them explicitly.
-func keepWriteOnly(c *web.Ctx) {
-	_ = c.R.ParseForm()
-	for _, f := range []string{"secret", "accessToken"} {
-		clear := c.R.Form.Get("clear"+strings.ToUpper(f[:1])+f[1:]) != ""
-		if c.R.Form.Get(f) == "" && !clear {
-			delete(c.R.Form, f)
-		}
-	}
-}
-
-func uiWebhookUpdate(c *web.Ctx) error {
-	keepWriteOnly(c)
-	formList(c, "events")
-	formList(c, "excludedEvents")
-	if _, err := c.Do("webhook.update"); err != nil {
-		return err
-	}
-	c.Redirect("/admin/webhooks?saved=updated")
-	return nil
-}
-func uiWebhookDelete(c *web.Ctx) error {
-	if _, err := c.Do("webhook.delete"); err != nil {
-		return err
-	}
-	c.Redirect("/admin/webhooks?saved=deleted")
-	return nil
-}
-func uiWebhookTest(c *web.Ctx) error {
-	d, err := typed[DeliveryOut](c, "webhook.test")
-	if err != nil {
-		return err
-	}
-	if d.State == "delivered" {
-		c.Toast(fmt.Sprintf("Ping delivered (HTTP %d, %d ms)", d.Status, d.DurationMs))
-	} else {
-		c.Toast("Ping failed: " + d.Error)
-	}
-	c.W.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func pageDeliveries(c *web.Ctx) error {
-	id := c.R.PathValue("id")
-	l, err := ops.Typed[WebhookListOut](c.Env, "webhook.list", NoInput{})
-	if err != nil {
-		return err
-	}
-	var wh WebhookOut
-	for _, w := range l.Items {
-		if w.ID == id {
-			wh = w
-		}
-	}
-	if wh.ID == "" {
-		return ops.NotFound("webhook")
-	}
-	d, err := ops.Typed[DeliveriesOut](c.Env, "webhook.deliveries", DeliveriesIn{ID: id, Limit: 100})
-	if err != nil {
-		return err
-	}
-	return c.Render("notify_deliveries.html", map[string]any{"W": wh, "Items": d.Items})
-}
-
-func uiDeliveryRetry(c *web.Ctx) error {
-	d, err := typed[DeliveryOut](c, "webhook.retry")
-	if err != nil {
-		return err
-	}
-	c.Redirect("/admin/webhooks/" + d.WebhookID + "/deliveries")
-	return nil
-}
-
 // ---- config ----------------------------------------------------------------
 
 type formField struct {
@@ -319,7 +223,6 @@ var configForm = []formGroup{
 		{"oidc.emailClaim", "E-mail claim", "text", "Default: email", nil},
 		{"oidc.groupsClaim", "Groups claim", "text", "Default: groups", nil},
 		{"oidc.adminGroup", "Admin group", "text", "Default: weave-admins", nil},
-		{"oidc.ownerGroup", "Project owner group", "text", "Default: weave-project-owners", nil},
 		{"oidc.userGroup", "User group", "text", "Default: weave-users", nil},
 		{"oidc.workerGroup", "Worker group", "text", "Default: weave-workers", nil},
 		{"oidc.guestGroup", "Guest group", "text", "Default: weave-guests", nil},
@@ -331,6 +234,9 @@ var configForm = []formGroup{
 	{"Sessions", "session", []formField{
 		{"session.hours", "Session lifetime (hours)", "text", "Default 24. When a session ends the user is sent back through your identity provider, so its own session policy decides whether they must sign in again.", nil},
 		{"session.maxIdleMinutes", "Maximum idle minutes", "text", "Sessions idle longer than this end, whatever the user's own auto-logout says. 0 or empty = no limit.", nil},
+	}},
+	{"Webhooks", "webhooks", []formField{
+		{UserAllowPrivateKey, "Board webhooks may reach private networks", "bool", "Board owners' webhooks are refused on loopback, link-local and cloud-metadata addresses, and by default on private networks (10.x, 172.16-31.x, 192.168.x, fc00::/7, 100.64/10) too. Turn this on when receivers live on your LAN. Webhooks created by admins are not affected.", nil},
 	}},
 	{"Board templates", "templates", []formField{
 		{"templates.hidden", "Hidden built-in templates", "textarea", "Ids of built-in templates to hide from the New board gallery, one per line (hidden ones cannot be used either). Ids: builtin:kanban-basics, builtin:sprint, builtin:bug-tracker, builtin:product-roadmap, builtin:content-calendar, builtin:hiring-pipeline, builtin:sales-pipeline, builtin:okrs, builtin:release-checklist, builtin:event-planning, builtin:weekly-planner, builtin:home-chores, builtin:meal-planning, builtin:study-reading. Boards people published as templates are not affected.", nil},

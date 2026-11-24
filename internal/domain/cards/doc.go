@@ -15,6 +15,15 @@
 //	AutoWatchComment(e, cardID, userID)                 "Watch when I comment": watch unless muted/agent/pref off (cardextras)
 //	IdleAfter                                           edit-lock idle threshold (60s)
 //
+// Owns card_placements (migration 0404): one row per board a card is on, the home included. The cards columns
+// board_id/list_id/position/prev_list_id/list_changed_at mirror the home placement through triggers and a guard
+// trigger refuses direct writes, so every move writes the placement (doMove, positionFor/rebalance, draft publish);
+// the boards domain writes placements for its bulk column operations (boards/placements.go). Access to a card is
+// authz.CardAccessFor (max over viewable placements). Write side (placement_ops.go): card.place / card.unplace
+// ("Remove from board") / card.placements; card.move moves one placement (resolveMove); archive, restore, trash,
+// close and delete act on the card (every placement). Installs boards.RemoveFromBoards and boards.BeforeBoardsDelete
+// (re-home a card off doomed boards instead of cascading it). See docs/DESIGN.md "Placements".
+//
 // Installs boards.LoadDrafts (the Inbox column on the board page reads drafts through it; the panel's UI routes
 // are registered by boards).
 //

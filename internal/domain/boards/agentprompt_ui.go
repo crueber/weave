@@ -1,6 +1,7 @@
 package boards
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/crueber/weave/internal/agentprompt"
@@ -30,6 +31,10 @@ type APData struct {
 	CustomBy, EditURL string
 	// Shared blocks of this prompt that an admin customised (titles, comma separated), and where admins edit them.
 	CustomBlocks, BlocksURL string
+	// Board and Runner tabs, for someone who manages the board: where agent accounts for it are created, and how
+	// many agent accounts already have access ("Create an agent for this board" shows when there is none).
+	AgentsURL  string
+	AgentCount int
 }
 
 func init() {
@@ -73,19 +78,19 @@ func init() {
 			}
 		}
 		d := APData{Out: out, PID: pc.ProjectID, BID: pc.BoardID, LID: pc.ListID, Scope: in.Scope, ID: in.ID, NoInstall: noInstall, Compact: in.Compact, BaseURL: agentBaseURL(c.Env),
-			IsAdmin: c.Env.User != nil && c.Env.User.Role == "admin"}
+			IsAdmin: authz.SystemAdmin(c.Env)}
 		add := func(label, scope, id string) {
 			d.Tabs = append(d.Tabs, APTab{Label: label, Scope: scope, ID: id, Active: scope == in.Scope})
 		}
 		switch out.Source {
 		case agentprompt.ScopeBoard:
-			d.CustomBy = "this board's managers"
-			if authz.BoardLevel(c.Env, pc.BoardID) >= authz.Manage {
+			d.CustomBy = "this board's owners"
+			if authz.Board(c.Env, pc.BoardID).CanEditPrompt {
 				d.EditURL = "/boards/" + pc.BoardID + "/settings?section=agents"
 			}
 		case agentprompt.ScopeProject:
 			d.CustomBy = "this project's managers"
-			if authz.ProjectLevel(c.Env, pc.ProjectID) >= authz.Manage {
+			if authz.Project(c.Env, pc.ProjectID).CanManage {
 				d.EditURL = "/projects/" + pc.ProjectID + "/settings?section=agents"
 			}
 		case SourceAdmin:
@@ -104,6 +109,14 @@ func init() {
 			d.CustomBlocks = strings.Join(titles, ", ")
 			if d.IsAdmin {
 				d.BlocksURL = "/admin/agent-prompts?tab=blocks&open=" + out.CustomBlocks[0] + "#ab-" + out.CustomBlocks[0]
+			}
+		}
+		if pc.BoardID != "" && (in.Scope == agentprompt.ScopeBoard || in.Scope == agentprompt.ScopeRunner) && authz.Board(c.Env, pc.BoardID).CanManageAgents {
+			if out, err := ops.CallMap(c.Env, "agent.list", map[string]any{"boardId": pc.BoardID}); err == nil {
+				if v := reflect.ValueOf(out); v.Kind() == reflect.Slice {
+					d.AgentCount = v.Len()
+				}
+				d.AgentsURL = "/boards/" + pc.BoardID + "/settings?section=agents#set-agents"
 			}
 		}
 		add("About Weave", agentprompt.ScopeGeneral, "")

@@ -37,13 +37,27 @@ pairs = []
 for fg in ("--fg", "--fg-2", "--muted"):
     for bg in ("--bg", "--surface", "--surface-2", "--surface-3", "--list-bg", "--tile-bg"):
         pairs.append((fg, bg, 4.5))
-for fg, bg in (("--accent", "--surface"), ("--accent", "--bg"), ("--accent", "--accent-soft"), ("--accent-fg", "--accent"), ("--accent-fg", "--accent-hover"),
+for fg, bg in (("--fg-2", "--accent-soft"), ("--accent", "--surface"), ("--accent", "--bg"), ("--accent", "--accent-soft"), ("--accent-fg", "--accent"), ("--accent-fg", "--accent-hover"),
                ("--danger", "--surface"), ("--danger", "--danger-soft"), ("--success", "--surface"), ("--success", "--success-soft"),
                ("--warning", "--surface"), ("--warning", "--warning-soft"), ("--fg", "--accent-soft")):
     pairs.append((fg, bg, 4.5))
 for n in "red orange yellow green teal blue indigo purple pink gray".split():
     pairs.append(("--label-fg", "--label-" + n, 4.5))
+# the lit notification bell (filled accent glyph on the accent tint) and its hover; the count pill sits on it
+pairs += [("--accent-hover", "--accent-soft", 3.0), ("--danger", "--accent-soft", 3.0)]
 pairs += [("--border-strong", "--surface", 3.0), ("--focus-ring", "--surface", 3.0), ("--focus-ring", "--bg", 3.0), ("--drop-indicator", "--list-bg", 3.0)]
+# the closed mark (a --success stroke icon, non-text 3:1) on every surface it sits on: tiles, list-view rows (surface,
+# hover accent-soft), calendar chips (tile-bg, done chips surface-2), the card sheet badge (success-soft)
+# ... and the same glyph on a column that closes cards that land in it: the kanban column header (--list-bg), the
+# column menu and sheet (surface), the template gallery chip (surface-2)
+for bg in ("--tile-bg", "--surface", "--surface-2", "--accent-soft", "--success-soft", "--bg", "--list-bg", "--list-bg-hover"):
+    pairs.append(("--success", bg, 3.0))
+# the "also on N other boards" marker (boards_board.css .boards-also, a pill of its own surface): --fg-2 text and glyph
+# on --surface-2 (plain tiles, list rows), --surface (filled tiles: boards_colors.css), --surface-3 with --fg (hover,
+# open); its outline on a filled tile is --border-strong on --surface (non-text, 3:1). The popover and the card
+# sheet's Boards row / switcher use --fg and --fg-2 on --surface and --surface-3 (the "home" pill: --fg-2 on --surface).
+pairs += [("--fg-2", "--surface-2", 4.5), ("--fg-2", "--surface", 4.5), ("--fg", "--surface-3", 4.5), ("--fg-2", "--surface-3", 4.5),
+          ("--border-strong", "--surface", 3.0), ("--fg", "--surface", 4.5)]
 
 bad = 0
 for name, t in (("light", light), ("dark", dark)):
@@ -115,6 +129,9 @@ palette = set(re.findall(r'\{"[a-z]+", "[A-Za-z ]+", "(#[0-9a-f]{6})"\}', (ROOT 
 ui_go = (ROOT / "internal/domain/boards/ui.go").read_text()
 palette |= set(re.findall(r'"[a-z-]+": "(#[0-9a-f]{6})"', ui_go[:ui_go.index("func init()")]))
 cbad = cbad0
+# the token the closed mark uses on filled tiles: read from boards_colors.css (".boards-tile[data-card-fill] .closed-mark{color:var(--x)}")
+m = re.search(r"\[data-card-fill\] \.closed-mark\{color:var\((--[\w-]+)\)", colors_css)
+MARK_ON_FILL = m.group(1) if m else "--success"
 for name, t in (("light", light), ("dark", dark)):
     k = tint[name]
     for c in sorted(palette):
@@ -135,6 +152,17 @@ for name, t in (("light", light), ("dark", dark)):
                 if r < mn:
                     cbad += 1
                     print("FAIL %-5s %-7s on tint of %s (%s) %.2f < %.1f" % (name, fgn, c, bg, r, mn))
+        # the "closes cards" mark in the header of a coloured column (pill mode tints the column; non-text, 3:1)
+        for bg in (col_bg, col_hov):
+            r = ratio(t["--success"], bg)
+            if r < 3.0:
+                cbad += 1
+                print("FAIL %-5s closes-cards mark --success on column tint of %s (%s) %.2f < 3.0" % (name, c, bg, r))
+        # the closed mark on a filled tile (non-text, 3:1); boards_colors.css draws it in MARK_ON_FILL there
+        r = ratio(t[MARK_ON_FILL], fill)
+        if r < 3.0:
+            cbad += 1
+            print("FAIL %-5s closed mark %s on filled tile of %s (%s) %.2f < 3.0" % (name, MARK_ON_FILL, c, fill, r))
     # meta chips on a filled card sit on --surface
     for fgn in ("--danger", "--warning", "--success", "--fg"):
         r = ratio(t[fgn], t["--surface"])

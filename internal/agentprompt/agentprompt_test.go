@@ -75,7 +75,7 @@ func TestQuestionnaireAndPlanShape(t *testing.T) {
 				t.Errorf("%s lacks %q", sc, want)
 			}
 		}
-		for _, want := range []string{"Edit access on the board", "/admin/agents", "ignore it and mention it in your comment", "Never ask them to paste the key"} {
+		for _, want := range []string{"Edit access on the board", "Board settings -> Agents", "ignore it and mention it in your comment", "Never ask them to paste the key"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s lacks %q", sc, want)
 			}

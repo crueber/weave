@@ -19,7 +19,6 @@
     <p class="bs-desc">Roles are owned by your identity provider: they refresh on every sign-in.</p>
     {{template "adm_field" dict "ID" "adm-sso-groupsClaim" "Name" "groupsClaim" "Title" "Groups claim" "Help" "Claim listing the user's groups." "Type" "text" "Value" .S.GroupsClaim "Placeholder" "groups" "Off" (notifyHas $.Data.S.FromEnv "groupsClaim")}}
     {{template "adm_field" dict "ID" "adm-sso-adminGroup" "Name" "adminGroup" "Title" "Admin group" "Help" "Grants the admin role." "Type" "text" "Value" .S.AdminGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "adminGroup")}}
-    {{template "adm_field" dict "ID" "adm-sso-ownerGroup" "Name" "ownerGroup" "Title" "Project owner group" "Help" "Grants the projectOwner role." "Type" "text" "Value" .S.OwnerGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "ownerGroup")}}
     {{template "adm_field" dict "ID" "adm-sso-userGroup" "Name" "userGroup" "Title" "User group" "Help" "Grants the boardUser role." "Type" "text" "Value" .S.UserGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "userGroup")}}
     {{template "adm_field" dict "ID" "adm-sso-workerGroup" "Name" "workerGroup" "Title" "Worker group" "Help" "Grants the worker role." "Type" "text" "Value" .S.WorkerGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "workerGroup")}}
     {{template "adm_field" dict "ID" "adm-sso-guestGroup" "Name" "guestGroup" "Title" "Guest group" "Help" "Grants the guest role." "Type" "text" "Value" .S.GuestGroup "Placeholder" "" "Off" (notifyHas $.Data.S.FromEnv "guestGroup")}}

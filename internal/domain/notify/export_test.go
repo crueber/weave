@@ -4,15 +4,16 @@ import "github.com/crueber/weave/internal/ops"
 
 // PlannedForTest is one planned notification (user, type, data).
 type PlannedForTest struct {
-	UserID, Type string
-	Data         map[string]any
+	UserID, Type, BoardID string
+	Data                  map[string]any
 }
 
 // PlanForTest runs the notification planner for an event without writing anything.
 func PlanForTest(e *ops.Env, ev ops.Event, actor string) []PlannedForTest {
 	var out []PlannedForTest
-	for _, p := range planNotifications(e, ev, actor) {
-		out = append(out, PlannedForTest{p.UserID, p.Type, p.Data})
+	plans, _ := planNotifications(e, ev, actor)
+	for _, p := range plans {
+		out = append(out, PlannedForTest{p.UserID, p.Type, p.BoardID, p.Data})
 	}
 	return out
 }

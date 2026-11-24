@@ -9,6 +9,8 @@
   B.body = function () { return document.getElementById('board-body'); };
   B.lists = function () { return document.getElementById('board-lists'); };
   B.boardId = function () { var el = document.getElementById('board-live'); return (el && el.dataset.board) || ''; };
+  // ?board= for the card fragments of this page: a card on several boards renders as it is on THIS board
+  B.boardQ = function () { var b = B.boardId(); return b ? '?board=' + encodeURIComponent(b) : ''; };
   B.canEdit = function () { var l = B.lists(); return !!(l && l.dataset.canEdit); };
   B.reduced = function () { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; };
 
@@ -55,7 +57,7 @@
   B.fragment = function (html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content; };
   // refetch one tile (after quick edit / closing the card sheet) and put focus back on it when asked
   B.refreshTile = function (id, focus) {
-    return fetch('/ui/cards/' + id + '/tile', { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
+    return fetch('/ui/cards/' + id + '/tile' + B.boardQ(), { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
       .then(function (r) { if (!r.ok) { B.refresh(true); return null; } return r.text(); })
       .then(function (html) {
         var cur = document.getElementById('tile-' + id); if (!cur) return;
@@ -184,7 +186,7 @@
     var id = B.boardId(); if (!id || !B.body()) return;
     if (B.dragging) { B.schedule(1200); return; }
     if (force) document.querySelectorAll('.boards-col').forEach(function (c) { c.__sig = null; });
-    fetch('/ui/boards/' + id + '/body' + location.search, { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
+    return fetch('/ui/boards/' + id + '/body' + location.search, { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
       .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
       .then(function (html) { if (B.dragging) { B.schedule(1200); return; } if (B.applyBody(html) === 'dirty') B.schedule(2500); })
       .catch(function (err) { if (err && window.console) console.error('boards refresh failed', err); /* offline: the next event retries */ });
@@ -193,17 +195,38 @@
 
   var verbs = ['created', 'updated', 'deleted', 'moved', 'claimed', 'released'];
   var nouns = ['board', 'list', 'card', 'label', 'boardMembership', 'cardMembership', 'cardLabel', 'task', 'taskList', 'comment', 'attachment', 'customFieldValue'];
+  // card.placed / card.unplaced: a card was put on or taken off this board; card.placement.changed: a card on this
+  // board changed on one of its OTHER boards (its "also on" marker may change)
+  var liveNames = ['listener.joined', 'listener.left', 'time.updated', 'card.placement.changed', 'card.placed', 'card.unplaced'];
+  nouns.forEach(function (n) { verbs.forEach(function (v) { liveNames.push(n + '.' + v); }); });
+  // The tab's one realtime stream belongs to notify_live.js (layout); the board adds its room and
+  // listeners to it. After a dropped connection comes back, refresh once (rooms have no replay).
+  var live = window.WeaveLive;
+  if (live) {
+    liveNames.concat(['message', 'reconnect']).forEach(function (n) { live.on(n, function () { if (B.boardId()) B.schedule(300); }); });
+    live.on('list.updated', autoArchived);
+  }
   function setup() {
     document.querySelectorAll('.boards-col').forEach(function (c) { if (!c.__init) { c.__init = 1; c.__sig = c.outerHTML; B.initCol(c); } });
     var id = B.boardId();
     if (id === esBoard) return;
-    if (es) { es.close(); es = null; }
     esBoard = id;
+    if (live) { live.setRooms('board', id ? ['board:' + id] : []); return; }
+    if (es) { es.close(); es = null; }
     if (!id || !window.EventSource) return;
     es = new EventSource('/events?rooms=board:' + encodeURIComponent(id));
-    nouns.forEach(function (n) { verbs.forEach(function (v) { es.addEventListener(n + '.' + v, function () { B.schedule(300); }); }); });
+    liveNames.forEach(function (n) { es.addEventListener(n, function () { B.schedule(300); }); });
     es.onmessage = function () { B.schedule(300); };
-    ['listener.joined', 'listener.left'].forEach(function (n) { es.addEventListener(n, function () { B.schedule(300); }); });
+    es.addEventListener('list.updated', autoArchived);
+  }
+  // A column's auto-archive rule ran (one summary event per pass; the per-card events are quiet): say so once. The
+  // board itself redraws through the debounced refresh above.
+  function autoArchived(ev) {
+    var d; try { d = JSON.parse(ev.data); } catch (x) { return; }
+    var data = (d && d.data) || {}, n = +data.autoArchived || 0; if (!n || !B.toast) return;
+    var col = document.getElementById('col-' + (d.listId || data.id || '')), t = col && col.querySelector('.boards-col-title');
+    var name = t ? t.textContent.trim() : 'A column';
+    B.toast(name + ': archived ' + n + (n === 1 ? ' older card' : ' older cards') + ' (keeps the newest ' + (+data.keep || 0) + ')');
   }
   B.setup = setup;
   document.addEventListener('DOMContentLoaded', setup);
@@ -246,7 +269,14 @@
     B.closePop && B.closePop();
     B.announce((d.msg || 'Archived') + '. Press Undo to restore.');
     B.toast(d.msg || 'Archived', { action: 'Undo', onAction: function () {
-      B.post(d.url, {}).then(function (r) { if (r.ok) { B.announce('Restored'); B.refresh(true); } else B.toast(r.error, { error: true }); });
+      B.post(d.url, {}).then(function (r) {
+        if (!r.ok) { B.toast(r.error, { error: true }); return; }
+        B.announce('Restored');
+        Promise.resolve(B.refresh(true)).then(function () {   // keyboard flow: put focus back on the restored card
+          var l = d.refocus && document.querySelector('#tile-' + esc(d.id) + ' .boards-tile-link');
+          if (l) { l.focus({ preventScroll: true }); l.closest('.boards-tile').scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+        });
+      });
     } });
   });
   // list menu: move-cards target list excludes the list itself

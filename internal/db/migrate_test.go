@@ -175,6 +175,46 @@ func TestDropCardTypeMigration(t *testing.T) {
 	}
 }
 
+// 0403: open cards that sit in a closed-type column are closed once; drafts, templates, cards elsewhere and
+// updated_at are left alone.
+func TestClosedColumnBackfill(t *testing.T) {
+	d := openWithout(t, map[string]bool{"0403_closed_column_backfill.sql": true})
+	now := Now()
+	old := "2020-01-01T00:00:00Z"
+	for _, q := range []string{
+		`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','` + now + `')`,
+		`INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'B','` + now + `')`,
+		`INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('la','b1','active',1,'Todo','` + now + `'),('lc','b1','closed',2,'Done','` + now + `'),('lx','b1','archive',NULL,NULL,'` + now + `')`,
+		`INSERT INTO cards(id,board_id,list_id,position,name,is_closed,is_draft,is_template,list_changed_at,created_at,updated_at) VALUES
+			('open-in-done','b1','lc',1,'A',0,0,0,'` + now + `','` + now + `','` + old + `'),
+			('closed-in-done','b1','lc',2,'B',1,0,0,'` + now + `','` + now + `','` + old + `'),
+			('open-todo','b1','la',1,'C',0,0,0,'` + now + `','` + now + `','` + old + `'),
+			('closed-todo','b1','la',2,'D',1,0,0,'` + now + `','` + now + `','` + old + `'),
+			('archived','b1','lx',1,'E',0,0,0,'` + now + `','` + now + `','` + old + `'),
+			('draft','b1','lc',3,'F',0,1,0,'` + now + `','` + now + `','` + old + `'),
+			('tmpl','b1','lc',4,'G',0,0,1,'` + now + `','` + now + `','` + old + `')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	if err := d.migrate(); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	want := map[string]int{"open-in-done": 1, "closed-in-done": 1, "open-todo": 0, "closed-todo": 1, "archived": 0, "draft": 0, "tmpl": 0}
+	for id, w := range want {
+		if n := count(t, d, `SELECT is_closed FROM cards WHERE id=?`, id); n != w {
+			t.Errorf("%s: is_closed=%d, want %d", id, n, w)
+		}
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM cards WHERE updated_at<>?`, old); n != 0 {
+		t.Fatalf("the backfill must not touch updated_at (%d rows changed)", n)
+	}
+	if err := d.migrate(); err != nil { // applied once
+		t.Fatal(err)
+	}
+}
+
 // openWithout builds a database with every migration applied except skip (the state of an existing install).
 func openWithout(t *testing.T, skip map[string]bool) *DB {
 	t.Helper()
@@ -256,6 +296,36 @@ func TestWatchMigrations(t *testing.T) {
 		t.Fatalf("list watches must cascade with the list: %d", n)
 	}
 	if err := d.migrate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 0310: lists gain archive_after (auto-archive), NULL for every existing column; nothing is archived by the upgrade.
+func TestListArchiveAfterMigration(t *testing.T) {
+	d := openWithout(t, map[string]bool{"0310_list_archive_after.sql": true})
+	if cols(t, d, "lists")["archive_after"] {
+		t.Fatal("column exists before the migration")
+	}
+	now := Now()
+	for _, q := range []string{
+		`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','` + now + `')`,
+		`INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'B','` + now + `')`,
+		`INSERT INTO lists(id,board_id,type,position,name,wip_limit,created_at) VALUES('la','b1','active',1,'Todo',3,'` + now + `')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	if err := d.migrate(); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if !cols(t, d, "lists")["archive_after"] {
+		t.Fatal("archive_after missing")
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM lists WHERE archive_after IS NULL AND wip_limit=3`); n != 1 {
+		t.Fatalf("existing column: %d rows off with the WIP limit kept", n)
+	}
+	if err := d.migrate(); err != nil { // applied once
 		t.Fatal(err)
 	}
 }

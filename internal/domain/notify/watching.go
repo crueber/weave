@@ -82,11 +82,26 @@ func subscriptionList(e *ops.Env, in WatchListIn) (WatchListOut, error) {
 		LEFT JOIN projects p ON p.id=b.project_id WHERE s.user_id=? ORDER BY b.name COLLATE NOCASE, b.id`, false)
 	lists := scan(`SELECT l.id,COALESCE(l.name,''),b.id,b.name,b.name FROM list_subscriptions s JOIN lists l ON l.id=s.list_id JOIN boards b ON b.id=l.board_id
 		WHERE s.user_id=? AND l.type IN ('active','closed') ORDER BY b.name COLLATE NOCASE, b.id, l.position`, false)
-	cards := scan(`SELECT c.id,c.name,b.id,b.name,b.name||' / '||COALESCE(l.name,l.type),s.is_permanent,s.muted FROM card_subscriptions s JOIN cards c ON c.id=s.card_id
-		JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id WHERE s.user_id=? AND c.is_template=0
-		ORDER BY COALESCE(c.updated_at,c.created_at) DESC, c.id DESC`, true)
+	// one row per placement here; reduced below to one row per card, shown on its context board (the home when
+	// viewable, else the board with the most access: authz.CardAccesses), never naming a hidden placement
+	placed := scan(`SELECT c.id,c.name,b.id,b.name,b.name||' / '||COALESCE(l.name,l.type),s.is_permanent,s.muted FROM card_subscriptions s JOIN cards c ON c.id=s.card_id
+		JOIN card_placements p ON p.card_id=c.id JOIN boards b ON b.id=p.board_id JOIN lists l ON l.id=p.list_id WHERE s.user_id=? AND c.is_template=0
+		ORDER BY COALESCE(c.updated_at,c.created_at) DESC, c.id DESC, p.is_home DESC, p.placed_at, p.board_id`, true)
+	var cardIDs []string
+	for i, r := range placed {
+		if i == 0 || placed[i-1].ID != r.ID {
+			cardIDs = append(cardIDs, r.ID)
+		}
+	}
+	access := authz.CardAccesses(e, cardIDs, "")
+	var cards []row
+	for _, r := range placed {
+		if a, ok := access[r.ID]; ok && a.BoardID == r.BoardID {
+			cards = append(cards, r)
+		}
+	}
 	seen, ids := map[string]bool{}, []string{}
-	for _, set := range [][]row{boards, lists, cards} {
+	for _, set := range [][]row{boards, lists} {
 		for _, r := range set {
 			if !seen[r.BoardID] {
 				seen[r.BoardID] = true
@@ -106,10 +121,7 @@ func subscriptionList(e *ops.Env, in WatchListIn) (WatchListOut, error) {
 			out.Lists = append(out.Lists, r.WatchItem)
 		}
 	}
-	for _, r := range cards {
-		if !ok(r) {
-			continue
-		}
+	for _, r := range cards { // already limited to viewable context placements
 		if r.muted {
 			r.Explicit = false
 			if out.MutedTotal++; out.MutedTotal <= limit {

@@ -54,7 +54,8 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 | `weave card create --board B --list L --name N [--desc T\|@f] [--label X]... [--assign U]... [--due T] [--from-stdin]` | create; `--from-stdin` reads NDJSON/lines for bulk |
 | `weave card show CARD [--full]` | card, optionally with comments, checklists (`.item.tasks[]`), attachments |
 | `weave card edit CARD [--name N] [--desc T\|@f\|-] [--due T]` | alias of `card update` |
-| `weave card move CARD --to-list L [--position N]` | move |
+| `weave card move CARD --to-list L [--position N] [--board B] [--boardId FROM]` | move (`--board B` resolves the list on B, and B's placement of the card moves; `--boardId FROM` moves the placement on FROM to another board) |
+| `weave card place CARD_ID --board B --listId L` / `weave card unplace CARD B` / `weave card placements CARD` | put the same card on another board too / remove it from one board / list its boards (see below) |
 | `weave card comment CARD "text"` / `--stdin` | comment |
 | `weave card attach CARD FILE...` | upload attachments |
 | `weave card claim CARD [--ttl 15m] [--note T]` / `release` / `renew` | lease (exit 7 if already claimed) |
@@ -66,6 +67,26 @@ Ambiguity is an error (exit 2, `code: ambiguous`, candidates listed).
 | `weave skill print\|install\|check\|targets\|uninstall` | this skill; `install` covers every detected coding agent (Claude Code, Codex, OpenCode, pi, Gemini, Cursor, ...) |
 | `weave completion bash\|zsh\|fish\|powershell` | shell completion |
 | `weave ops [tag]` / `weave schema OP` | discovery |
+
+## One card on several boards
+
+A card can be on several boards at once (the same card, not a copy), each board with its own column and position:
+`card place` adds a board (needs edit access to the card and to that board; any project), `card unplace` ("Remove from
+board") takes it off one board (never its last one: archive or delete the card instead), `card placements` lists the
+boards you can see (`isHome` marks the card's home board). `card get`/`show` reports the card on one board
+(`boardId`, `listId`, `position`; `--boardId B` picks it) plus `placements[]` and `homeBoardId`.
+
+- **Per board**: the column and position, the labels (each board shows only its own; `card label.add --boardId B`
+  when the card is on several boards), the board's column rules (WIP, auto-archive). `card move` moves one board's
+  placement: the one on the target list's board, else pass `--boardId`; `card close --boardId B` closes it into board B's
+  closing column (closed itself is per card).
+- **Per card**: everything else, including **closed** (a closing column on any board closes it everywhere; an ordinary
+  column re-opens it), comments, checklists, members, claims (one lease: two listeners on two boards never both get it).
+- **Archive, trash and delete are card actions**: `card archive` moves the card into the archive (or trash) of every
+  board it is on, `card restore` brings each board's placement back, `card delete` needs it in the trash everywhere.
+  A column's auto-archive (keep newest N) is the exception: it archives only that board's placement.
+- Events: a card-level event reaches every board the card is on (one envelope per board you listen to, sharing
+  `origin`: dedupe on it); `card.placed` / `card.unplaced` concern one board (treat `card.placed` as an arrival).
 
 ## `weave listen`
 

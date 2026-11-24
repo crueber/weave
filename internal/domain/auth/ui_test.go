@@ -260,10 +260,10 @@ func TestOIDCBrowserFlow(t *testing.T) {
 
 func TestOIDCRolesAndAdminPages(t *testing.T) {
 	c, idp := newClient(t)
-	c.signIn(idp, userClaims("owner@x.io", "weave-project-owners"))
+	c.signIn(idp, userClaims("owner@x.io", "weave-users"))
 	var role string
 	_ = c.e.DB.QueryRow(`SELECT role FROM users WHERE email='owner@x.io'`).Scan(&role)
-	if role != "projectOwner" {
+	if role != "boardUser" {
 		t.Fatalf("role %q", role)
 	}
 	if w := c.do("GET", "/admin/users", nil, nil); w.Code != 404 {

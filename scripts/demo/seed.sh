@@ -7,10 +7,12 @@
 #     WEAVE_OIDC_CLIENT_ID=w WEAVE_OIDC_CLIENT_SECRET=x
 #   go build -o $DEMO_DIR/weave ./cmd/weave && ($DEMO_DIR/weave serve &)      # fresh, empty data dir only
 #   scripts/demo/seed.sh $DEMO_DIR/weave                                       # fictional data + sessions
-#   node scripts/demo/shots.mjs docs/screenshots   # right after seeding (the demo moves cards, so re-seed between runs)
-#   node scripts/demo/record.mjs && python3 scripts/demo/encode.py docs        # needs DEMO_DIR, WEAVE_BASE_URL, PW_CORE, PW_CHROMIUM, FFMPEG
+#   node scripts/demo/shots.mjs docs/screenshots && python3 scripts/demo/pngopt.py docs/screenshots   # right after seeding
+#   (fresh data dir + seed.sh again: shots and the demo both change state)
+#   node scripts/demo/record.mjs && POSTER=site/img/demo-poster.webp python3 scripts/demo/encode.py docs
+#                                                    # needs DEMO_DIR, WEAVE_BASE_URL, PW_CORE, PW_CHROMIUM, FFMPEG
 #
-# It mints fictional users (example.com addresses), names them, opens browser sessions for them straight in
+# It mints five fictional users (example.com addresses; Morgan ends up deactivated), names them, opens browser sessions for them straight in
 # SQLite (the OIDC provider is never contacted), and creates projects, boards, cards, labels and comments over
 # the REST API. Everything lands in $DEMO_DIR/state.json. Nothing here touches a real account.
 set -euo pipefail
@@ -20,10 +22,10 @@ DEMO_DIR=${DEMO_DIR:?set DEMO_DIR}
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$DEMO_DIR"
 
-declare -A ROLE=([avery]=admin [jordan]=boardUser [sam]=boardUser [riley]=boardUser)
+declare -A ROLE=([avery]=admin [jordan]=boardUser [sam]=boardUser [riley]=boardUser [morgan]=boardUser)
 printf '{' > "$DEMO_DIR/keys.json"
 sep=''
-for u in avery jordan sam riley; do
+for u in avery jordan sam riley morgan; do
   k=$("$BIN" admin mint-key --email "$u@example.com" --role "${ROLE[$u]}" | sed 's/.*"key":"\([^"]*\)".*/\1/')
   printf '%s"%s":"%s"' "$sep" "$u" "$k" >> "$DEMO_DIR/keys.json"; sep=','
 done
@@ -33,7 +35,7 @@ chmod 600 "$DEMO_DIR/keys.json"
 python3 - "$WEAVE_DATA_DIR/weave.db" "$DEMO_DIR" <<'PY'
 import sqlite3, sys, hashlib, secrets, json, datetime
 db, out = sys.argv[1], sys.argv[2]
-names = {"avery": "Avery Quinn", "jordan": "Jordan Lee", "sam": "Sam Rivera", "riley": "Riley Chen"}
+names = {"avery": "Avery Quinn", "jordan": "Jordan Lee", "sam": "Sam Rivera", "riley": "Riley Chen", "morgan": "Morgan Blake"}
 c = sqlite3.connect(db)
 now = datetime.datetime.now(datetime.timezone.utc)
 exp = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")

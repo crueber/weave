@@ -78,7 +78,8 @@
     if (f) f.focus({ preventScroll: true });
   }
   document.addEventListener('toggle', function (e) { // 'toggle' does not bubble: capture
-    var d = e.target; if (!d || d.tagName !== 'DETAILS' || !d.open || !d.classList.contains('cards-pop') || !d.closest('#list-sheet')) return;
+    var d = e.target; if (!d || d.tagName !== 'DETAILS' || !d.classList.contains('cards-pop') || !d.closest('#list-sheet')) return;
+    if (!d.open) { var cs = d.querySelector('.ls-closes-confirm'); if (cs) cs.textContent = ''; return; } // a pending confirm is dropped
     closePops(d);
     if (d.dataset.pop !== 'menu' && d.dataset.pop !== 'list') focusIn(d);
   }, true);
@@ -134,6 +135,8 @@
     var dv = t.closest('[data-ls-desc-click]');
     if (dv && !t.closest('a') && !(window.getSelection && String(window.getSelection()))) { editDesc(true); return; }
     if (t.closest('[data-ls-desc-cancel]')) { cancelDesc(); return; }
+    var cur = t.closest('[data-closes-opt].is-on'); // the setting already has this value: nothing to ask
+    if (cur) { closePops(); var sm0 = q('details[data-pop=closes]>summary'); if (sm0) sm0.focus({ preventScroll: true }); return; }
     var mi = t.closest('.cm-menu-panel .cm-mi'); // menu items close the menu
     if (mi) { var mn = mi.closest('details'); setTimeout(function () { if (mn) mn.removeAttribute('open'); }, 0); return; }
     if (!t.closest('details.cards-pop')) closePops();
@@ -178,6 +181,16 @@
     if (clr) clr.hidden = !lim;
     if (inp) inp.value = lim ? lim : '';
   }
+  function renderKeep() {
+    var s = sheet(); if (!s) return;
+    var keep = parseInt(s.dataset.keep, 10) || 0, chip = s.querySelector('[data-ls-keep]');
+    var ico = chip && chip.querySelector('svg');
+    if (chip) { chip.hidden = !keep; var t = chip.querySelector('[data-ls-keep-text]'); if (t) t.textContent = keep ? 'Keeps newest ' + keep : ''; }
+    var val = s.querySelector('[data-ls-keep-val]');
+    if (val) { val.textContent = ''; if (keep && ico) val.appendChild(ico.cloneNode(true)); val.appendChild(document.createTextNode(keep ? 'Keep ' + keep : 'Off')); }
+    var inp = s.querySelector('[data-ls-keep-input]'); if (inp) inp.value = keep ? keep : '';
+    var clr = s.querySelector('[data-ls-keep-clear]'); if (clr) clr.hidden = !keep;
+  }
   function flash(msg) {
     var el = q('[data-ls-saved]'); if (!el) return;
     el.textContent = ''; setTimeout(function () { el.textContent = msg || 'Saved'; }, 20);
@@ -213,21 +226,58 @@
         var b = q('[data-ls-desc-edit].cm-ghost'); if (b) b.hidden = !ta.defaultValue;
       });
     } else if (kind === 'type') {
-      var ty = el.dataset.type;
-      s.querySelector('[data-ls-type]').textContent = ty === 'closed' ? 'Closed column' : 'Active column';
-      s.querySelector('[data-ls-type-val]').textContent = ty === 'closed' ? 'Closed' : 'Active';
-      s.querySelectorAll('[data-ls-form=type]').forEach(function (b) {
-        var on = b.dataset.type === ty; b.classList.toggle('is-on', on); b.querySelector('.cm-tick').textContent = on ? '✓' : '';
+      // the closing setting ("Close cards that land here"): type closed = on, active = off
+      var on = el.dataset.type === 'closed';
+      var chip = s.querySelector('[data-ls-type]'); if (chip) chip.hidden = !on;
+      var val = s.querySelector('[data-ls-type-val]'), ico = chip && chip.querySelector('svg');
+      if (val) { val.textContent = ''; if (on && ico) val.appendChild(ico.cloneNode(true)); val.appendChild(document.createTextNode(on ? 'On' : 'Off')); }
+      s.querySelectorAll('[data-closes-opt]').forEach(function (b) {
+        var sel = (b.dataset.closesOpt === 'closed') === on;
+        b.classList.toggle('is-on', sel); b.setAttribute('aria-checked', sel ? 'true' : 'false'); b.querySelector('.cm-tick').textContent = sel ? '✓' : '';
       });
+      var slot = q('#ls-closes-confirm'); if (slot) slot.textContent = '';
       closePops();
+      var sm = q('details[data-pop=closes]>summary'); if (sm) sm.focus({ preventScroll: true });
+      // the switch may have closed or re-opened the column's cards: redraw the board behind the sheet (check marks)
+      if (window.Boards && window.Boards.refresh) window.Boards.refresh(true);
     } else if (kind === 'wip') {
       var wi = s.querySelector('[data-ls-wip-input]'), n = el.hasAttribute('data-ls-wip-clear') ? 0 : parseInt(wi.value, 10);
       s.dataset.wip = n > 0 ? n : 0; renderChips();
       closePops();
+    } else if (kind === 'archive') {
+      // auto-archive ("Keep the newest N cards"): data-keep is the new setting (0 = off), data-archived what it archived
+      var keep = parseInt(el.dataset.keep, 10) || 0, gone = parseInt(el.dataset.archived, 10) || 0;
+      s.dataset.keep = keep;
+      if (gone) s.dataset.total = Math.max(0, (parseInt(s.dataset.total, 10) || 0) - gone);
+      renderChips(); renderKeep();
+      var slot2 = q('#ls-archive-confirm'); if (slot2) slot2.textContent = '';
+      closePops();
+      var sm2 = q('details[data-pop=archive]>summary'); if (sm2) sm2.focus({ preventScroll: true });
+      if (window.Boards && window.Boards.refresh) window.Boards.refresh(true);
+      flash(gone ? 'Archived ' + gone + (gone === 1 ? ' card' : ' cards') : 'Saved');
+      refreshActivity();
+      return;
     } else if (kind === 'move') {
       s.dataset.total = 0; renderChips();
     }
     flash('Saved');
     refreshActivity();
+  });
+
+  // ---- the closing-setting confirm (column sheet popover and column "..." menu; boards_list_closes_confirm) ----
+  // Cancel drops it and returns focus to the control that asked; a fresh confirm focuses its default action.
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest && e.target.closest('[data-closes-cancel]'); if (!c) return;
+    var slot = c.closest('.ls-closes-confirm, .boards-menu-confirm'); if (!slot) return;
+    var back = slot.id === 'ls-closes-confirm' ? slot.parentNode.querySelector('[data-closes-opt].is-on')
+      : slot.id === 'ls-archive-confirm' ? slot.parentNode.querySelector('[data-ls-keep-input]') : slot.previousElementSibling;
+    slot.textContent = '';
+    if (back && back.tagName === 'FORM') back = back.querySelector('input:not([type=hidden])');
+    if (back) back.focus({ preventScroll: true });
+  });
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    var t = e.detail.target; if (!t || !t.matches || !t.matches('.ls-closes-confirm, .boards-menu-confirm')) return;
+    var f = t.querySelector('[data-closes-default]'); if (f) f.focus({ preventScroll: true });
+    var cf = t.querySelector('.closes-confirm'); if (cf && cf.scrollIntoView) cf.scrollIntoView({ block: 'nearest' });
   });
 })();

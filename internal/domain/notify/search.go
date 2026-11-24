@@ -82,8 +82,11 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 		args = append(args, in.Kind)
 	}
 	if in.BoardID != "" {
-		q += ` AND board_id=?`
-		args = append(args, in.BoardID)
+		// the index keeps ONE row per card or comment, under the card's home board; a card placed on this board (and
+		// its comments) matches too
+		q += ` AND (board_id=? OR (kind='card' AND ref_id IN (SELECT card_id FROM card_placements WHERE board_id=?))
+			OR (kind='comment' AND ref_id IN (SELECT m.id FROM comments m JOIN card_placements p ON p.card_id=m.card_id WHERE p.board_id=?)))`
+		args = append(args, in.BoardID, in.BoardID, in.BoardID)
 	}
 	q += ` ORDER BY rank LIMIT ?`
 	args = append(args, limit*8)
@@ -99,6 +102,37 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 		cands = append(cands, c)
 	}
 	rows.Close()
+	// card and comment hits: access over the card's placements (one bulk call), shown on the context board (the
+	// boardId filter when the card is placed there, else the home when viewable, else the board with the most
+	// access); the board of the index row (the home) is never named unless the caller can view it
+	cardOf := map[string]string{} // comment id -> card id
+	var cardIDs, commentIDs []string
+	for _, c := range cands {
+		switch c.kind {
+		case "card":
+			cardIDs = append(cardIDs, c.ref)
+		case "comment":
+			commentIDs = append(commentIDs, c.ref)
+		}
+	}
+	if len(commentIDs) > 0 { // one query (at most limit*8 = 800 candidates)
+		ph := "?" + strings.Repeat(",?", len(commentIDs)-1)
+		cargs := make([]any, len(commentIDs))
+		for i, id := range commentIDs {
+			cargs[i] = id
+		}
+		if rs, err := e.DB.QueryContext(e.Ctx, `SELECT id,card_id FROM comments WHERE id IN (`+ph+`)`, cargs...); err == nil {
+			for rs.Next() {
+				var id, cid string
+				if rs.Scan(&id, &cid) == nil {
+					cardOf[id] = cid
+					cardIDs = append(cardIDs, cid)
+				}
+			}
+			rs.Close()
+		}
+	}
+	access := authz.CardAccesses(e, cardIDs, in.BoardID)
 	boards := map[string]*boardInfo{}
 	binfo := func(id string) *boardInfo {
 		if b, ok := boards[id]; ok {
@@ -130,17 +164,25 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 			}
 			h.BoardID, h.BoardName, h.ProjectID, h.ProjectName, h.URL = c.board, b.name, b.projectID, b.project, "/boards/"+c.board
 		case "card", "comment":
-			b := binfo(c.board)
+			h.CardID = c.ref
+			if c.kind == "comment" {
+				cid, ok := cardOf[c.ref]
+				if !ok {
+					continue
+				}
+				h.CardID = cid
+			}
+			a, ok := access[h.CardID]
+			if !ok || (in.BoardID != "" && a.BoardID != in.BoardID) {
+				// with a boardId filter, only cards the caller can see ON that board: a hit shown elsewhere would
+				// reveal a placement on a board the caller cannot view
+				continue
+			}
+			b := binfo(a.BoardID)
 			if b.level < authz.View {
 				continue
 			}
-			h.BoardID, h.BoardName, h.ProjectID, h.ProjectName = c.board, b.name, b.projectID, b.project
-			h.CardID = c.ref
-			if c.kind == "comment" {
-				if e.DB.QueryRowContext(e.Ctx, `SELECT card_id FROM comments WHERE id=?`, c.ref).Scan(&h.CardID) != nil {
-					continue
-				}
-			}
+			h.BoardID, h.BoardName, h.ProjectID, h.ProjectName = a.BoardID, b.name, b.projectID, b.project
 			h.URL = "/cards/" + h.CardID
 		default:
 			continue

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crueber/weave/internal/authz"
+	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -84,11 +85,17 @@ func slug(s string) string {
 	return s
 }
 
-// loadCards loads cards (with labels, members, tasks, comments, attachments, custom fields) for a
-// condition on the cards table alias c, e.g. "c.board_id=?" / "c.id=?".
-func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
+// loadCards loads the cards placed on boardID (only cardID when not empty) with labels, members, tasks, comments,
+// attachments and custom fields, as seen on that board: its columns, its card order and only the labels shown on it
+// (db.LabelOnBoard). Every query is scoped by the placement alias p, so a card is loaded once per board.
+func loadCards(e *ops.Env, boardID, cardID string) ([]*exCard, error) {
+	where, args := "p.board_id=?", []any{boardID}
+	if cardID != "" {
+		where += " AND p.card_id=?"
+		args = append(args, cardID)
+	}
 	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(l.name,l.type),l.type
-	 FROM cards c JOIN lists l ON l.id=c.list_id WHERE c.is_draft=0 AND c.is_template=0 AND `+where+` ORDER BY l.position, c.position`, arg)
+	 FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id WHERE c.is_draft=0 AND c.is_template=0 AND `+where+` ORDER BY l.position, p.position`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +110,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 		}
 		if ltype == "archive" || ltype == "trash" {
 			// archived/trashed lists are not part of an export of the live board
-			if !strings.Contains(where, "c.id=?") {
+			if cardID == "" {
 				continue
 			}
 		}
@@ -112,7 +119,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 	}
 	rows.Close()
 	query := func(q string, fn func(scan func(...any) error)) {
-		rs, err := e.DB.QueryContext(e.Ctx, q, arg)
+		rs, err := e.DB.QueryContext(e.Ctx, q, args...)
 		if err != nil {
 			return
 		}
@@ -121,7 +128,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			fn(rs.Scan)
 		}
 	}
-	query(`SELECT cl.card_id,COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN cards c ON c.id=cl.card_id WHERE `+where+` ORDER BY l.position`, func(s func(...any) error) {
+	query(`SELECT cl.card_id,COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id WHERE `+where+` AND `+db.LabelOnBoard("l", "p.board_id")+` ORDER BY l.position`, func(s func(...any) error) {
 		var id string
 		var l exLabel
 		_ = s(&id, &l.Name, &l.Color)
@@ -129,7 +136,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			c.Labels = append(c.Labels, l)
 		}
 	})
-	query(`SELECT m.card_id,u.name FROM card_memberships m JOIN users u ON u.id=m.user_id JOIN cards c ON c.id=m.card_id WHERE `+where+` ORDER BY u.name`, func(s func(...any) error) {
+	query(`SELECT m.card_id,u.name FROM card_memberships m JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id WHERE `+where+` ORDER BY u.name`, func(s func(...any) error) {
 		var id, n string
 		_ = s(&id, &n)
 		if c := byID[id]; c != nil {
@@ -141,7 +148,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 		i int
 	}
 	tls := map[string]tlref{}
-	query(`SELECT tl.id,tl.card_id,tl.name FROM task_lists tl JOIN cards c ON c.id=tl.card_id WHERE `+where+` ORDER BY tl.position`, func(s func(...any) error) {
+	query(`SELECT tl.id,tl.card_id,tl.name FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id WHERE `+where+` ORDER BY tl.position`, func(s func(...any) error) {
 		var id, cid, n string
 		_ = s(&id, &cid, &n)
 		if c := byID[cid]; c != nil {
@@ -149,7 +156,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			tls[id] = tlref{c, len(c.TaskLists) - 1}
 		}
 	})
-	query(`SELECT t.task_list_id,t.name,t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN cards c ON c.id=tl.card_id WHERE `+where+` ORDER BY t.position`, func(s func(...any) error) {
+	query(`SELECT t.task_list_id,t.name,t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id WHERE `+where+` ORDER BY t.position`, func(s func(...any) error) {
 		var id string
 		var t exTask
 		_ = s(&id, &t.Name, &t.Done)
@@ -157,7 +164,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			r.c.TaskLists[r.i].Tasks = append(r.c.TaskLists[r.i].Tasks, t)
 		}
 	})
-	query(`SELECT m.card_id,COALESCE(u.name,'Unknown'),m.text,m.created_at FROM comments m LEFT JOIN users u ON u.id=m.user_id JOIN cards c ON c.id=m.card_id WHERE `+where+` ORDER BY m.created_at`, func(s func(...any) error) {
+	query(`SELECT m.card_id,COALESCE(u.name,'Unknown'),m.text,m.created_at FROM comments m LEFT JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id WHERE `+where+` ORDER BY m.created_at`, func(s func(...any) error) {
 		var id string
 		var cm exComment
 		_ = s(&id, &cm.User, &cm.Text, &cm.At)
@@ -165,7 +172,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			c.Comments = append(c.Comments, cm)
 		}
 	})
-	query(`SELECT a.card_id,a.name,COALESCE(a.url,'') FROM attachments a JOIN cards c ON c.id=a.card_id WHERE `+where+` ORDER BY a.created_at`, func(s func(...any) error) {
+	query(`SELECT a.card_id,a.name,COALESCE(a.url,'') FROM attachments a JOIN card_placements p ON p.card_id=a.card_id WHERE `+where+` ORDER BY a.created_at`, func(s func(...any) error) {
 		var id, n, u string
 		_ = s(&id, &n, &u)
 		if c := byID[id]; c != nil {
@@ -175,7 +182,7 @@ func loadCards(e *ops.Env, where string, arg any) ([]*exCard, error) {
 			c.Attachments = append(c.Attachments, n)
 		}
 	})
-	query(`SELECT v.card_id,COALESCE(g.name,''),f.name,COALESCE(v.content,'') FROM custom_field_values v JOIN custom_fields f ON f.id=v.field_id JOIN custom_field_groups g ON g.id=v.group_id JOIN cards c ON c.id=v.card_id WHERE `+where+` ORDER BY g.position,f.position`, func(s func(...any) error) {
+	query(`SELECT v.card_id,COALESCE(g.name,''),f.name,COALESCE(v.content,'') FROM custom_field_values v JOIN custom_fields f ON f.id=v.field_id JOIN custom_field_groups g ON g.id=v.group_id JOIN card_placements p ON p.card_id=v.card_id WHERE `+where+` ORDER BY g.position,f.position`, func(s func(...any) error) {
 		var id string
 		var f exField
 		_ = s(&id, &f.Group, &f.Name, &f.Value)
@@ -267,7 +274,7 @@ func init() {
 				return nil, ops.NotFound("board")
 			}
 			doc.Title = doc.Board
-			cards, err := loadCards(e, "c.board_id=?", in.ID)
+			cards, err := loadCards(e, in.ID, "")
 			if err != nil {
 				return nil, err
 			}
@@ -291,7 +298,7 @@ func init() {
 			}
 			doc := exDoc{Kind: "card"}
 			_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.name,p.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.id=?`, board).Scan(&doc.Board, &doc.Project)
-			cards, err := loadCards(e, "c.id=?", in.ID)
+			cards, err := loadCards(e, board, in.ID) // as seen on the context board
 			if err != nil || len(cards) == 0 {
 				return nil, ops.NotFound("card")
 			}

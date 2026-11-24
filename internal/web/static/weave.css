@@ -97,5 +97,8 @@ main{padding:var(--space-5) var(--space-4)}
 ::selection{background:var(--accent-soft)}
 :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .muted{color:var(--muted)}
+/* The hidden attribute always wins: component rules such as .bs-combo li[role=option]{display:flex} must never show
+   an element a script (or a template) hid. */
+[hidden]{display:none!important}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}

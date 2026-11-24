@@ -1,12 +1,22 @@
 // Package authz holds every permission rule. Domain packages must call these
 // helpers rather than inventing their own checks.
 //
-// Rules: admin = full access. projectOwner may create projects. A project
-// manager is editor on every board of the project. Board access comes from a
-// direct membership or a user-group membership (role editor|viewer, can_comment
-// overrides viewer commenting). Public boards give anonymous View. guest/worker
-// roles are restricted: guests never see boards without a membership and cannot
-// create projects; workers can edit cards they are members of when board role is viewer.
+// Rules: content access comes ONLY from ownership and membership. The admin role is
+// system administration (users, groups, instance settings, recovery: SystemAdmin) and
+// gives no access to any project, board or card by itself; an admin sees exactly what
+// they manage or are a member of, like everyone else (TestNoAdminContentBypass guards
+// this). Any signed-in human with role admin or boardUser may create a project and
+// becomes its manager (CanCreateProject; workers, guests and agent accounts may not). A project manager manages every board of the project.
+// Board access comes from a direct membership or a user-group membership (role
+// owner|editor|viewer, can_comment overrides viewer commenting). A board owner (a
+// user membership with role owner) manages THAT board only: not the project and not
+// its other boards. Any membership on a board of a project gives View on the
+// project. Who may create boards in a project is the project's boardCreation setting
+// (CanCreateBoard): owners = project managers only, members = also any project member
+// who may create projects; a creator who is not a project manager becomes the new
+// board's owner. Public boards give anonymous View. guest/worker roles are restricted:
+// guests never see boards without a membership; neither may create projects or
+// boards; workers can edit cards they are members of when board role is viewer.
 package authz
 
 import (
@@ -22,8 +32,30 @@ const (
 	View
 	Comment
 	Edit
-	Manage // project manager / admin
+	Manage // project manager, or the owner of that one board
 )
+
+// Board membership roles (board_memberships.role). A commenter is a viewer with can_comment.
+const (
+	RoleOwner  = "owner"
+	RoleEditor = "editor"
+	RoleViewer = "viewer"
+)
+
+// MembershipLevel maps one board membership row to the level it grants: owner = Manage (that board only),
+// editor = Edit, viewer = View (Comment with can_comment).
+func MembershipLevel(role string, canComment *bool) Level {
+	switch role {
+	case RoleOwner:
+		return Manage
+	case RoleEditor:
+		return Edit
+	}
+	if canComment != nil && *canComment {
+		return Comment
+	}
+	return View
+}
 
 func BoardLevel(e *ops.Env, boardID string) Level {
 	var projectID string
@@ -36,9 +68,6 @@ func BoardLevel(e *ops.Env, boardID string) Level {
 			return View
 		}
 		return None
-	}
-	if e.User.Role == "admin" {
-		return Manage
 	}
 	var n int
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM project_managers WHERE project_id=? AND user_id=?`, projectID, e.User.UserID).Scan(&n)
@@ -54,13 +83,7 @@ func BoardLevel(e *ops.Env, boardID string) Level {
 			var role string
 			var cc *bool
 			_ = rows.Scan(&role, &cc)
-			l := View
-			if role == "editor" {
-				l = Edit
-			} else if cc != nil && *cc {
-				l = Comment
-			}
-			if l > best {
+			if l := MembershipLevel(role, cc); l > best {
 				best = l
 			}
 		}
@@ -105,12 +128,6 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 		}
 		return out
 	}
-	if e.User.Role == "admin" {
-		for id := range boards {
-			out[id] = Manage
-		}
-		return out
-	}
 	managed := map[string]bool{}
 	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT project_id FROM project_managers WHERE user_id=?`, e.User.UserID); err == nil {
 		for rows.Next() {
@@ -131,13 +148,7 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 			if rows.Scan(&id, &role, &cc) != nil {
 				continue
 			}
-			l := View
-			if role == "editor" {
-				l = Edit
-			} else if cc != nil && *cc {
-				l = Comment
-			}
-			if l > best[id] {
+			if l := MembershipLevel(role, cc); l > best[id] {
 				best[id] = l
 			}
 		}
@@ -158,7 +169,7 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 
 // ViewersAmong returns the users among userIDs who can view the board (BoardLevel >= View for each of them), in one
 // query whatever the number of users. Same rules as BoardLevel, applied to the stored account: the user must exist, not
-// be deleted and not be deactivated; then admin, a manager of the board's project, a direct or group board membership,
+// be deleted and not be deactivated; then a manager of the board's project, a direct or group board membership,
 // or a public board. The notification planner uses it to drop watchers who lost access.
 func ViewersAmong(e *ops.Env, boardID string, userIDs []string) map[string]bool {
 	out := map[string]bool{}
@@ -167,7 +178,7 @@ func ViewersAmong(e *ops.Env, boardID string, userIDs []string) map[string]bool 
 	}
 	in, args := placeholders(userIDs)
 	q := `SELECT u.id FROM users u JOIN boards b ON b.id=? WHERE u.id IN (` + in + `) AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
-		u.role='admin' OR b.is_public=1 OR
+		b.is_public=1 OR
 		EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
 		EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
 			(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))`
@@ -193,14 +204,11 @@ func placeholders(ids []string) (string, []any) {
 	return "?" + strings.Repeat(",?", len(ids)-1), args
 }
 
-// IsBoardMember reports whether the caller has real access to the board (admin, project manager, or a direct/group
+// IsBoardMember reports whether the caller has real access to the board (project manager, or a direct/group
 // membership), as opposed to merely being able to view it because it is public.
 func IsBoardMember(e *ops.Env, boardID string) bool {
 	if e.User == nil {
 		return false
-	}
-	if e.User.Role == "admin" {
-		return BoardLevel(e, boardID) != None
 	}
 	var n int
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM boards b WHERE b.id=? AND (
@@ -222,6 +230,9 @@ func RequireBoard(e *ops.Env, boardID string, min Level) error {
 	return nil
 }
 
+// BoardOfCard returns the card's HOME board (cards.board_id, the mirror of the home placement; see placements.go).
+// It is not an access check and, once a card is on several boards, not the only board the card is on: access goes
+// through CardAccessFor / RequireCard / RequireCardOn.
 func BoardOfCard(e *ops.Env, cardID string) (string, error) {
 	var b string
 	if e.DB.QueryRowContext(e.Ctx, `SELECT board_id FROM cards WHERE id=?`, cardID).Scan(&b) != nil {
@@ -230,19 +241,25 @@ func BoardOfCard(e *ops.Env, cardID string) (string, error) {
 	return b, nil
 }
 
+// RequireCard checks the caller's level on the card (the maximum over the placements they can view, CardAccessFor)
+// and returns the context board (the home when viewable). Errors are those of the single-board check it replaced:
+// "card not found" for a missing card, "board not found" (not_found) when no placement is viewable, forbidden below min.
 func RequireCard(e *ops.Env, cardID string, min Level) (boardID string, err error) {
-	if boardID, err = BoardOfCard(e, cardID); err != nil {
-		return
+	a, exists := cardAccess(e, cardID, "")
+	switch {
+	case !exists:
+		return "", ops.NotFound("card")
+	case a.Level == None:
+		return "", ops.NotFound("board")
+	case a.Level < min:
+		return a.BoardID, ops.Forbidden()
 	}
-	return boardID, RequireBoard(e, boardID, min)
+	return a.BoardID, nil
 }
 
 func ProjectLevel(e *ops.Env, projectID string) Level {
 	if e.User == nil {
 		return None
-	}
-	if e.User.Role == "admin" {
-		return Manage
 	}
 	var n int
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM project_managers WHERE project_id=? AND user_id=?`, projectID, e.User.UserID).Scan(&n)
@@ -268,9 +285,46 @@ func RequireProject(e *ops.Env, projectID string, min Level) error {
 	return nil
 }
 
-// CanCreateProject: admin or projectOwner.
+// CanCreateProject: a signed-in human (never an agent/service account) with role admin or boardUser. Workers and
+// guests may not. The creator becomes the project's manager.
 func CanCreateProject(e *ops.Env) bool {
-	return e.User != nil && (e.User.Role == "admin" || e.User.Role == "projectOwner")
+	return e.User != nil && !e.User.IsAgent && (SystemAdmin(e) || e.User.Role == "boardUser")
+}
+
+// Project board-creation policies (projects.board_creation).
+const (
+	BoardCreationOwners  = "owners"  // project managers only; the default
+	BoardCreationMembers = "members" // also any project member who may create projects
+)
+
+// CanCreateBoard is the one rule for every path that creates a board in a project (blank board, template,
+// import) and for the buttons and gallery that lead there: project Manage (a project manager) always; with
+// the project's boardCreation set to members, also any project member (ProjectLevel >= View, i.e. a board
+// membership in the project) who may create projects (CanCreateProject: a human admin/boardUser; never workers,
+// guests or agents).
+func CanCreateBoard(e *ops.Env, projectID string) bool {
+	l := ProjectLevel(e, projectID)
+	if l >= Manage {
+		return true
+	}
+	if l < View || !CanCreateProject(e) {
+		return false
+	}
+	var policy string
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(board_creation,'owners') FROM projects WHERE id=?`, projectID).Scan(&policy)
+	return policy == BoardCreationMembers
+}
+
+// RequireCreateBoard is CanCreateBoard as an error: not_found when the caller cannot see the project at all
+// (hiding its existence), forbidden when they can see it but may not create boards there.
+func RequireCreateBoard(e *ops.Env, projectID string) error {
+	if ProjectLevel(e, projectID) == None {
+		return ops.NotFound("project")
+	}
+	if !CanCreateBoard(e, projectID) {
+		return ops.Forbidden()
+	}
+	return nil
 }
 
 // RoomAllowed decides whether the caller may subscribe to an SSE room.
@@ -292,8 +346,8 @@ func RoomAllowed(e *ops.Env, room string) bool {
 	return room == "global" && e.User != nil
 }
 
-// TemplateVisible reports whether the caller may see and start boards from a published board template: admins always;
-// everyone who can already see the board (its project members); the publisher; and, depending on the publisher's choice
+// TemplateVisible reports whether the caller may see and start boards from a published board template: everyone who
+// can already see the board (its project members); the publisher; and, depending on the publisher's choice
 // (boards.template_visibility), the members of one user group or every signed-in user.
 func TemplateVisible(e *ops.Env, boardID string) bool {
 	if e.User == nil {
@@ -306,7 +360,7 @@ func TemplateVisible(e *ops.Env, boardID string) bool {
 		Scan(&tpl, &vis, &group, &publisher) != nil || !tpl {
 		return false
 	}
-	if e.User.Role == "admin" || BoardLevel(e, boardID) >= View || (publisher != nil && *publisher == e.User.UserID) {
+	if BoardLevel(e, boardID) >= View || (publisher != nil && *publisher == e.User.UserID) {
 		return true
 	}
 	switch vis {

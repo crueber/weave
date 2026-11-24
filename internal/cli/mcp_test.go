@@ -340,15 +340,15 @@ func TestMCPWeaveCallParityAndConfirm(t *testing.T) {
 }
 
 func TestMCPAdminToolsHidden(t *testing.T) {
-	cur := []string{"card.get", "agent.list"}
+	cur := []string{"card.get", "group.create"}
 	f := newFake(t) // whoami role: boardUser
 	e := newMCPEnv(t, f, mcpConfig{Curated: cur})
 	tools := e.toolNames()
-	if tools["weave_agent_list"] != nil || tools["weave_card_get"] == nil {
+	if tools["weave_group_create"] != nil || tools["weave_card_get"] == nil {
 		t.Fatalf("non-admin sees admin tool: %v", tools)
 	}
-	r := e.call(mcpOpsTool, map[string]any{"tag": "agent"})
-	if strings.Contains(resultText(r), "agent.list") {
+	r := e.call(mcpOpsTool, map[string]any{"tag": "group"})
+	if strings.Contains(resultText(r), "group.create") {
 		t.Fatalf("weave_ops lists admin ops to a non-admin: %s", resultText(r))
 	}
 	// whoami failing: show everything (the server is the real gate)
@@ -356,12 +356,12 @@ func TestMCPAdminToolsHidden(t *testing.T) {
 	f2.status("GET /api/v1/whoami", 500, "error", "down")
 	f2.status("GET /api/v1/auth/whoami", 500, "error", "down")
 	f2.status("GET /api/v1/auth/me", 500, "error", "down")
-	if newMCPEnv(t, f2, mcpConfig{Curated: cur}).toolNames()["weave_agent_list"] == nil {
+	if newMCPEnv(t, f2, mcpConfig{Curated: cur}).toolNames()["weave_group_create"] == nil {
 		t.Fatal("admin tool must be shown when whoami fails")
 	}
 	f3 := newFake(t)
 	f3.json("GET /api/v1/auth/whoami", map[string]any{"item": map[string]any{"user": map[string]any{"id": "u1"}, "role": "admin"}})
-	if newMCPEnv(t, f3, mcpConfig{Curated: cur}).toolNames()["weave_agent_list"] == nil {
+	if newMCPEnv(t, f3, mcpConfig{Curated: cur}).toolNames()["weave_group_create"] == nil {
 		t.Fatal("admin must see admin tools")
 	}
 }

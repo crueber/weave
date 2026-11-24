@@ -2,6 +2,7 @@ package boards
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/crueber/weave/internal/authz"
@@ -118,6 +119,27 @@ func activitySummary(env events.Envelope, listID, card string, names map[string]
 	case "list.updated":
 		d := env.Data
 		switch {
+		case d["autoArchived"] != nil: // the archive-after rule ran (one summary per pass; the per-card events are quiet)
+			return "auto-archived " + plural(num(d["autoArchived"]), "card") + ": the column keeps the newest " + strconv.Itoa(num(d["keep"]))
+		case d["archiveAfter"] != nil && d["closes"] == nil:
+			if n := num(d["archiveAfter"]); n > 0 {
+				return "set auto-archive: keep the newest " + plural(n, "card")
+			}
+			return "turned auto-archive off"
+		case d["closes"] != nil:
+			on, _ := d["closes"].(bool)
+			if on {
+				s := "set this column to close cards that land here"
+				if n := num(d["closed"]); n > 0 {
+					s += " and closed the " + plural(n, "card") + " in it"
+				}
+				return s
+			}
+			s := "stopped closing cards that land here"
+			if n := num(d["reopened"]); n > 0 {
+				s += " and re-opened the " + plural(n, "card") + " in it"
+			}
+			return s
 		case d["sorted"] == true:
 			return "sorted the cards"
 		case d["cleared"] == true:
@@ -150,4 +172,24 @@ func initialOf(name string) string {
 		return strings.ToUpper(string(r[0]))
 	}
 	return "?"
+}
+
+// num reads a count from event data (an int when fresh, a float64 once it went through JSON).
+func num(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
 }

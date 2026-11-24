@@ -45,3 +45,12 @@
 @media (max-width:640px){.nw-ico{display:none}}
 .nw-more{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
 .notify-reason{margin-top:.15rem;color:var(--fg-2);font-size:var(--text-xs)}
+/* "New notifications" (notify_live.js unhides it when one arrives while this page is open; nothing moves under the reader) */
+.notify-fresh{display:flex;align-items:center;gap:var(--space-2);margin:0 auto var(--space-3);padding:.4rem .5rem .4rem .8rem;border:1px solid var(--accent);border-radius:var(--radius-pill);background:var(--accent-soft);color:var(--accent);font:inherit;font-size:var(--text-sm);font-weight:600;cursor:pointer;box-shadow:var(--shadow-1)}
+.notify-fresh[hidden]{display:none}
+.notify-fresh svg{width:14px;height:14px;flex:none}
+.notify-fresh-cta{padding:.1rem .6rem;border-radius:var(--radius-pill);background:var(--accent);color:var(--accent-fg)}
+.notify-fresh:hover .notify-fresh-cta{background:var(--accent-hover)}
+.notify-fresh:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.notify-head-count{display:inline-flex;align-items:center}
+.notify-head-count:empty{display:none}

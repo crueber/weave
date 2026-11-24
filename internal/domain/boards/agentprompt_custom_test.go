@@ -197,7 +197,7 @@ func TestBoardAgentPromptUI(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 	_, dlg := get(t, m, "/ui/agent-prompt?scope=board&id="+b.ID, true)
-	if !strings.Contains(dlg, "customised by this board&#39;s managers") || !strings.Contains(dlg, "/boards/"+b.ID+"/settings?section=agents") || !strings.Contains(dlg, "Mine &#34;UI board&#34;") {
+	if !strings.Contains(dlg, "customised by this board&#39;s owners") || !strings.Contains(dlg, "/boards/"+b.ID+"/settings?section=agents") || !strings.Contains(dlg, "Mine &#34;UI board&#34;") {
 		t.Fatalf("dialog note missing:\n%s", dlg)
 	}
 	if _, ed := get(t, mux(testutil.As(e, editor)), "/ui/agent-prompt?scope=board&id="+b.ID, true); !strings.Contains(ed, "Customised") || strings.Contains(ed, "settings?section=agents") {

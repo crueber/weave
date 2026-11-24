@@ -8,7 +8,7 @@
 {{define "page"}}{{template "boards_list_sheet" .}}{{end}}
 {{define "boards_watch_list"}}{{template "boards_watch_list_btn" .Data}}{{end}}
 {{define "boards_list_sheet"}}{{$d := .Data}}{{$l := $d.List}}{{$edit := $d.CanEdit}}
-<div id="list-sheet" class="ls cm" data-list="{{$l.ID}}" data-board="{{$d.Board.ID}}" data-total="{{$d.Total}}" data-wip="{{$d.WIP}}" aria-label="Column: {{$d.Name}}">
+<div id="list-sheet" class="ls cm" data-list="{{$l.ID}}" data-board="{{$d.Board.ID}}" data-total="{{$d.Total}}" data-wip="{{$d.WIP}}" data-keep="{{$d.Keep}}" aria-label="Column: {{$d.Name}}">
   <div class="cm-top">
     <nav class="cm-crumb" aria-label="Breadcrumb">
       {{if $d.ProjectName}}<a href="/projects/{{$d.Board.ProjectID}}">{{$d.ProjectName}}</a><span class="cm-sep" aria-hidden="true">/</span>{{end}}<a href="/boards/{{$d.Board.ID}}">{{$d.Board.Name}}</a><span class="cm-sep" aria-hidden="true">/</span>
@@ -36,7 +36,8 @@
       {{else}}<h2>{{$d.Name}}</h2>{{end}}
     </div>
     <div class="cm-chips" role="group" aria-label="Column status">
-      <span class="cards-badge" data-ls-type>{{if eq $l.Type "closed"}}Closed column{{else}}Active column{{end}}</span>
+      <span class="cards-badge cards-badge-closed" data-ls-type title="Cards that land in this column are marked closed"{{if ne $l.Type "closed"}} hidden{{end}}>{{template "closed_mark_ico"}}Closes cards</span>
+      <span class="cards-badge ls-keepchip" data-ls-keep title="Older cards are archived automatically"{{if not $d.Keep}} hidden{{end}}>{{template "archive_after_ico"}}<span data-ls-keep-text>{{if $d.Keep}}Keeps newest {{$d.Keep}}{{end}}</span></span>
       <span class="cards-badge" data-ls-count>{{$d.Total}} {{if eq $d.Total 1}}card{{else}}cards{{end}}</span>
       <span class="cards-badge ls-wipchip{{if $d.Over}} cards-badge-warn is-over{{end}}" data-ls-wip{{if not $d.WIP}} hidden{{end}}>{{if $d.Over}}<b class="ls-flag" aria-hidden="true">!</b>{{end}}<span data-ls-wip-text>{{if $d.WIP}}WIP {{$d.Total}}/{{$d.WIP}}{{if $d.Over}}, over the limit{{end}}{{end}}</span></span>
     </div>
@@ -78,12 +79,16 @@
     <div class="cm-rail">
       <aside class="cm-props" aria-label="Properties">
         {{if $edit}}
-        <div class="cm-prop" data-prop="type"><span class="cm-pl" id="ls-pl-type">Type</span>
-          <details class="cm-pv cards-pop" data-pop="type"><summary class="cm-val" aria-labelledby="ls-pl-type" data-pl="Type"><span class="cm-vtext" data-ls-type-val>{{if eq $l.Type "closed"}}Closed{{else}}Active{{end}}</span></summary>
-            <div class="cm-popbody cards-popbody" role="group" aria-label="Column type">
-              <button type="button" class="cm-opt{{if ne $l.Type "closed"}} is-on{{end}}" hx-patch="/ui/lists/{{$l.ID}}" hx-vals='{"type":"active"}' hx-swap="none" data-ls-form="type" data-type="active"><span class="cm-tick" aria-hidden="true">{{if ne $l.Type "closed"}}&#10003;{{end}}</span>Active</button>
-              <button type="button" class="cm-opt{{if eq $l.Type "closed"}} is-on{{end}}" hx-patch="/ui/lists/{{$l.ID}}" hx-vals='{"type":"closed"}' hx-swap="none" data-ls-form="type" data-type="closed"><span class="cm-tick" aria-hidden="true">{{if eq $l.Type "closed"}}&#10003;{{end}}</span>Closed</button>
-              <p class="cm-hint ls-pophint">Closed columns hold finished work.</p>
+        {{$on := eq $l.Type "closed"}}<div class="cm-prop" data-prop="closes"><span class="cm-pl" id="ls-pl-closes">Auto-close</span>
+          <details class="cm-pv cards-pop" data-pop="closes"><summary class="cm-val" aria-labelledby="ls-pl-closes" data-pl="Auto-close" title="Close cards that land here"><span class="cm-vtext ls-closes-val" data-ls-type-val>{{if $on}}{{template "closed_mark_ico"}}On{{else}}Off{{end}}</span></summary>
+            <div class="cm-popbody cards-popbody ls-closes" role="group" aria-labelledby="ls-closes-h">
+              <p class="ls-closes-h" id="ls-closes-h">Close cards that land here</p>
+              <div class="ls-closes-opts" role="radiogroup" aria-labelledby="ls-closes-h">
+                <button type="button" class="cm-opt{{if $on}} is-on{{end}}" role="radio" aria-checked="{{if $on}}true{{else}}false{{end}}" data-closes-opt="closed" hx-get="/ui/lists/{{$l.ID}}/type-preview?type=closed&amp;ctx=sheet" hx-target="#ls-closes-confirm" hx-swap="innerHTML"><span class="cm-tick" aria-hidden="true">{{if $on}}&#10003;{{end}}</span>On</button>
+                <button type="button" class="cm-opt{{if not $on}} is-on{{end}}" role="radio" aria-checked="{{if $on}}false{{else}}true{{end}}" data-closes-opt="active" hx-get="/ui/lists/{{$l.ID}}/type-preview?type=active&amp;ctx=sheet" hx-target="#ls-closes-confirm" hx-swap="innerHTML"><span class="cm-tick" aria-hidden="true">{{if not $on}}&#10003;{{end}}</span>Off</button>
+              </div>
+              <p class="cm-hint ls-pophint">Cards moved or added to this column are marked closed (with a check mark); moving them to another column re-opens them.</p>
+              <div class="ls-closes-confirm" id="ls-closes-confirm" aria-live="polite"></div>
             </div></details></div>
         <div class="cm-prop" data-prop="wip"><span class="cm-pl" id="ls-pl-wip">WIP limit</span>
           <details class="cm-pv cards-pop" data-pop="wip"><summary class="cm-val ls-wipval" aria-labelledby="ls-pl-wip" data-pl="WIP limit" title="Soft limit: the header flags the column when it holds more cards than this. Nothing is blocked.">
@@ -93,9 +98,19 @@
               <form hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="wip"><label>Maximum cards<input type="number" name="wipLimit" min="1" max="10000" step="1" inputmode="numeric" required value="{{if $d.WIP}}{{$d.WIP}}{{end}}" placeholder="e.g. 5" data-ls-wip-input></label><button class="primary">Set limit</button></form>
               <form hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="wip" data-ls-wip-clear{{if not $d.WIP}} hidden{{end}}><input type="hidden" name="wipLimit" value=""><button class="cm-quiet">Remove limit</button></form>
             </div></details></div>
+        <div class="cm-prop" data-prop="archive"><span class="cm-pl" id="ls-pl-archive">Auto-archive</span>
+          <details class="cm-pv cards-pop" data-pop="archive"><summary class="cm-val" aria-labelledby="ls-pl-archive" data-pl="Auto-archive" title="Keep the newest N cards; older cards are archived automatically"><span class="cm-vtext ls-keep-val" data-ls-keep-val>{{if $d.Keep}}{{template "archive_after_ico"}}Keep {{$d.Keep}}{{else}}Off{{end}}</span></summary>
+            <div class="cm-popbody cards-popbody ls-closes ls-archive" role="group" aria-labelledby="ls-archive-h">
+              <p class="ls-closes-h" id="ls-archive-h">Keep the newest N cards</p>
+              <p class="cm-hint ls-pophint">Older cards are archived automatically: when more cards land here, the ones that have been in the column longest go to the archive, where you can restore them. Cards an agent has claimed stay until the claim ends.</p>
+              <form hx-get="/ui/lists/{{$l.ID}}/archive-preview" hx-target="#ls-archive-confirm" hx-swap="innerHTML" data-ls-keep-ask><input type="hidden" name="ctx" value="sheet"><label>Cards to keep<input type="number" name="archiveAfter" min="1" max="10000" step="1" inputmode="numeric" required value="{{if $d.Keep}}{{$d.Keep}}{{end}}" placeholder="e.g. 30" data-ls-keep-input></label><button class="primary">Set</button></form>
+              <form hx-patch="/ui/lists/{{$l.ID}}" hx-swap="none" data-ls-form="archive" data-keep="0" data-ls-keep-clear{{if not $d.Keep}} hidden{{end}}><input type="hidden" name="archiveAfter" value=""><button class="cm-quiet">Turn off</button></form>
+              <div class="ls-closes-confirm" id="ls-archive-confirm" aria-live="polite"></div>
+            </div></details></div>
         {{else}}
-        <div class="cm-prop" data-prop="type"><span class="cm-pl">Type</span><span class="cm-pv cm-ro" data-pl="Type"><span class="cm-vtext">{{if eq $l.Type "closed"}}Closed{{else}}Active{{end}}</span></span></div>
+        <div class="cm-prop" data-prop="closes"><span class="cm-pl">Auto-close</span><span class="cm-pv cm-ro" data-pl="Auto-close" title="Close cards that land here"><span class="cm-vtext ls-closes-val">{{if eq $l.Type "closed"}}{{template "closed_mark_ico"}}On{{else}}Off{{end}}</span></span></div>
         <div class="cm-prop" data-prop="wip"><span class="cm-pl">WIP limit</span><span class="cm-pv cm-ro" data-pl="WIP limit"><span class="cm-vtext">{{if $d.WIP}}Max {{$d.WIP}}{{if $d.Over}} (over){{end}}{{else}}None{{end}}</span></span></div>
+        <div class="cm-prop" data-prop="archive"><span class="cm-pl">Auto-archive</span><span class="cm-pv cm-ro" data-pl="Auto-archive" title="Keep the newest N cards; older cards are archived automatically"><span class="cm-vtext ls-keep-val">{{if $d.Keep}}{{template "archive_after_ico"}}Keep {{$d.Keep}}{{else}}Off{{end}}</span></span></div>
         {{end}}
         <div class="cm-prop" data-prop="cards"><span class="cm-pl">Cards</span><span class="cm-pv cm-ro" data-pl="Cards"><span class="cm-vtext" data-ls-count-val>{{$d.Total}}</span></span></div>
         <div class="cm-prop" data-prop="created"><span class="cm-pl">Created</span><span class="cm-pv cm-ro" data-pl="Created"><span class="cm-vtext">{{cards_when $l.CreatedAt}}</span></span></div>
@@ -135,3 +150,38 @@
   </ul>
   {{if $d.HasMore}}<button type="button" class="cm-ghost" hx-get="/ui/lists/{{$d.ListID}}/activity?limit={{$d.NextLimit}}">Show more</button>{{end}}
 </div>{{end}}
+
+{{/* The confirm for the closing setting (GET /ui/lists/{id}/type-preview, op list.typePreview), swapped into the
+   column sheet's "Close cards" popover (Ctx sheet) or the column "..." menu (Ctx menu). With no card to flip it applies
+   the setting at once (a form that submits on load); otherwise it states the exact count and offers: flip the cards
+   already here too (default, focused) or leave them as they are (existingCards=keep: the setting applies only to cards
+   that land from now on). Only the final PATCH forms carry data-ls-form="type" (boards_listsheet.js updates the sheet
+   after them); in the menu any PATCH closes the menu and the board refreshes. */}}
+{{define "boards_list_closes_confirm"}}{{$d := .Data}}{{$p := $d.P}}{{$menu := eq $d.Ctx "menu"}}
+{{if eq $p.Type $p.CurrentType}}{{else if not $p.Changes}}<form hx-patch="/ui/lists/{{$p.ID}}" hx-trigger="load" hx-swap="none"{{if not $menu}} data-ls-form="type" data-type="{{$p.Type}}"{{end}}><input type="hidden" name="type" value="{{$p.Type}}"></form>
+{{else}}<div class="closes-confirm{{if $menu}} is-menu{{end}}" role="group" aria-labelledby="cc-h-{{$p.ID}}-{{$d.Ctx}}" aria-describedby="cc-d-{{$p.ID}}-{{$d.Ctx}}">
+  <p class="closes-confirm-h" id="cc-h-{{$p.ID}}-{{$d.Ctx}}">{{$d.Heading}}</p>
+  <p class="closes-confirm-d" id="cc-d-{{$p.ID}}-{{$d.Ctx}}">{{$d.Body}}</p>
+  <div class="closes-confirm-actions">
+    <form hx-patch="/ui/lists/{{$p.ID}}" hx-swap="none"{{if not $menu}} data-ls-form="type" data-type="{{$p.Type}}"{{end}}><input type="hidden" name="type" value="{{$p.Type}}"><input type="hidden" name="existingCards" value="flip"><button class="primary"{{if $menu}} role="menuitem"{{end}} data-closes-default autofocus>{{$d.Flip}}</button></form>
+    <form hx-patch="/ui/lists/{{$p.ID}}" hx-swap="none"{{if not $menu}} data-ls-form="type" data-type="{{$p.Type}}"{{end}}><input type="hidden" name="type" value="{{$p.Type}}"><input type="hidden" name="existingCards" value="keep"><button{{if $menu}} role="menuitem"{{end}}>{{$d.Keep}}</button></form>
+    <button type="button" class="cm-quiet closes-cancel"{{if $menu}} role="menuitem"{{end}} data-closes-cancel>Cancel</button>
+  </div>
+</div>{{end}}{{end}}
+
+{{/* The confirm for the auto-archive setting (GET /ui/lists/{id}/archive-preview, op list.archivePreview), swapped into the
+   column sheet's "Auto-archive" popover (Ctx sheet) or the column "..." menu (Ctx menu). When the setting archives nothing
+   right now it applies at once (a form that submits on load); otherwise it states the exact count and offers to archive
+   them (default, focused; the PATCH carries confirmArchive=true) or Cancel. Only the sheet's final PATCH forms carry
+   data-ls-form="archive" (boards_listsheet.js updates the sheet after them); in the menu any PATCH closes the menu and the
+   board refreshes. */}}
+{{define "boards_list_archive_confirm"}}{{$d := .Data}}{{$p := $d.P}}{{$menu := eq $d.Ctx "menu"}}
+{{if not $p.WillArchive}}<form hx-patch="/ui/lists/{{$p.ID}}" hx-trigger="load" hx-swap="none"{{if not $menu}} data-ls-form="archive" data-keep="{{$p.Keep}}"{{end}}><input type="hidden" name="archiveAfter" value="{{$p.Keep}}"></form>
+{{else}}<div class="closes-confirm{{if $menu}} is-menu{{end}}" role="group" aria-labelledby="ac-h-{{$p.ID}}-{{$d.Ctx}}" aria-describedby="ac-d-{{$p.ID}}-{{$d.Ctx}}">
+  <p class="closes-confirm-h" id="ac-h-{{$p.ID}}-{{$d.Ctx}}">{{$d.Heading}}</p>
+  <p class="closes-confirm-d" id="ac-d-{{$p.ID}}-{{$d.Ctx}}">{{$d.Body}}</p>
+  <div class="closes-confirm-actions">
+    <form hx-patch="/ui/lists/{{$p.ID}}" hx-swap="none"{{if not $menu}} data-ls-form="archive" data-keep="{{$p.Keep}}" data-archived="{{$p.WillArchive}}"{{end}}><input type="hidden" name="archiveAfter" value="{{$p.Keep}}"><input type="hidden" name="confirmArchive" value="true"><button class="primary"{{if $menu}} role="menuitem"{{end}} data-closes-default autofocus>{{$d.Action}}</button></form>
+    <button type="button" class="cm-quiet closes-cancel"{{if $menu}} role="menuitem"{{end}} data-closes-cancel>Cancel</button>
+  </div>
+</div>{{end}}{{end}}

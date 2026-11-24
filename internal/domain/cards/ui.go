@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"math"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -113,7 +114,7 @@ func init() {
 	})
 	web.Route("GET /ui/cards/{id}/editing", func(c *web.Ctx) error { return renderDesc(c, c.R.PathValue("id"), "view", nil) })
 
-	// plain mutations: run the op, then re-render the modal
+	// plain mutations: run the op, then re-render the modal (_part=none: just 204, for the board's card shortcuts)
 	for _, m := range []struct{ pat, op string }{
 		{"POST /ui/cards/{id}/archive", "card.archive"}, {"POST /ui/cards/{id}/restore", "card.restore"},
 		{"POST /ui/cards/{id}/close", "card.close"}, {"POST /ui/cards/{id}/cover", "card.cover.set"},
@@ -126,8 +127,12 @@ func init() {
 	} {
 		op := m.op
 		web.Route(m.pat, func(c *web.Ctx) error {
-			if _, err := c.Do(op); err != nil {
+			if _, err := doOn(c, op); err != nil {
 				return err
+			}
+			if c.R.Form.Get("_part") == "none" {
+				c.W.WriteHeader(http.StatusNoContent)
+				return nil
 			}
 			return renderModal(c, c.R.PathValue("id"), "view", nil)
 		})
@@ -201,7 +206,7 @@ func init() {
 		if c.R.Form.Get("listId") == "" && c.R.Form.Get("container") != "" { // weave.js sortable posts "container"
 			c.R.Form.Set("listId", c.R.Form.Get("container"))
 		}
-		if _, err := c.Do("card.move"); err != nil {
+		if _, err := doOn(c, "card.move"); err != nil {
 			return err
 		}
 		if c.R.Form.Get("_part") == "modal" {
@@ -212,7 +217,7 @@ func init() {
 	})
 	web.Route("POST /ui/cards/{id}/delete", func(c *web.Ctx) error {
 		id := c.R.PathValue("id")
-		card, _ := cardGetCard(c.Env, id)
+		card, _ := cardGetOn(c, id) // the context board: the full page goes back to the board it showed the card on
 		if _, err := c.Do("card.delete"); err != nil {
 			return err
 		}
@@ -227,7 +232,7 @@ func init() {
 	} {
 		op := m.op
 		web.Route(m.pat, func(c *web.Ctx) error {
-			out, err := c.Do(op)
+			out, err := doOn(c, op)
 			if err != nil {
 				return err
 			}
@@ -296,6 +301,36 @@ func init() {
 	})
 }
 
+// contextOps are the card writes whose boardId input names the placement they act on (docs/DESIGN.md "Placements",
+// "Which placement a write acts on"): the UI maps its context board onto it. Every other op is left alone: card.place's
+// boardId is the TARGET board, and customfieldgroup.create's boardId makes a board-wide group (that is why the UI's
+// field is called board, not boardId).
+var contextOps = map[string]bool{"card.move": true, "card.label.add": true, "card.label.remove": true, "card.close": true, "card.duplicate": true}
+
+// doOn is c.Do for the card sheet and the board page: for the contextOps it fills the op's boardId (when the request
+// did not set one) with the request's context board (web.Ctx.BoardHint: the sheet's hx-vals, the board page's
+// board), but only when that board is a placement of the card the caller can see, i.e. when it is the board the
+// sheet shows (CardAccessFor resolves the hint to itself). A stale or foreign hint is dropped, so the op falls back to
+// its own default (the placement on listId's board, the only visible placement...) instead of failing on it.
+func doOn(c *web.Ctx, op string) (any, error) {
+	in, err := c.Bind(op)
+	if err != nil {
+		return nil, err
+	}
+	if hint := c.BoardHint(); hint != "" && contextOps[op] {
+		v := reflect.ValueOf(in)
+		if v.Kind() == reflect.Pointer {
+			v = v.Elem()
+		}
+		if f := v.FieldByName("BoardID"); f.IsValid() && f.Kind() == reflect.String && f.CanSet() && f.String() == "" {
+			if a, err := authz.CardAccessFor(c.Env, c.R.PathValue("id"), hint); err == nil && a.BoardID == hint {
+				f.SetString(hint)
+			}
+		}
+	}
+	return ops.Call(c.Env, op, in)
+}
+
 func mustBind(c *web.Ctx, op string) any {
 	in, err := c.Bind(op)
 	if err != nil {
@@ -311,17 +346,48 @@ type modalData struct {
 	DescMode string // view | edit | locked
 	Locker   *EditHolder
 	Origin   string
+	// Boards are the card's placements the caller can see (home first), for the breadcrumb switcher and the
+	// Boards row; both show only when Multi (more than one visible placement).
+	Boards []sheetBoard
+	Multi  bool
+	// Caps: the card's capabilities (authz.CardPlacing: CanPlace, CanRemoveFromBoard). ShowBoards: the Boards row
+	// shows (several visible boards, or the caller may add the card to one). Others: the other boards the caller can
+	// see (the "also on N other boards" wording of archive and delete). CanRemoveHere: "Remove from this board".
+	Caps          authz.CardCaps
+	ShowBoards    bool
+	Others        int
+	CanRemoveHere bool
+}
+
+// sheetBoard is one visible placement as the card sheet shows it.
+type sheetBoard struct {
+	Placement
+	IsCtx       bool // the board the sheet shows the card on (Card.BoardID)
+	ShowProject bool // its project differs from the context board's project (cross-project placement)
+	CanRemove   bool // "Remove from this board" (authz.CardCaps.CanRemoveFromBoard)
+}
+
+// cardGetOn is the in-process card.get on the request's context board (c.BoardHint: ?board= or the sheet's board
+// field). The hint goes to card.get, which resolves it (a board the caller cannot see is ignored); the sheet then
+// renders only the resolved Card.BoardID.
+func cardGetOn(c *web.Ctx, id string) (Card, error) {
+	return ops.Typed[Card](c.Env, "card.get", GetIn{ID: id, BoardID: c.BoardHint()})
 }
 
 func buildModal(c *web.Ctx, id, mode string, locker *EditHolder) (modalData, error) {
 	d := modalData{DescMode: mode, Locker: locker}
 	var err error
-	if d.Card, err = cardGetCard(c.Env, id); err != nil {
+	if d.Card, err = cardGetOn(c, id); err != nil {
 		return d, err
 	}
-	if d.Opts, err = ops.Typed[Options](c.Env, "card.options", IDIn{id}); err != nil {
+	if d.Opts, err = ops.Typed[Options](c.Env, "card.options", OptionsIn{ID: id, BoardID: d.Card.BoardID}); err != nil {
 		return d, err
 	}
+	d.Caps = authz.CardPlacing(c.Env, id)
+	d.Boards, d.Multi = sheetBoards(d.Card, d.Caps), len(d.Card.Placements) > 1
+	d.ShowBoards = !d.Card.IsDraft && !d.Card.IsTemplate && (d.Multi || d.Caps.CanPlace)
+	d.Others = max(0, len(d.Card.Placements)-1)
+	d.CanRemoveHere = d.Caps.CanRemoveFromBoard(d.Card.BoardID)
 	if el, err := ops.Typed[EditListOut](c.Env, "card.edit.list", IDIn{id}); err == nil {
 		d.Editors = el.Editors
 	}
@@ -336,6 +402,21 @@ func buildModal(c *web.Ctx, id, mode string, locker *EditHolder) (modalData, err
 		d.Origin = scheme + "://" + c.R.Host
 	}
 	return d, nil
+}
+
+// sheetBoards marks the context placement and the placements in another project than the context board's.
+func sheetBoards(card Card, caps authz.CardCaps) []sheetBoard {
+	proj := ""
+	for _, p := range card.Placements {
+		if p.BoardID == card.BoardID {
+			proj = p.ProjectID
+		}
+	}
+	out := make([]sheetBoard, 0, len(card.Placements))
+	for _, p := range card.Placements {
+		out = append(out, sheetBoard{Placement: p, IsCtx: p.BoardID == card.BoardID, ShowProject: p.ProjectID != proj, CanRemove: caps.CanRemoveFromBoard(p.BoardID)})
+	}
+	return out
 }
 
 func renderModal(c *web.Ctx, id, mode string, locker *EditHolder) error {

@@ -10,6 +10,7 @@ import (
 	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/boards"
 	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/realtime"
@@ -71,6 +72,8 @@ type Project struct {
 	ManagerUserIDs     []string `json:"managerUserIds"`
 	BoardCount         int      `json:"boardCount"`
 	CanManage          bool     `json:"canManage"`
+	BoardCreation      string   `json:"boardCreation" desc:"who may create boards in this project: owners (project managers only, the default) | members (also any project member)"`
+	CanCreateBoard     bool     `json:"canCreateBoard" desc:"you may create boards in this project (per caller)"`
 	AgentPrompt        string   `json:"agentPrompt,omitempty" desc:"this project's own text for the project agent prompt (plain text with {tokens}); absent = the admin default or the built-in text"`
 	CreatedAt          string   `json:"createdAt"`
 	UpdatedAt          string   `json:"updatedAt"`
@@ -141,13 +144,13 @@ const projCols = `p.id,p.name,COALESCE(p.description,''),p.is_hidden,p.use_proje
  COALESCE(p.background_color,''),COALESCE(p.background_gradient,''),COALESCE(p.background_image_id,''),COALESCE(p.owner_manager_id,''),
  EXISTS(SELECT 1 FROM project_favorites f WHERE f.project_id=p.id AND f.user_id=?),
  COALESCE((SELECT group_concat(user_id) FROM project_managers m WHERE m.project_id=p.id),''),
- (SELECT COUNT(*) FROM boards b WHERE b.project_id=p.id AND b.is_template=0),COALESCE(p.agent_prompt,''),p.created_at,COALESCE(p.updated_at,'')`
+ (SELECT COUNT(*) FROM boards b WHERE b.project_id=p.id AND b.is_template=0),COALESCE(p.agent_prompt,''),p.board_creation,p.created_at,COALESCE(p.updated_at,'')`
 
 func scanProject(sc interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var mgrs string
 	err := sc.Scan(&p.ID, &p.Name, &p.Description, &p.IsHidden, &p.UseProjectLabels, &p.BackgroundType, &p.BackgroundColor,
-		&p.BackgroundGradient, &p.BackgroundImageID, &p.OwnerManagerID, &p.IsFavorite, &mgrs, &p.BoardCount, &p.AgentPrompt, &p.CreatedAt, &p.UpdatedAt)
+		&p.BackgroundGradient, &p.BackgroundImageID, &p.OwnerManagerID, &p.IsFavorite, &mgrs, &p.BoardCount, &p.AgentPrompt, &p.BoardCreation, &p.CreatedAt, &p.UpdatedAt)
 	p.ManagerUserIDs = []string{}
 	if mgrs != "" {
 		p.ManagerUserIDs = strings.Split(mgrs, ",")
@@ -177,6 +180,7 @@ func Get(e *ops.Env, id string) (Project, error) {
 		return p, ops.NotFound("project")
 	}
 	p.CanManage = IsManager(e, id)
+	p.CanCreateBoard = authz.CanCreateBoard(e, id)
 	return p, nil
 }
 
@@ -194,12 +198,12 @@ func List(e *ops.Env, o ListOpts) ([]Project, error) {
 	}
 	q := `SELECT ` + projCols + ` FROM projects p WHERE 1=1`
 	args := []any{uid(e)}
-	if e.User.Role != "admin" {
-		q += ` AND (p.id IN (SELECT project_id FROM project_managers WHERE user_id=?) OR p.id IN (
-			SELECT b.project_id FROM boards b JOIN board_memberships m ON m.board_id=b.id WHERE m.user_id=? OR
-			m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?)))`
-		args = append(args, e.User.UserID, e.User.UserID, e.User.UserID)
-	}
+	// the projects the caller manages or holds a board membership in (authz.ProjectLevel >= View); the admin role
+	// adds none
+	q += ` AND (p.id IN (SELECT project_id FROM project_managers WHERE user_id=?) OR p.id IN (
+		SELECT b.project_id FROM boards b JOIN board_memberships m ON m.board_id=b.id WHERE m.user_id=? OR
+		m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?)))`
+	args = append(args, e.User.UserID, e.User.UserID, e.User.UserID)
 	if !o.IncludeHidden {
 		q += ` AND p.is_hidden=0`
 	}
@@ -226,10 +230,22 @@ func List(e *ops.Env, o ListOpts) ([]Project, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.CanManage = e.User.Role == "admin" || contains(p.ManagerUserIDs, e.User.UserID)
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	ids := make([]string, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	lv := authz.ProjectLevels(e, ids)
+	for i := range out {
+		out[i].CanManage = lv[out[i].ID] >= authz.Manage
+		out[i].CanCreateBoard = out[i].CanManage || authz.CanCreateBoard(e, out[i].ID)
+	}
+	return out, nil
 }
 
 func contains(s []string, v string) bool {
@@ -272,6 +288,7 @@ type UpdateIn struct {
 	BackgroundColor    *string `json:"backgroundColor" desc:"Hex colour like #1d6fa5 (type color)"`
 	BackgroundGradient *string `json:"backgroundGradient" desc:"Named gradient (type gradient), e.g. ocean-dive"`
 	BackgroundImageID  *string `json:"backgroundImageId" desc:"Uploaded background image id (type image)"`
+	BoardCreation      *string `json:"boardCreation" desc:"Who may create boards: owners (project managers only, the default) | members (also anyone with access to a board of the project; they become the new board's owner)"`
 	AgentPrompt        *string `json:"agentPrompt" desc:"This project's text for the project agent prompt, plain text with {tokens} such as {project_name} {boards} {connect} {questionnaire} (max 20000 characters); empty string, or text equal to the default, goes back to the admin default"`
 }
 
@@ -292,7 +309,7 @@ func init() {
 	ops.Register(ops.Op{Name: "project.get", Summary: "Get a project", Method: "GET", Path: "/projects/{id}",
 		UI: "GET /projects/{id}"}, func(e *ops.Env, in IDIn) (Project, error) { return Get(e, in.ID) })
 
-	ops.Register(ops.Op{Name: "project.create", Summary: "Create a project (you become its manager)", Method: "POST", Path: "/projects",
+	ops.Register(ops.Op{Name: "project.create", Summary: "Create a project (you become its manager). Any signed-in admin or boardUser may; workers, guests and agent accounts may not", Method: "POST", Path: "/projects",
 		UI: "POST /ui/projects"}, func(e *ops.Env, in CreateIn) (Project, error) {
 		if !authz.CanCreateProject(e) {
 			return Project{}, ops.Forbidden()
@@ -322,7 +339,7 @@ func init() {
 		return p, nil
 	})
 
-	ops.Register(ops.Op{Name: "project.update", Summary: "Update a project (name, description, hidden, labels toggle, background, agent prompt text)", Method: "PATCH", Path: "/projects/{id}",
+	ops.Register(ops.Op{Name: "project.update", Summary: "Update a project (name, description, hidden, labels toggle, who may create boards, background, agent prompt text)", Method: "PATCH", Path: "/projects/{id}",
 		UI: "POST /ui/projects/{id}"}, updateProject)
 
 	ops.Register(ops.Op{Name: "project.delete", Summary: "Delete a project and everything in it", Method: "DELETE", Path: "/projects/{id}",
@@ -331,11 +348,26 @@ func init() {
 			return DeleteOut{}, err
 		}
 		files := imageFiles(e, in.ID)
-		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM projects WHERE id=?`, in.ID); err != nil {
+		var boardIDs []string // a card also placed on a board of another project survives (re-homed there)
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT id FROM boards WHERE project_id=?`, in.ID); err == nil {
+			for rows.Next() {
+				var b string
+				if rows.Scan(&b) == nil {
+					boardIDs = append(boardIDs, b)
+				}
+			}
+			rows.Close()
+		}
+		after, err := boards.DeleteBoards(e, boardIDs, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(e.Ctx, `DELETE FROM projects WHERE id=?`, in.ID)
+			return err
+		})
+		if err != nil {
 			return DeleteOut{}, err
 		}
 		removeFiles(e, files)
 		publish(e, "project.deleted", in.ID, map[string]string{"id": in.ID})
+		after()
 		return DeleteOut{in.ID}, nil
 	})
 
@@ -429,6 +461,14 @@ func updateProject(e *ops.Env, in UpdateIn) (Project, error) {
 		}
 		cur.AgentPrompt = txt
 	}
+	if in.BoardCreation != nil {
+		switch *in.BoardCreation {
+		case authz.BoardCreationOwners, authz.BoardCreationMembers:
+			cur.BoardCreation = *in.BoardCreation
+		default:
+			return cur, ops.Invalid("boardCreation must be owners or members")
+		}
+	}
 	if in.BackgroundType != nil {
 		switch *in.BackgroundType {
 		case "", "color", "gradient", "image":
@@ -452,8 +492,8 @@ func updateProject(e *ops.Env, in UpdateIn) (Project, error) {
 		}
 	}
 	_, err = e.DB.ExecContext(e.Ctx, `UPDATE projects SET name=?,description=?,is_hidden=?,use_project_labels=?,background_type=?,background_color=?,
-		background_gradient=?,background_image_id=?,agent_prompt=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
-		nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), nullStr(cur.AgentPrompt), db.Now(), in.ID)
+		background_gradient=?,background_image_id=?,agent_prompt=?,board_creation=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
+		nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), nullStr(cur.AgentPrompt), cur.BoardCreation, db.Now(), in.ID)
 	if err != nil {
 		return cur, err
 	}

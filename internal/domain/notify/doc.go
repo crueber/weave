@@ -5,7 +5,8 @@
 // # Exported Go API (for other domains)
 //
 //	notify.Record(e, ev)            ops.EmitHook implementation (ops.Emit calls it)
-//	notify.ActionWriter             var func(*ops.Env, ops.Event); writes the activity row (default: INSERT into actions)
+//	notify.ActionWriter             var func(*ops.Env, ops.Event) bool; writes one activity row (default: INSERT into actions),
+//	                                called once per board of a fanned-out event (fanout.go)
 //	notify.Wait()                   waits for background deliveries (tests, shutdown)
 //	notify.SendMail(e, to, subject, text, html) error   SMTP via config smtp.* (env overrides)
 //	notify.SMTPConfigured(e) bool
@@ -36,11 +37,17 @@
 //	cardUpdate:            "changed" []string of the fields the update set ("isClosed", "dueDate" notify)
 //	cardCreate:            "draft": true for inbox drafts (silent)
 //
+// Event.Boards (optional) lists the boards a card event concerns; without it Record asks the cards domain
+// (events.Placements) and fans a card-level event out to every board the card is on, a placement event
+// (events.PlacementScoped) not. One actions row and one room publish per board, each with that board's own card
+// (events.CardOn) and no other board's column/board ids; every envelope carries "origin" (the first row's id, which
+// the other rows store in actions.origin_id). Notifications and webhooks run once per logical event.
+//
 // Notification rules (planNotifications; see docs/DESIGN.md "Watching and notifications"): watchers of the card,
 // its column(s) and the board hear createCard, moveCard, closeCard, reopenCard, setCardDueDate and commentCard;
 // mentioned viewers get mentionInComment; the added member gets addMemberToCard. At most one notification per
-// user per event (reason in data.via), never the actor, never a muted card, only users who can view the board
-// (authz.ViewersAmong). subscription.list (op) and Settings > Watching (/ui/settings/watching) are the read side.
+// user per event (reason in data.via), never the actor, never a muted card, only users who can view the board the
+// notification names (one authz.CardViewers call; placement events: the event's board). subscription.list (op) and Settings > Watching (/ui/settings/watching) are the read side.
 // Every notification is pushed to realtime room user:<id> as event "notification",
 // delivered to that user's notification services and (when SMTP is configured) by
 // e-mail; board services are additionally told about new comments.
@@ -50,7 +57,7 @@
 //	branding.appName branding.loginText branding.primaryColor branding.logoData branding.logoType
 //	smtp.host smtp.port smtp.secure(starttls|tls|none) smtp.user smtp.password smtp.from smtp.skipVerify smtp.notifications
 //	oidc.issuer oidc.clientId oidc.clientSecret oidc.scopes oidc.usernameClaim oidc.nameClaim
-//	oidc.emailClaim oidc.groupsClaim oidc.adminGroup oidc.ownerGroup oidc.userGroup oidc.workerGroup oidc.guestGroup oidc.requireGroup oidc.teamPrefix oidc.autoProvision oidc.buttonText
+//	oidc.emailClaim oidc.groupsClaim oidc.adminGroup oidc.userGroup oidc.workerGroup oidc.guestGroup oidc.requireGroup oidc.teamPrefix oidc.autoProvision oidc.buttonText
 //	terms.enabled terms.version terms.text
 //
 // # UI routes registered here

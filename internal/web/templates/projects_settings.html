@@ -36,7 +36,7 @@
 {{define "projects_set_general"}}{{template "projects_set_general_in" .Data}}{{end}}
 {{define "projects_set_general_in"}}<section id="set-general" class="boards-sec bs-panel" data-panel="general" aria-labelledby="set-general-h">
   <div class="bs-sec-head"><h2 id="set-general-h">General</h2>{{template "bs_status" .}}</div>
-  <form hx-post="/ui/projects/{{.P.ID}}" hx-trigger="change, submit" hx-target="#set-general" hx-swap="outerHTML" class="bs-form">
+  <form hx-post="/ui/projects/{{.P.ID}}" hx-trigger="change, submit" hx-target="#set-general" hx-swap="outerHTML" class="bs-form" data-cap="project-edit">
     <input type="hidden" name="_section" value="general">
     <div class="bs-row bs-row-stack">
       <span class="bs-text"><b><label for="ps-name">Project name</label></b><small>Shown on the home page, in the top bar and in notifications.</small></span>
@@ -48,6 +48,8 @@
     </div>
     {{template "bs_toggle" dict "ID" "ps-labels" "Name" "useProjectLabels" "Title" "Project-wide labels" "Help" "One label set shared by every board in this project. Only managers can change those labels." "On" .P.UseProjectLabels}}
     {{template "bs_toggle" dict "ID" "ps-hidden" "Name" "isHidden" "Title" "Hidden" "Help" "Hidden projects are not listed on the home page by default." "On" .P.IsHidden}}
+    <div class="bs-row bs-row-stack"><span class="bs-text"><b id="ps-bc-l">Who can create boards</b><small id="ps-bc-h">Managers can always create boards. With <b>Any member</b>, everyone with access to a board in this project can too, and owns each board they create (that board only, not the project). Guests and workers never create boards.</small></span>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="ps-bc-l" aria-describedby="ps-bc-h">{{$bc := .P.BoardCreation}}<label><input type="radio" name="boardCreation" value="owners"{{if ne $bc "members"}} checked{{end}}><span>Managers only</span></label><label><input type="radio" name="boardCreation" value="members"{{if eq $bc "members"}} checked{{end}}><span>Any member</span></label></div></div>
   </form>
   <p class="bs-hint">Changes save automatically.</p>
 </section>{{end}}
@@ -80,8 +82,8 @@
 {{define "projects_set_managers"}}{{template "projects_set_managers_in" .Data}}{{end}}
 {{define "projects_set_managers_in"}}<section id="set-managers" class="boards-sec bs-panel" data-panel="managers" aria-labelledby="set-managers-h">
   <div class="bs-sec-head"><h2 id="set-managers-h">Managers</h2></div>
-  <p class="bs-desc">Managers can change these settings and create boards. Only admin and project owner users can be managers.</p>
-  <form class="bs-add" hx-post="/ui/projects/{{.P.ID}}/managers" hx-target="#set-managers" hx-swap="outerHTML">
+  <p class="bs-desc">Managers run the project: they change these settings, create boards and manage every board in it. Anyone except guests can be a manager. The project's creator is marked Owner and stays a manager until they step down themself (or their account is deactivated); a project always keeps at least one manager.</p>
+  <form class="bs-add" data-cap="project-managers-add" hx-post="/ui/projects/{{.P.ID}}/managers" hx-target="#set-managers" hx-swap="outerHTML">
     {{template "bs_combo" dict "ID" "ps-combo" "Label" "Search people" "ListLabel" "People" "Placeholder" "Add a manager..." "Users" .Candidates}}
     <button class="primary" disabled data-add>Add</button>
   </form>
@@ -89,7 +91,7 @@
   {{range .Managers}}<li class="bs-member">
     <span class="avatar avatar-ph" aria-hidden="true">{{authInitial .Name}}</span>
     <span class="bs-member-t"><b>{{.Name}}{{if .IsOwner}} <span class="boards-badge">Owner</span>{{end}}</b>{{if .Email}}<small>{{.Email}}</small>{{end}}</span>
-    <button class="bs-x" aria-label="Remove {{.Name}}" title="Remove" hx-delete="/ui/projects/{{$.P.ID}}/managers/{{.ID}}" hx-target="#set-managers" hx-swap="outerHTML" hx-confirm="Remove {{.Name}} as manager?">&times;</button>
+    {{if .CanRemove}}<button class="bs-x" data-cap="{{if .IsOwner}}project-owner-remove{{else}}project-manager-remove{{end}}" aria-label="Remove {{.Name}}" title="Remove" hx-delete="/ui/projects/{{$.P.ID}}/managers/{{.ID}}" hx-target="#set-managers" hx-swap="outerHTML" hx-confirm="Remove {{.Name}} as manager?">&times;</button>{{end}}
   </li>{{else}}<li class="bs-empty-row">No managers yet.</li>{{end}}
   </ul>
 </section>{{end}}
@@ -125,13 +127,13 @@
 {{define "projects_set_agents"}}{{template "projects_set_agents_in" .Data}}{{end}}
 {{define "projects_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel" data-panel="agents" aria-labelledby="set-agents-h">
   <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2>{{template "bs_status" .}}</div>
-  <p class="bs-desc">Connect AI agents to this project. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>.{{if .IsAdmin}} Create dedicated agent accounts under <a href="/admin/agents">Admin &rarr; Agents</a>.{{end}}</p>
+  <p class="bs-desc">Connect AI agents to this project. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>. For unattended work, create a dedicated agent account in a board's settings (<b>Agents</b>): it can only reach the boards you give it.</p>
   <div class="bs-row"><span class="bs-text"><b>Project prompt</b><small>Asks which boards to attach to, then runs the board questionnaire for each.</small></span>
     <span class="bs-btns"><button type="button" class="primary" hx-get="/ui/agent-prompt?scope=project&amp;id={{.P.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button></span></div>
   {{template "bs_prompt" dict "ID" "ps-ap" "Name" "agentPrompt" "Title" "Project prompt text" "Help" "What Connect an agent hands out for this project. Plain text; the tokens below are filled in when it is shown. Boards have their own text and do not inherit this one." "Text" .Prompt.Text "Custom" .Prompt.Custom "From" .Prompt.From "Tokens" .Prompt.Tokens "URL" (print "/ui/projects/" .P.ID) "Patch" false "Target" "#set-agents" "Section" "agents" "Preview" (print "/ui/agent-prompt?scope=project&id=" .P.ID)}}
 </section>{{end}}
 
-{{define "projects_set_danger_in"}}<section id="set-danger" class="boards-sec bs-panel danger-zone" data-panel="danger" aria-labelledby="set-danger-h">
+{{define "projects_set_danger_in"}}<section id="set-danger" data-cap="project-delete" class="boards-sec bs-panel danger-zone" data-panel="danger" aria-labelledby="set-danger-h">
   <div class="bs-sec-head"><h2 id="set-danger-h">Danger zone</h2></div>
   <p class="bs-desc">Deleting the project removes all its boards, cards, labels, custom fields and history. This cannot be undone.</p>
   <div class="bs-delete" data-name="{{.P.Name}}">

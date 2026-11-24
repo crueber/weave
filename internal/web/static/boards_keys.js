@@ -17,6 +17,12 @@
   document.addEventListener('mouseout', function (e) { var t = e.target.closest && e.target.closest('.boards-tile'); if (t && !t.contains(e.relatedTarget) && hovered === t) hovered = null; });
 
   function tileFocused() { var a = document.activeElement; return a && a.closest ? a.closest('.boards-tile') : null; }
+  // the tile a card shortcut acts on: the focused one, else the hovered one (boards_cardkeys.js uses it too)
+  B.targetTile = function () {
+    var t = tileFocused() || hovered;
+    if (t && !document.contains(t)) t = t.id ? document.getElementById(t.id) : null;   // re-rendered under the mouse
+    return t;
+  };
   function currentCol() {
     var t = tileFocused() || hovered, c = t && t.closest('.boards-col'); if (c) return c;
     var a = document.activeElement; c = a && a.closest && a.closest('.boards-col'); if (c) return c;
@@ -51,16 +57,26 @@
   var popTile = null;
   B.closePop = function (focusTile) {
     var p = document.getElementById('boards-pop'); if (!p || p.hidden) return;
+    var also = p.dataset.also || ''; delete p.dataset.also;
     p.hidden = true; p.innerHTML = ''; p._anchor = null;
-    if (focusTile !== false && popTile && document.contains(popTile)) { var l = popTile.querySelector('.boards-tile-link'); l && l.focus({ preventScroll: true }); }
+    if (also) {   // the "also on" popover gives focus back to its marker (found again by card id after a live merge)
+      var m = alsoBtn(also); popTile = null;
+      if (m) { m.setAttribute('aria-expanded', 'false'); if (focusTile !== false) m.focus({ preventScroll: true }); }
+      return;
+    }
+    // the tile may have been re-rendered meanwhile (live refresh, a picker's refreshTile): find it again by id
+    var t = popTile && (document.contains(popTile) ? popTile : document.getElementById(popTile.id));
+    if (focusTile !== false && t) { var l = t.querySelector('.boards-tile-link'); l && l.focus({ preventScroll: true }); }
     popTile = null;
   };
+  B.setPopTile = function (t) { popTile = t; };   // the card-shortcut pickers share #boards-pop with quick edit
   B.openQuick = function (tile) {
     if (!tile) return;
     var p = document.getElementById('boards-pop'); if (!p) return;
     var id = tile.dataset.id;
+    B.closePop(false);   // an open "also on" popover (or picker) gives way first, so its marker resets
     popTile = tile;
-    fetch('/ui/cards/' + id + '/quick', { credentials: 'same-origin', headers: HDR }).then(function (r) { return r.ok ? r.text() : Promise.reject(); }).then(function (html) {
+    fetch('/ui/cards/' + id + '/quick' + B.boardQ(), { credentials: 'same-origin', headers: HDR }).then(function (r) { return r.ok ? r.text() : Promise.reject(); }).then(function (html) {
       p.innerHTML = html; B.process(p); p.hidden = false;
       p._anchor = tile;
       if (window.WeavePlace) window.WeavePlace(p, tile, { align: 'left', cover: true });
@@ -68,10 +84,42 @@
       var n = p.querySelector('[data-quick-name]'); if (n) { n.focus(); n.select(); }
     }).catch(function () { B.toast('Could not open quick edit', { error: true }); popTile = null; });
   };
+  // ---- "also on N other boards" marker (a card on several boards): a popover listing the other boards the viewer can
+  // see, in #boards-pop under the marker. It never opens the card sheet; Escape (above) / a click outside close it and
+  // focus returns to the marker. Capture phase: the list view's row carries an hx-get that must not see this click.
+  function alsoBtn(id) { return document.querySelector('[data-id="' + esc(id) + '"] [data-also-on]'); }
+  B.openAlso = function (btn) {
+    var p = document.getElementById('boards-pop'), row = btn.closest('[data-id]'); if (!p || !row) return;
+    var id = row.dataset.id;
+    if (!p.hidden && p.dataset.also === id) { B.closePop(); return; }   // the marker toggles its popover
+    B.closePop(false);
+    fetch('/ui/cards/' + id + '/placements-popover' + B.boardQ(), { credentials: 'same-origin', headers: HDR }).then(function (r) { return r.ok ? r.text() : Promise.reject(); }).then(function (html) {
+      var b = btn.isConnected ? btn : alsoBtn(id); if (!b) return;
+      B.closePop(false);
+      p.innerHTML = html; p.hidden = false; p._anchor = b; p.dataset.also = id; popTile = null;
+      b.setAttribute('aria-expanded', 'true');
+      if (window.WeavePlace) window.WeavePlace(p, b, { align: 'left' });
+      var f = p.querySelector('.boards-also-item') || p.querySelector('[data-also-pop]'); if (f) f.focus({ preventScroll: true });
+    }).catch(function () { B.toast('Could not list the other boards', { error: true }); });
+  };
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-also-on]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    if (B.suppressClick && Date.now() - B.suppressClick < 250) return;   // the end of a drag, not a click
+    B.openAlso(b);
+  }, true);
+  // arrow keys move between the boards of the popover
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    var box = e.target.closest && e.target.closest('#boards-pop [data-also-pop]'); if (!box) return;
+    var items = [].slice.call(box.querySelectorAll('.boards-also-item')), i = items.indexOf(document.activeElement); if (!items.length) return;
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+  });
   document.addEventListener('boards:closepop', function () { var t = popTile; B.announce('Card updated'); B.closePop(); if (t) B.refreshTile(t.dataset.id, true); });
   document.addEventListener('pointerdown', function (e) {
     var p = document.getElementById('boards-pop');
-    if (p && !p.hidden && !p.contains(e.target) && !(e.target.closest && e.target.closest('[data-quick]'))) B.closePop(false);
+    if (p && !p.hidden && !p.contains(e.target) && !(e.target.closest && e.target.closest('[data-quick],[data-also-on]'))) B.closePop(false);
   });
   document.addEventListener('keydown', function (e) {
     var p = document.getElementById('boards-pop'); if (!p || p.hidden) return;
@@ -132,10 +180,13 @@
       var l2 = tilesOf(cols[j]); if (l2.length) { focusTileLink(l2[Math.min(idx < 0 ? 0 : idx, l2.length - 1)]); return; }
     }
   }
+  function popOpen() { var p = document.getElementById('boards-pop'); return !!(p && !p.hidden); }
   document.addEventListener('keydown', function (e) {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
     if (typing(e.target)) return;
     var key = e.key;
+    if (popOpen() && e.target.closest && e.target.closest('#boards-pop')) return;   // a picker / quick edit owns its keys
+    if (document.querySelector('dialog.boards-confirm[open]')) return;                // the Delete confirm owns the keyboard
     if (key === '?') { e.preventDefault(); B.showHelp(); return; }
     if (modalOpen() || helpOpen()) return;
     if (B.grab && B.grab.active) return;                       // the grab mode owns the arrows/space
@@ -152,7 +203,7 @@
       case '/':
         var f = document.querySelector('[data-filter-input]'); if (f) { e.preventDefault(); f.focus(); f.select(); } break;
       case 'e':
-        var t = tileFocused() || hovered; if (t && !t.classList.contains('boards-draft') && B.canEdit()) { e.preventDefault(); B.openQuick(t); } break;
+        var t = tileFocused() || hovered; if (t && !t.classList.contains('boards-draft') && (B.canEdit() || t.querySelector('[data-quick]'))) { e.preventDefault(); B.openQuick(t); } break;   // a worker's own cards carry the button
       case 'j': e.preventDefault(); moveFocus(1); break;
       case 'k': e.preventDefault(); moveFocus(-1); break;
       case 'l': e.preventDefault(); moveFocus(1, true); break;

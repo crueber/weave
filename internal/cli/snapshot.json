@@ -2,7 +2,7 @@
  {
   "name": "activity.board",
   "tag": "activity",
-  "summary": "Board activity feed (actions), newest first",
+  "summary": "Board activity feed (actions), newest first. Quiet per-card rows of bulk changes (auto-archive, applying a template) are left out; their summary row is kept and activity.card still lists them",
   "method": "GET",
   "path": "/boards/{boardId}/actions",
   "auth": "public",
@@ -33,7 +33,7 @@
  {
   "name": "activity.card",
   "tag": "activity",
-  "summary": "Card activity feed (actions), newest first",
+  "summary": "Card activity feed (actions), newest first. Only what was recorded on boards you can view; an event recorded on several boards (the card is on several) is listed once",
   "method": "GET",
   "path": "/cards/{cardId}/actions",
   "auth": "public",
@@ -44,6 +44,13 @@
     "in": "path",
     "type": "string",
     "required": true
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Context board when the card is on several boards: an event recorded on several boards is listed once, preferably as recorded on this board"
    },
    {
     "name": "before",
@@ -85,11 +92,11 @@
  {
   "name": "agent.access",
   "tag": "agent",
-  "summary": "Grant (editor|viewer|commenter) or revoke an agent's access to a board",
+  "summary": "Grant (editor|viewer|commenter) or revoke an agent's access to a board you manage",
   "method": "POST",
   "path": "/agents/{id}/access",
-  "auth": "admin",
-  "ui": "POST /ui/admin/agents/{id}/access",
+  "auth": "user",
+  "ui": "POST /ui/agents/{id}/access",
   "fields": [
    {
     "name": "id",
@@ -102,7 +109,8 @@
     "name": "boardId",
     "in": "body",
     "type": "string",
-    "required": true
+    "required": true,
+    "desc": "the board; granting needs Manage on it, revoking needs Manage on it or being the agent's creator"
    },
    {
     "name": "role",
@@ -123,11 +131,11 @@
  {
   "name": "agent.create",
   "tag": "agent",
-  "summary": "Create an AI agent account (no login) and return its API key once",
+  "summary": "Create an AI agent account (no login) for boards you manage and return its API key once",
   "method": "POST",
   "path": "/agents",
-  "auth": "admin",
-  "ui": "POST /ui/admin/agents",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/agents",
   "fields": [
    {
     "name": "name",
@@ -141,14 +149,14 @@
     "in": "body",
     "type": "array\u003cstring\u003e",
     "required": false,
-    "desc": "boards to grant access to"
+    "desc": "boards to grant access to; you need Manage on each (board owner or project manager). Required unless you are an admin"
    },
    {
     "name": "role",
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "user role: worker (default) | boardUser | guest"
+    "desc": "admins only: user role worker | boardUser (default) | guest; agents created by board owners are always boardUser"
    },
    {
     "name": "boardRole",
@@ -172,8 +180,8 @@
   "summary": "Delete an agent account; its claims are released",
   "method": "DELETE",
   "path": "/agents/{id}",
-  "auth": "admin",
-  "ui": "POST /ui/admin/agents/{id}/delete",
+  "auth": "user",
+  "ui": "POST /ui/agents/{id}/delete",
   "fields": [
    {
     "name": "id",
@@ -187,12 +195,20 @@
  {
   "name": "agent.list",
   "tag": "agent",
-  "summary": "List AI agent accounts with their board access",
+  "summary": "List AI agents you created or that have access to boards you manage (admins: every agent account), with their access on boards you manage",
   "method": "GET",
   "path": "/agents",
-  "auth": "admin",
-  "ui": "GET /admin/agents",
-  "fields": null
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/agents",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "optional: only agents with access to this board (needs Manage on it)"
+   }
+  ]
  },
  {
   "name": "agent.prompt",
@@ -292,8 +308,8 @@
   "summary": "Issue a new API key for an agent (the old key stops working); returned once",
   "method": "POST",
   "path": "/agents/{id}/key",
-  "auth": "admin",
-  "ui": "POST /ui/admin/agents/{id}/key",
+  "auth": "user",
+  "ui": "POST /ui/agents/{id}/key",
   "fields": [
    {
     "name": "id",
@@ -314,11 +330,11 @@
  {
   "name": "agent.update",
   "tag": "agent",
-  "summary": "Rename an agent, change its role or deactivate it",
+  "summary": "Rename an agent or deactivate it (its creator, a manager of all its boards, or an admin; only admins change the role)",
   "method": "PATCH",
   "path": "/agents/{id}",
-  "auth": "admin",
-  "ui": "POST /ui/admin/agents/{id}/update",
+  "auth": "user",
+  "ui": "POST /ui/agents/{id}/update",
   "fields": [
    {
     "name": "id",
@@ -337,7 +353,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "worker | boardUser | guest"
+    "desc": "admins only: worker | boardUser | guest"
    },
    {
     "name": "isDeactivated",
@@ -579,6 +595,38 @@
   ]
  },
  {
+  "name": "audit.list",
+  "tag": "audit",
+  "summary": "Admin audit log, newest first: agent key rotations, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only",
+  "method": "GET",
+  "path": "/audit",
+  "auth": "admin",
+  "ui": "GET /admin/audit",
+  "fields": [
+   {
+    "name": "action",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only this action: agent.rotateKey | group.member.add | user.relink"
+   },
+   {
+    "name": "before",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "cursor: the nextCursor of the previous page"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "entries per page (default 50, max 200)"
+   }
+  ]
+ },
+ {
   "name": "auth.logout",
   "tag": "auth",
   "summary": "End the current session",
@@ -724,12 +772,6 @@
     "required": false
    },
    {
-    "name": "ownerGroup",
-    "in": "body",
-    "type": "string",
-    "required": false
-   },
-   {
     "name": "userGroup",
     "in": "body",
     "type": "string",
@@ -833,7 +875,7 @@
  {
   "name": "board.create",
   "tag": "board",
-  "summary": "Create a board in a project (project manager)",
+  "summary": "Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)",
   "method": "POST",
   "path": "/projects/{projectId}/boards",
   "auth": "user",
@@ -872,7 +914,7 @@
  {
   "name": "board.delete",
   "tag": "board",
-  "summary": "Delete a board and everything on it (project manager)",
+  "summary": "Delete a board and everything on it (project manager or board owner)",
   "method": "DELETE",
   "path": "/boards/{id}",
   "auth": "user",
@@ -933,7 +975,7 @@
  {
   "name": "board.import",
   "tag": "board",
-  "summary": "Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (project manager)",
+  "summary": "Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (whoever may create boards in the project, see board.create)",
   "method": "POST",
   "path": "/projects/{projectId}/boards/import",
   "auth": "user",
@@ -979,7 +1021,7 @@
  {
   "name": "board.instantiate",
   "tag": "board",
-  "summary": "Create a board in a project from a built-in or published template (project manager)",
+  "summary": "Create a board in a project from a built-in or published template (whoever may create boards there, see board.create)",
   "method": "POST",
   "path": "/projects/{projectId}/boards/from-template",
   "auth": "user",
@@ -1061,7 +1103,7 @@
  {
   "name": "board.member.add",
   "tag": "board",
-  "summary": "Add a user or user group to a board (project manager)",
+  "summary": "Add a user or user group to a board (project manager or board owner)",
   "method": "POST",
   "path": "/boards/{boardId}/members",
   "auth": "user",
@@ -1092,7 +1134,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "editor (default) | viewer"
+    "desc": "editor (default) | viewer | owner (people only, not groups, guests or agents: manages this board, not the project)"
    },
    {
     "name": "canComment",
@@ -1123,7 +1165,7 @@
  {
   "name": "board.member.remove",
   "tag": "board",
-  "summary": "Remove a membership (project manager, or the member themself)",
+  "summary": "Remove a membership (project manager, board owner, or the member themself; the last owner can leave only when a project manager removes them)",
   "method": "DELETE",
   "path": "/board-members/{memberId}",
   "auth": "user",
@@ -1140,7 +1182,7 @@
  {
   "name": "board.member.update",
   "tag": "board",
-  "summary": "Change a membership's role / comment permission (project manager)",
+  "summary": "Change a membership's role / comment permission (project manager or board owner; the last owner cannot be downgraded except by a project manager)",
   "method": "PATCH",
   "path": "/board-members/{memberId}",
   "auth": "user",
@@ -1157,7 +1199,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "editor | viewer"
+    "desc": "editor | viewer | owner (people only, not groups, guests or agents: manages this board, not the project)"
    },
    {
     "name": "canComment",
@@ -1295,6 +1337,65 @@
     "type": "string",
     "required": true,
     "desc": "board id"
+   }
+  ]
+ },
+ {
+  "name": "board.template.apply",
+  "tag": "board",
+  "summary": "Apply a built-in or published template to an existing board (board manager): adds the template's columns on the left, moves every card into its first open column (closed cards stay closed), removes the old, now empty columns (removeOldColumns=false keeps them), adds missing labels, label groups and custom-field groups (never replaces), optionally the board settings and sample cards. dryRun previews; confirm=true applies. No automatic undo",
+  "method": "POST",
+  "path": "/boards/{id}/template/apply",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/template/apply",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "templateId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "builtin:\u003cslug\u003e or the id of a published template board (see board.template.list)"
+   },
+   {
+    "name": "dryRun",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "preview only: return exactly what would change and write nothing"
+   },
+   {
+    "name": "confirm",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "must be true to apply (not needed for dryRun). Every card moves; there is no automatic undo, so export the board first (board.export)"
+   },
+   {
+    "name": "applySettings",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "also apply the template's board settings: colour, card colouring, card counter, card ages, task lists, card creator, inbox, default view (default false; the agent prompt is never applied)"
+   },
+   {
+    "name": "includeSampleCards",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "also add the template's sample cards to its columns (default false)"
+   },
+   {
+    "name": "removeOldColumns",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "remove the board's old columns once their cards have moved (default true: they are empty by then; their WIP/auto-close/auto-archive settings and column watches go with them). false keeps them, emptied, to the right"
    }
   ]
  },
@@ -1527,7 +1628,7 @@
  {
   "name": "card.archive",
   "tag": "card",
-  "summary": "Move a card to the board's archive (or trash) list",
+  "summary": "Archive (or trash) a card: it moves to the archive (trash) list of every board it is on",
   "method": "POST",
   "path": "/cards/{id}/archive",
   "auth": "user",
@@ -1592,7 +1693,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "also move the card to this list when the claim succeeds (e.g. 'In progress')"
+    "desc": "also move the card to this list when the claim succeeds (e.g. 'In progress'); on a card that is on several boards, a list of a board it is on (that board's placement moves)"
    },
    {
     "name": "ttlSeconds",
@@ -1613,7 +1714,7 @@
  {
   "name": "card.close",
   "tag": "card",
-  "summary": "Close (or re-open) a card; moves to the closed list when the board has one",
+  "summary": "Close (or re-open) a card (closed is per card, on every board); moves it to the closing list of its board when that board has one",
   "method": "POST",
   "path": "/cards/{id}/close",
   "auth": "user",
@@ -1631,6 +1732,13 @@
     "type": "bool",
     "required": false,
     "desc": "default true; false re-opens"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "when the card is on several boards: the board whose placement moves into its closing column (or out of it when re-opening); closed is per card either way. Default: its home board when you can edit there; a board you may not edit there falls back to that default"
    }
   ]
  },
@@ -1706,7 +1814,7 @@
  {
   "name": "card.delete",
   "tag": "card",
-  "summary": "Delete a card (must be in the trash list, or a draft/template)",
+  "summary": "Delete a card permanently, from every board (it must be in the trash on every board it is on, or be a draft/template)",
   "method": "DELETE",
   "path": "/cards/{id}",
   "auth": "user",
@@ -1849,6 +1957,13 @@
     "type": "string",
     "required": false,
     "desc": "name of the copy (default '\u003cname\u003e (copy)')"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "the board to copy the card on when it is on several boards (the copy is on that board only, next to the card); default: its home board when you can see it"
    }
   ]
  },
@@ -1979,6 +2094,13 @@
     "required": true
    },
    {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "context board when the card is on several boards: boardId, listId and position (and the labels and board fields shown) describe the card on that board; default: the home board when you can see it, else the board where you have the most access"
+   },
+   {
     "name": "full",
     "in": "query",
     "type": "bool",
@@ -2047,6 +2169,13 @@
     "in": "body",
     "type": "string",
     "required": true
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "the board whose label it is (labels belong to a board); required when the card is on several boards you can see"
    }
   ]
  },
@@ -2070,6 +2199,13 @@
     "in": "path",
     "type": "string",
     "required": true
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "the board whose label it is; required when the card is on several boards you can see"
    }
   ]
  },
@@ -2248,7 +2384,7 @@
  {
   "name": "card.move",
   "tag": "card",
-  "summary": "Move/reorder a card between lists or boards (applies list-type rules)",
+  "summary": "Move/reorder a card between lists or boards (applies list-type rules); on a card that is on several boards it moves one board's placement (boardId)",
   "method": "POST",
   "path": "/cards/{id}/move",
   "auth": "user",
@@ -2266,6 +2402,13 @@
     "type": "string",
     "required": true,
     "desc": "target list (may be on another board of the caller)"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "which placement moves when the card is on several boards (the board it moves on or away from); default: its placement on listId's board, else the only board you can see it on"
    },
    {
     "name": "position",
@@ -2324,7 +2467,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "with claim=true: move the claimed card to this list"
+    "desc": "with claim=true: move the claimed card to this list (a list of the listId's board moves the card's placement there)"
    },
    {
     "name": "note",
@@ -2361,6 +2504,84 @@
   "path": "/cards/{id}/options",
   "auth": "user",
   "ui": "GET /ui/cards/{id}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "context board when the card is on several boards (its columns, members and labels); default as card.get"
+   }
+  ]
+ },
+ {
+  "name": "card.place",
+  "tag": "card",
+  "summary": "Place a card on another board too (the same card, not a copy): it appears in a column of that board and keeps its place on its other boards. Needs edit access to the card and to that board",
+  "method": "POST",
+  "path": "/cards/{id}/placements",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/placements",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   },
+   {
+    "name": "listId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "column of the board to place the card on (an active or closing column); the new placement's board is this column's board"
+   },
+   {
+    "name": "boardId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "the board to place the card on (optional: it is listId's board; must match when given)"
+   },
+   {
+    "name": "position",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "explicit position in the column; default the end"
+   },
+   {
+    "name": "afterId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "place after this card of the column"
+   },
+   {
+    "name": "beforeId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "place before this card of the column"
+   }
+  ]
+ },
+ {
+  "name": "card.placements",
+  "tag": "card",
+  "summary": "List the boards a card is on (only boards you can see), with each board's column",
+  "method": "GET",
+  "path": "/cards/{id}/placements",
+  "auth": "user",
+  "ui": "GET /ui/cards/{id}/placements",
   "fields": [
    {
     "name": "id",
@@ -2433,7 +2654,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "also move the card to this list (e.g. back to 'Ready' or on to 'Review')"
+    "desc": "also move the card to this list (e.g. back to 'Ready' or on to 'Review'); on a card that is on several boards, a list of a board it is on (that board's placement moves)"
    }
   ]
  },
@@ -2464,7 +2685,7 @@
  {
   "name": "card.restore",
   "tag": "card",
-  "summary": "Restore an archived/trashed card to its previous list",
+  "summary": "Restore an archived/trashed card: on every board it is on, it returns to its previous list (or that board's first open list)",
   "method": "POST",
   "path": "/cards/{id}/restore",
   "auth": "user",
@@ -2589,6 +2810,31 @@
     "type": "string",
     "required": false,
     "desc": "template name (default: card name)"
+   }
+  ]
+ },
+ {
+  "name": "card.unplace",
+  "tag": "card",
+  "summary": "Remove a card from one board (\"Remove from board\"): it stays on its other boards; the last board cannot be removed (archive or delete the card instead)",
+  "method": "DELETE",
+  "path": "/cards/{id}/placements/{boardId}",
+  "auth": "user",
+  "ui": "POST /ui/cards/{id}/placements/{boardId}/delete",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "card id"
+   },
+   {
+    "name": "boardId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "the board to remove the card from"
    }
   ]
  },
@@ -2958,13 +3204,6 @@
     "desc": "Group granting admin (default weave-admins)"
    },
    {
-    "name": "oidc.ownerGroup",
-    "in": "body",
-    "type": "string",
-    "required": false,
-    "desc": "Group granting projectOwner (default weave-project-owners)"
-   },
-   {
     "name": "oidc.userGroup",
     "in": "body",
     "type": "string",
@@ -3047,6 +3286,13 @@
     "type": "string",
     "required": false,
     "desc": "Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"
+   },
+   {
+    "name": "webhook.userAllowPrivate",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "true lets board webhooks created by non-admins reach private-network addresses (RFC 1918, ULA, CGNAT; for homelab receivers). Loopback, link-local and cloud metadata stay refused. Default false"
    },
    {
     "name": "templates.hidden",
@@ -3367,6 +3613,13 @@
     "in": "path",
     "type": "string",
     "required": true
+   },
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "context board when the card is on several boards: its board-wide groups are shown (card-level groups always are); default as card.get"
    }
   ]
  },
@@ -4275,9 +4528,33 @@
   ]
  },
  {
+  "name": "list.archivePreview",
+  "tag": "list",
+  "summary": "Count the cards that setting the column's auto-archive (list.update archiveAfter=N) would archive right now; read-only",
+  "method": "GET",
+  "path": "/lists/{id}/archive-preview",
+  "auth": "user",
+  "ui": "GET /ui/lists/{id}/archive-preview",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "archiveAfter",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "the setting to preview (1-10000); omit or 0 for the column's current setting"
+   }
+  ]
+ },
+ {
   "name": "list.clear",
   "tag": "list",
-  "summary": "Permanently delete all cards of the trash list",
+  "summary": "Empty the trash list: permanently delete its cards (a card that is also on another board is only removed from this board)",
   "method": "POST",
   "path": "/lists/{id}/clear",
   "auth": "user",
@@ -4317,7 +4594,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "active (default) | closed"
+    "desc": "active (default) | closed = the column closes cards that land here: cards created in or moved to it are marked closed, moving them to an active column re-opens them"
    },
    {
     "name": "color",
@@ -4339,6 +4616,13 @@
     "type": "number",
     "required": false,
     "desc": "soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none"
+   },
+   {
+    "name": "archiveAfter",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "auto-archive (1-10000): keep at most this many cards; when more land here, the ones that have been in the column longest go to the board's archive; omit or 0 for off"
    },
    {
     "name": "position",
@@ -4527,6 +4811,30 @@
   ]
  },
  {
+  "name": "list.typePreview",
+  "tag": "list",
+  "summary": "Count the cards a switch of the column's closing setting (list.update type) would close or re-open; read-only",
+  "method": "GET",
+  "path": "/lists/{id}/type-preview",
+  "auth": "user",
+  "ui": "GET /ui/lists/{id}/type-preview",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "type",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "the type to switch to: closed | active; omit for the opposite of the current type"
+   }
+  ]
+ },
+ {
   "name": "list.unsubscribe",
   "tag": "list",
   "summary": "Stop watching a column",
@@ -4546,7 +4854,7 @@
  {
   "name": "list.update",
   "tag": "list",
-  "summary": "Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position",
+  "summary": "Rename / recolour a list, set its description (brief for agents), soft WIP limit or auto-archive (archiveAfter: keep the newest N cards), switch whether it closes cards that land here (type closed|active), or change its position",
   "method": "PATCH",
   "path": "/lists/{id}",
   "auth": "user",
@@ -4576,7 +4884,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "switch between active and closed"
+    "desc": "closed = close cards that land here (created in or moved to the column; moving them to an active column re-opens them), active = do not; see existingCards for the cards already in the column (list.typePreview counts them)"
    },
    {
     "name": "description",
@@ -4597,6 +4905,27 @@
     "in": "body",
     "type": "number",
     "required": false
+   },
+   {
+    "name": "archiveAfter",
+    "in": "body",
+    "type": "number",
+    "required": false,
+    "desc": "auto-archive (1-10000): the column keeps at most this many cards; whenever more land here, the ones that have been in it longest (oldest list change first) go to the board's archive, where card.restore brings them back; cards with a live claim and, for now, cards with a recurrence rule are skipped (they still count); 0 turns it off. Setting or lowering it applies at once to the cards already here: when that would archive cards, confirmArchive=true is required (409 conflict with the count otherwise; list.archivePreview counts them)"
+   },
+   {
+    "name": "confirmArchive",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "with archiveAfter: confirm that the cards over the new limit are archived right now"
+   },
+   {
+    "name": "existingCards",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "when type changes: flip (default) = also close the open cards already in the column (switching to closed) or re-open its closed cards (switching to active); keep = leave them as they are, the setting applies only to cards that land from now on"
    }
   ]
  },
@@ -4699,13 +5028,6 @@
     "type": "string",
     "required": false,
     "desc": "attach to a board instead of myself (needs board manage rights)"
-   },
-   {
-    "name": "userId",
-    "in": "body",
-    "type": "string",
-    "required": false,
-    "desc": "admin only: attach to another user"
    }
   ]
  },
@@ -4934,7 +5256,7 @@
  {
   "name": "project.create",
   "tag": "project",
-  "summary": "Create a project (you become its manager)",
+  "summary": "Create a project (you become its manager). Any signed-in admin or boardUser may; workers, guests and agent accounts may not",
   "method": "POST",
   "path": "/projects",
   "auth": "user",
@@ -5248,7 +5570,7 @@
  {
   "name": "project.manager.add",
   "tag": "project",
-  "summary": "Add a project manager",
+  "summary": "Add a project manager (any active person except guests and agent accounts)",
   "method": "POST",
   "path": "/projects/{id}/managers",
   "auth": "user",
@@ -5266,7 +5588,7 @@
     "in": "body",
     "type": "string",
     "required": true,
-    "desc": "User to promote (must be admin or projectOwner role)"
+    "desc": "User to make a project manager: any active person except guests and agent accounts"
    }
   ]
  },
@@ -5291,7 +5613,7 @@
  {
   "name": "project.manager.remove",
   "tag": "project",
-  "summary": "Remove a project manager (the last manager cannot be removed)",
+  "summary": "Remove a project manager (the last manager cannot be removed; the project's owning manager steps down only themself, unless their account is inactive)",
   "method": "DELETE",
   "path": "/projects/{id}/managers/{managerId}",
   "auth": "user",
@@ -5310,6 +5632,66 @@
     "type": "string",
     "required": true,
     "desc": "Project manager id (see project.manager.list)"
+   }
+  ]
+ },
+ {
+  "name": "project.orphans",
+  "tag": "project",
+  "summary": "List ownerless projects: no active manager left (admin recovery; ids, names, counts and former managers only, no content)",
+  "method": "GET",
+  "path": "/projects/orphans",
+  "auth": "admin",
+  "ui": "GET /admin/orphans",
+  "fields": null
+ },
+ {
+  "name": "project.reassign",
+  "tag": "project",
+  "summary": "Give an ownerless project a new manager (admin recovery; refused while the project has an active manager; audited)",
+  "method": "POST",
+  "path": "/projects/{id}/reassign",
+  "auth": "admin",
+  "ui": "POST /ui/admin/orphans/{id}/reassign",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Project id of an ownerless project (see project.orphans)"
+   },
+   {
+    "name": "userId",
+    "in": "body",
+    "type": "string",
+    "required": true,
+    "desc": "The new manager: an active person who is not a guest and not an agent account"
+   }
+  ]
+ },
+ {
+  "name": "project.recovery.list",
+  "tag": "project",
+  "summary": "Audit trail of project recoveries: who gave which ownerless project to whom, and when (admin)",
+  "method": "GET",
+  "path": "/projects/recoveries",
+  "auth": "admin",
+  "ui": "GET /admin/orphans",
+  "fields": [
+   {
+    "name": "projectId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "Only entries of this project"
+   },
+   {
+    "name": "limit",
+    "in": "query",
+    "type": "number",
+    "required": false,
+    "desc": "Most recent entries to return (default 50, max 500)"
    }
   ]
  },
@@ -5334,7 +5716,7 @@
  {
   "name": "project.update",
   "tag": "project",
-  "summary": "Update a project (name, description, hidden, labels toggle, background, agent prompt text)",
+  "summary": "Update a project (name, description, hidden, labels toggle, who may create boards, background, agent prompt text)",
   "method": "PATCH",
   "path": "/projects/{id}",
   "auth": "user",
@@ -5402,6 +5784,13 @@
     "type": "string",
     "required": false,
     "desc": "Uploaded background image id (type image)"
+   },
+   {
+    "name": "boardCreation",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "Who may create boards: owners (project managers only, the default) | members (also anyone with access to a board of the project; they become the new board's owner)"
    },
    {
     "name": "agentPrompt",
@@ -6334,46 +6723,46 @@
  {
   "name": "webhook.create",
   "tag": "webhook",
-  "summary": "Create a webhook",
+  "summary": "Create a webhook (board scope: board owners and project managers; global and project scope: admins)",
   "method": "POST",
   "path": "/webhooks",
-  "auth": "admin",
-  "ui": "POST /ui/admin/webhooks",
+  "auth": "user",
+  "ui": "POST /ui/boards/{boardId}/webhooks",
   "fields": [
    {
     "name": "name",
     "in": "body",
     "type": "string",
     "required": true,
-    "desc": "label"
+    "desc": "label (max 255 characters)"
    },
    {
     "name": "url",
     "in": "body",
     "type": "string",
     "required": true,
-    "desc": "http(s) endpoint receiving POSTs"
+    "desc": "http(s) endpoint receiving POSTs (max 2048 characters). Board webhooks created by non-admins may not point at loopback, link-local, cloud metadata or (unless an admin allows it) private-network addresses"
    },
    {
     "name": "accessToken",
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "sent as 'Authorization: Bearer \u003ctoken\u003e'; also the HMAC key when no secret is set"
+    "desc": "sent as 'Authorization: Bearer \u003ctoken\u003e'; also the HMAC key when no secret is set (write-only, max 1024 characters)"
    },
    {
     "name": "secret",
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "HMAC-SHA256 signing key (headers X-Weave-Signature: sha256=\u003chex\u003e and X-Weave-Signature-V2: t=\u003cts\u003e,v1=\u003chex\u003e; see docs/WEBHOOKS.md)"
+    "desc": "HMAC-SHA256 signing key (headers X-Weave-Signature: sha256=\u003chex\u003e and X-Weave-Signature-V2: t=\u003cts\u003e,v1=\u003chex\u003e; see docs/WEBHOOKS.md); write-only, max 1024 characters"
    },
    {
     "name": "events",
     "in": "body",
     "type": "array\u003cstring\u003e",
     "required": false,
-    "desc": "only these event names (empty = all); see webhook.events"
+    "desc": "only these event names (empty = all); see webhook.events (board webhooks: webhook.events scope=board)"
    },
    {
     "name": "excludedEvents",
@@ -6387,21 +6776,21 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "scope: only events inside this project"
+    "desc": "admins only: scope to events inside this project"
    },
    {
     "name": "boardId",
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "scope: only events inside this board"
+    "desc": "scope to events inside this board; required unless you are an admin (needs Manage on the board: board owner or project manager)"
    },
    {
     "name": "userId",
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "scope: only events caused by this user"
+    "desc": "admins only: only events caused by this user"
    }
   ]
  },
@@ -6411,8 +6800,8 @@
   "summary": "Delete a webhook (and its delivery log)",
   "method": "DELETE",
   "path": "/webhooks/{id}",
-  "auth": "admin",
-  "ui": "POST /ui/admin/webhooks/{id}/delete",
+  "auth": "user",
+  "ui": "POST /ui/webhooks/{id}/delete",
   "fields": [
    {
     "name": "id",
@@ -6429,8 +6818,8 @@
   "summary": "Delivery log of a webhook (newest first)",
   "method": "GET",
   "path": "/webhooks/{id}/deliveries",
-  "auth": "admin",
-  "ui": "GET /admin/webhooks/{id}/deliveries",
+  "auth": "user",
+  "ui": "GET /ui/webhooks/{id}/deliveries",
   "fields": [
    {
     "name": "id",
@@ -6450,22 +6839,38 @@
  {
   "name": "webhook.events",
   "tag": "webhook",
-  "summary": "List the event names webhooks can subscribe to",
+  "summary": "List the event names webhooks can subscribe to (scope=board: those a board webhook may use)",
   "method": "GET",
   "path": "/webhooks/events",
-  "auth": "admin",
-  "ui": "GET /admin/webhooks",
-  "fields": null
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/webhooks",
+  "fields": [
+   {
+    "name": "scope",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "board: only the events a board-scoped webhook can subscribe to; empty: every event name"
+   }
+  ]
  },
  {
   "name": "webhook.list",
   "tag": "webhook",
-  "summary": "List webhooks",
+  "summary": "List webhooks: the board webhooks of boards you manage (admins also: global and project webhooks)",
   "method": "GET",
   "path": "/webhooks",
-  "auth": "admin",
-  "ui": "GET /admin/webhooks",
-  "fields": null
+  "auth": "user",
+  "ui": "GET /ui/boards/{boardId}/webhooks",
+  "fields": [
+   {
+    "name": "boardId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "only the webhooks of this board (needs Manage on it)"
+   }
+  ]
  },
  {
   "name": "webhook.retry",
@@ -6473,8 +6878,8 @@
   "summary": "Redeliver a logged webhook delivery (async, with backoff)",
   "method": "POST",
   "path": "/webhook-deliveries/{id}/retry",
-  "auth": "admin",
-  "ui": "POST /ui/admin/webhook-deliveries/{id}/retry",
+  "auth": "user",
+  "ui": "POST /ui/webhook-deliveries/{id}/retry",
   "fields": [
    {
     "name": "id",
@@ -6488,11 +6893,11 @@
  {
   "name": "webhook.test",
   "tag": "webhook",
-  "summary": "Send a synchronous 'ping' event to a webhook and report the result",
+  "summary": "Send a synchronous 'ping' event to a webhook and report the result (non-admins get the status and a short response snippet)",
   "method": "POST",
   "path": "/webhooks/{id}/test",
-  "auth": "admin",
-  "ui": "POST /ui/admin/webhooks/{id}/test",
+  "auth": "user",
+  "ui": "POST /ui/webhooks/{id}/test",
   "fields": [
    {
     "name": "id",
@@ -6509,8 +6914,8 @@
   "summary": "Update a webhook",
   "method": "PATCH",
   "path": "/webhooks/{id}",
-  "auth": "admin",
-  "ui": "POST /ui/admin/webhooks/{id}",
+  "auth": "user",
+  "ui": "POST /ui/webhooks/{id}",
   "fields": [
    {
     "name": "id",
@@ -6534,13 +6939,15 @@
     "name": "accessToken",
     "in": "body",
     "type": "string",
-    "required": false
+    "required": false,
+    "desc": "write-only; empty clears it"
    },
    {
     "name": "secret",
     "in": "body",
     "type": "string",
-    "required": false
+    "required": false,
+    "desc": "write-only; empty clears it"
    },
    {
     "name": "events",
@@ -6558,19 +6965,22 @@
     "name": "projectId",
     "in": "body",
     "type": "string",
-    "required": false
+    "required": false,
+    "desc": "admins only"
    },
    {
     "name": "boardId",
     "in": "body",
     "type": "string",
-    "required": false
+    "required": false,
+    "desc": "move to another board you manage (non-admins cannot remove the board scope)"
    },
    {
     "name": "userId",
     "in": "body",
     "type": "string",
-    "required": false
+    "required": false,
+    "desc": "admins only"
    }
   ]
  }

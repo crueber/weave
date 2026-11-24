@@ -64,17 +64,19 @@ func getTask(e *ops.Env, q querier, id string) (TaskItem, error) {
 
 // taskListCard resolves a task list to (cardID, boardID) and checks the level.
 func taskListCard(e *ops.Env, listID string, min authz.Level) (cardID, boardID string, err error) {
-	if e.DB.QueryRowContext(e.Ctx, `SELECT tl.card_id,c.board_id FROM task_lists tl JOIN cards c ON c.id=tl.card_id WHERE tl.id=?`, listID).Scan(&cardID, &boardID) != nil {
+	if e.DB.QueryRowContext(e.Ctx, `SELECT card_id FROM task_lists WHERE id=?`, listID).Scan(&cardID) != nil {
 		return "", "", ops.NotFound("task list")
 	}
-	return cardID, boardID, authz.RequireBoard(e, boardID, min)
+	boardID, err = authz.RequireCard(e, cardID, min) // any placement of the card (the context board is returned)
+	return cardID, boardID, err
 }
 
 func taskCard(e *ops.Env, taskID string, min authz.Level) (listID, cardID, boardID string, err error) {
-	if e.DB.QueryRowContext(e.Ctx, `SELECT t.task_list_id,tl.card_id,c.board_id FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN cards c ON c.id=tl.card_id WHERE t.id=?`, taskID).Scan(&listID, &cardID, &boardID) != nil {
+	if e.DB.QueryRowContext(e.Ctx, `SELECT t.task_list_id,tl.card_id FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id WHERE t.id=?`, taskID).Scan(&listID, &cardID) != nil {
 		return "", "", "", ops.NotFound("task")
 	}
-	return listID, cardID, boardID, authz.RequireBoard(e, boardID, min)
+	boardID, err = authz.RequireCard(e, cardID, min)
+	return listID, cardID, boardID, err
 }
 
 func getTaskList(e *ops.Env, q querier, id string) (TaskListItem, error) {

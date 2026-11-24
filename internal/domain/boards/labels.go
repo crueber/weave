@@ -256,16 +256,13 @@ func registerLabelOps() {
 	})
 	ops.Register(ops.Op{Name: "label.create", Summary: "Create a label on a board (project-wide when the project uses project labels)", Method: "POST", Path: "/boards/{boardId}/labels",
 		UI: ui("POST", "/boards/{boardId}/labels")}, func(e *ops.Env, in LabelCreateIn) (Label, error) {
-		if err := authz.RequireBoard(e, in.BoardID, authz.Edit); err != nil {
+		if err := authz.RequireBoardLabels(e, in.BoardID); err != nil {
 			return Label{}, err
 		}
 		pid, use := projectOfBoard(e, in.BoardID)
 		var l Label
 		var err error
 		if use {
-			if err = authz.RequireProject(e, pid, authz.Manage); err != nil {
-				return l, err
-			}
 			l, err = createLabel(e, "", pid, in)
 		} else {
 			l, err = createLabel(e, in.BoardID, "", in)
@@ -395,14 +392,11 @@ func registerLabelOps() {
 	})
 	ops.Register(ops.Op{Name: "labelgroup.create", Summary: "Create a label group on a board", Method: "POST", Path: "/boards/{boardId}/label-groups",
 		UI: ui("POST", "/boards/{boardId}/label-groups")}, func(e *ops.Env, in GroupCreateIn) (LabelGroup, error) {
-		if err := authz.RequireBoard(e, in.BoardID, authz.Edit); err != nil {
+		if err := authz.RequireBoardLabels(e, in.BoardID); err != nil {
 			return LabelGroup{}, err
 		}
 		pid, use := projectOfBoard(e, in.BoardID)
 		if use {
-			if err := authz.RequireProject(e, pid, authz.Manage); err != nil {
-				return LabelGroup{}, err
-			}
 			return createGroup(e, "", pid, in.Name, in.SingleSelect, in.BoardID)
 		}
 		return createGroup(e, in.BoardID, "", in.Name, in.SingleSelect, in.BoardID)

@@ -18,7 +18,7 @@ func init() {
 	registerSpec("board tree", boardTreeFlags, cmdBoardTree)
 	registerSpec("list stats", []FlagSpec{{Name: "list"}}, cmdListStats)
 	registerSpec("card show", []FlagSpec{{Name: "full", Bool: true}}, cmdCardShow)
-	registerSpec("card move", []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}}, cmdCardMove)
+	registerSpec("card move", []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}, {Name: "boardId"}}, cmdCardMove)
 	registerSpec("card comment", []FlagSpec{{Name: "board"}}, cmdCardComment)
 	registerSpec("card attach", []FlagSpec{{Name: "name"}, {Name: "board"}}, cmdCardAttach)
 	registerSpec("card claim", []FlagSpec{{Name: "ttl"}, {Name: "note"}, {Name: "list"}, {Name: "board"}}, cmdCardClaim)
@@ -563,12 +563,12 @@ func cmdCardShow(a *App, args []string) int {
 }
 
 func cmdCardMove(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}})
+	p, err := a.parse(args, []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}, {Name: "boardId"}})
 	if err != nil {
 		return a.fail(err)
 	}
 	if len(p.Pos) < 1 || p.Str("to-list") == "" {
-		return a.failUsage("weave card move CARD --to-list NAME [--board B] [--position N]")
+		return a.failUsage("weave card move CARD --to-list NAME [--board B] [--boardId FROM] [--position N]")
 	}
 	ctx := a.ctx
 	bid, err := a.boardFromFlags(ctx, p)
@@ -587,6 +587,13 @@ func cmdCardMove(a *App, args []string) int {
 		return a.fail(err)
 	}
 	params := Params{"id": id, "listId": lid}
+	if v := p.Str("boardId"); v != "" { // which placement moves (a card on several boards moved to another board)
+		from, err := a.Resolve(ctx, "board", v, Scope{})
+		if err != nil {
+			return a.fail(err)
+		}
+		params["boardId"] = from
+	}
 	if p.Has("position") {
 		params["position"] = parseValue("number", p.Str("position"))
 	}

@@ -8,6 +8,7 @@ import fs from 'fs';
 
 export const DEMO_DIR = process.env.DEMO_DIR;
 export const BASE = process.env.WEAVE_BASE_URL || 'http://localhost:18120';
+export const PUBLIC_URL = 'https://weave.example.com'; // what the agent prompts show instead of BASE
 if (!DEMO_DIR) throw new Error('set DEMO_DIR (see seed.sh)');
 export const state = JSON.parse(fs.readFileSync(DEMO_DIR + '/state.json', 'utf8'));
 export const sessions = JSON.parse(fs.readFileSync(DEMO_DIR + '/sessions.json', 'utf8'));
@@ -30,7 +31,14 @@ export async function newCtx(b, {width = 1280, height = 720, theme = 'light', us
   });
   // The agent prompt's install step embeds the project's public download URL (a real account name): always ask for the
   // variant without install steps, so no frame or screenshot ever shows it. The UI is unchanged (the toggle shows as checked).
-  await ctx.route('**/ui/agent-prompt*', r => { const u = new URL(r.request().url()); u.searchParams.set('noinstall', '1'); r.continue({url: u.toString()}); });
+  // The prompt also names the instance's own URL (http://localhost:PORT here): show a neutral weave.example.com instead.
+  await ctx.route('**/ui/agent-prompt*', async r => {
+    const u = new URL(r.request().url()); u.searchParams.set('noinstall', '1');
+    const resp = await r.fetch({url: u.toString()});
+    const host = new URL(BASE).host;
+    const body = (await resp.text()).split(BASE).join(PUBLIC_URL).split(host).join(new URL(PUBLIC_URL).host);
+    await r.fulfill({response: resp, body});
+  });
   await ctx.addCookies([{name: 'weave_session', value: sessions[user].session, url: BASE}]);
   return ctx;
 }
@@ -70,6 +78,17 @@ export const OVERLAY = () => {
 };
 
 export async function overlay(ctx) { await ctx.addInitScript(OVERLAY); }
+
+// Never show even a key prefix (an agent account row reads "Key wk_1a2b..."): rewrite such text nodes as they appear.
+export const MASK_KEYS = () => {
+  const fix = root => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) if (/wk_[0-9A-Za-z]/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/wk_[0-9A-Za-z]+(\.\.\.|…)?/g, 'wk_••••');
+  };
+  const boot = () => { fix(document.body); new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) fix(n.nodeType === 1 ? n : n.parentNode || document.body); }).observe(document.body, {childList: true, subtree: true}); };
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', boot); else boot();
+};
+export async function maskKeys(ctx) { await ctx.addInitScript(MASK_KEYS); }
 
 export function driver(p, textDir) {
   let mx = 640, my = 360;

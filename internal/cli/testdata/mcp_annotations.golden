@@ -20,6 +20,7 @@ weave_attachment_list GET readOnly,idempotent
 weave_attachment_media GET readOnly,idempotent
 weave_attachment_thumbnail GET openWorld
 weave_attachment_update PATCH idempotent
+weave_audit_list GET readOnly,idempotent
 weave_auth_logout POST 
 weave_auth_me GET readOnly,idempotent
 weave_auth_oidc_authorize GET readOnly,idempotent
@@ -48,6 +49,7 @@ weave_board_public_get GET readOnly,idempotent
 weave_board_setPublic POST 
 weave_board_stats GET readOnly,idempotent
 weave_board_subscribe PUT idempotent
+weave_board_template_apply POST 
 weave_board_template_get GET readOnly,idempotent
 weave_board_template_list GET readOnly,idempotent
 weave_board_template_publish POST 
@@ -84,6 +86,8 @@ weave_card_move POST
 weave_card_next POST 
 weave_card_notifications_read POST 
 weave_card_options GET readOnly,idempotent
+weave_card_place POST 
+weave_card_placements GET readOnly,idempotent
 weave_card_recurrence_run POST 
 weave_card_recurrence_set PUT idempotent
 weave_card_release POST 
@@ -95,6 +99,7 @@ weave_card_share_view GET readOnly,idempotent
 weave_card_subscribe PUT idempotent
 weave_card_template_list GET readOnly,idempotent
 weave_card_template_save POST 
+weave_card_unplace DELETE destructive,idempotent
 weave_card_unsubscribe DELETE destructive,idempotent
 weave_card_update PATCH idempotent
 weave_comment_create POST 
@@ -148,6 +153,7 @@ weave_labelgroup_project_create POST
 weave_labelgroup_update PATCH idempotent
 weave_list_activity GET readOnly,idempotent
 weave_list_archive POST destructive
+weave_list_archivePreview GET readOnly,idempotent
 weave_list_clear POST destructive
 weave_list_create POST 
 weave_list_delete DELETE destructive,idempotent
@@ -158,6 +164,7 @@ weave_list_move POST
 weave_list_moveCards POST 
 weave_list_sort POST 
 weave_list_subscribe PUT idempotent
+weave_list_typePreview GET readOnly,idempotent
 weave_list_unsubscribe DELETE destructive,idempotent
 weave_list_update PATCH idempotent
 weave_notification_list GET readOnly,idempotent
@@ -190,6 +197,9 @@ weave_project_list GET readOnly,idempotent
 weave_project_manager_add POST 
 weave_project_manager_list GET readOnly,idempotent
 weave_project_manager_remove DELETE destructive,idempotent
+weave_project_orphans GET readOnly,idempotent
+weave_project_reassign POST 
+weave_project_recovery_list GET readOnly,idempotent
 weave_project_unfavorite DELETE destructive,idempotent
 weave_project_update PATCH idempotent
 weave_search_query GET readOnly,idempotent

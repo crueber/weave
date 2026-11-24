@@ -9,7 +9,7 @@
 <div class="x-sec" id="x-tasks" data-sec="tasks" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Checklists")}}
   {{if $d.TasksTotal}}<span class="x-count" title="Items completed">{{$d.TasksDone}}/{{$d.TasksTotal}}</span>{{end}}
-  <div class="x-actions">{{if $d.CanEdit}}{{if $d.Lists}}<details class="x-pop x-addlist"><summary class="x-addbtn" title="Add a checklist">+ Checklist</summary>
+  <div class="x-actions">{{if $d.CanEdit}}{{if $d.Lists}}<details class="x-pop x-addlist" data-cap="card-add-checklist"><summary class="x-addbtn" title="Add a checklist">+ Checklist</summary>
     <form class="x-popbody" hx-post="/ui/cards/{{$d.CardID}}/task-lists">
       <input name="name" placeholder="New task list" aria-label="Checklist title" required autocomplete="off">
       <label class="x-check"><input type="checkbox" name="showOnFrontOfCard"> on card face</label>
@@ -62,7 +62,7 @@
 </section>
 {{else}}<p class="x-muted x-empty">No task lists yet.</p>{{end}}
 </div>
-{{if $d.CanEdit}}{{if not $d.Lists}}<form class="x-row x-newlist" hx-post="/ui/cards/{{$d.CardID}}/task-lists">
+{{if $d.CanEdit}}{{if not $d.Lists}}<form class="x-row x-newlist" data-cap="card-add-checklist" hx-post="/ui/cards/{{$d.CardID}}/task-lists">
   <input name="name" class="x-grow" placeholder="New task list (e.g. Launch steps)" aria-label="Checklist title" required autocomplete="off" data-task-input>
   <label class="x-check"><input type="checkbox" name="showOnFrontOfCard"> on card face</label>
   <button class="primary">Add list</button></form>{{end}}{{end}}
@@ -137,7 +137,8 @@
   {{else}}<input type="text" name="content" value="{{$v}}" aria-label="{{.f.Name}}" placeholder="-">{{end}}
 </form>{{end}}{{end}}
 
-{{define "fields"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{/* Read-only callers get nothing (and the card sheet hides the empty section) when there is nothing to read. */}}
+{{define "fields"}}{{$d := .Data}}{{if or $d.CanEdit $d.Groups}}<link rel="stylesheet" href="/static/extras_card.css">
 <div class="x-sec" id="x-fields" data-sec="fields" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Custom fields")}}
   <div class="x-actions">{{if $d.CanEdit}}<details class="x-pop x-addgroup"><summary class="x-addbtn">+ Group</summary><div class="x-popbody">
@@ -188,9 +189,9 @@
 </section>
 {{else}}<p class="x-muted x-empty">No custom fields.</p>{{end}}
 </div>
-</div>{{end}}
+</div>{{end}}{{end}}
 
-{{define "time"}}{{$d := .Data}}{{$t := $d.Time}}<link rel="stylesheet" href="/static/extras_card.css"><script src="/static/extras_card.js"></script>
+{{define "time"}}{{$d := .Data}}{{$t := $d.Time}}{{if or $d.CanEdit $t.Entries $t.Running}}<link rel="stylesheet" href="/static/extras_card.css"><script src="/static/extras_card.js"></script>
 <div class="x-sec" id="x-time" data-sec="time" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Time tracking")}}</header>
 <div class="x-timer{{if $t.Running}} is-running{{end}}">
@@ -211,7 +212,7 @@
   <input name="note" class="x-grow" placeholder="Note (optional)" aria-label="Note"><button>Add time</button></form>
 <button class="x-quiet x-reset" hx-post="/ui/cards/{{$d.CardID}}/time/reset" hx-confirm="Delete all time entries?">Reset all time</button>{{end}}
 </details>
-</div>{{end}}
+</div>{{end}}{{end}}
 
 {{define "activity"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
 <div class="x-sec x-act" id="x-activity" data-sec="activity" hx-target="this" hx-swap="outerHTML">

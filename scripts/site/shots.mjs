@@ -3,9 +3,12 @@
 // Env as in scripts/demo/lib.mjs (DEMO_DIR, WEAVE_BASE_URL, PW_CORE, PW_CHROMIUM, LD_LIBRARY_PATH, FONTCONFIG_FILE).
 // WEAVE_CLI=/path/to/weave also starts `weave listen` as the seeded agent while shooting, so the board shows a listener.
 // Writes PNGs plus the visible text of every page (OUT_DIR/text/*.txt) for the PII scan; convert with scripts/site/webp.py.
+// Images: week, platform, calendar, timeline-list, pulse, gallery, claim (card sheet with an agent's claim), multiboard
+// (a card on two boards, with the Add to board picker), rules (a column sheet: auto-close and keep the newest N), phone.
+// Agent key prefixes are masked before each screenshot (MASK_KEYS in scripts/demo/lib.mjs).
 import fs from 'fs';
 import {spawn} from 'child_process';
-import {BASE, state as S, launch, newCtx} from '../demo/lib.mjs';
+import {BASE, state as S, launch, newCtx, MASK_KEYS} from '../demo/lib.mjs';
 
 const OUT = process.argv[2];
 if (!OUT) throw new Error('usage: node scripts/site/shots.mjs OUT_DIR');
@@ -29,6 +32,7 @@ async function shoot(name, {w = 1280, h = 800, theme = 'light', url, act, full =
   await p.goto(BASE + url); await p.waitForLoadState('load'); await wait(1000);
   if (act) await act(p);
   await wait(600);
+  await p.evaluate(MASK_KEYS);
   await p.screenshot({path: `${OUT}/${name}.png`, fullPage: full});
   fs.writeFileSync(`${OUT}/text/${name}.txt`, await p.evaluate(() => document.body.innerText + '\n' +
     [...document.querySelectorAll('textarea,input')].map(e => e.value).join('\n') + '\n' +
@@ -38,6 +42,9 @@ async function shoot(name, {w = 1280, h = 800, theme = 'light', url, act, full =
 }
 const gallery = async p => { await p.locator('.projects-board-new, .boards-new').first().click(); await p.waitForSelector('#tg .tg-tile'); await wait(800); };
 const inProgress = async p => { await p.evaluate(id => document.getElementById('col-' + id)?.scrollIntoView({inline: 'start', block: 'nearest'}), S.platformLists['In progress']); await wait(400); };
+const blur = p => p.evaluate(() => document.activeElement && document.activeElement.blur());
+const multi = async p => { await p.locator('.boards-tile', {hasText: 'Apollo 2.0 launch checklist'}).first().click(); await p.waitForSelector('#card-modal'); await wait(1200); await blur(p); await p.locator('.cm-board-add').first().click(); await p.waitForSelector('.cm-place'); await wait(800); };
+const rules = async p => { await p.locator(`[data-list-sheet="${S.platformLists['Done']}"]`).click(); await p.waitForSelector('#list-sheet'); await wait(1000); await blur(p); };
 const sheet = async p => { await p.locator('.boards-tile', {hasText: 'Triage new crash reports'}).first().click(); await p.waitForSelector('#card-modal'); await wait(1200); await p.evaluate(() => document.activeElement && document.activeElement.blur()); };
 
 for (const theme of ['light', 'dark']) {
@@ -48,6 +55,8 @@ for (const theme of ['light', 'dark']) {
   await shoot(`pulse-${theme}`, {theme, h: 660, url: `/projects/${S.apollo}`});
   await shoot(`gallery-${theme}`, {theme, url: `/projects/${S.apollo}`, act: gallery});
   await shoot(`claim-${theme}`, {theme, url: `/boards/${S.platform}`, act: sheet});
+  await shoot(`multiboard-${theme}`, {theme, url: `/boards/${S.platform}`, act: multi});
+  await shoot(`rules-${theme}`, {theme, url: `/boards/${S.platform}`, act: rules});
   await shoot(`phone-${theme}`, {theme, w: 390, h: 800, url: `/boards/${S.platform}`, act: inProgress});
 }
 

@@ -48,6 +48,8 @@ func seed(t *testing.T) *fx {
 		mustExec(t, f.e, `INSERT INTO users(id,email,name,created_at) VALUES(?,?,?,?)`, u[0], u[0]+"@x.io", u[1], now)
 	}
 	mustExec(t, f.e, `INSERT INTO projects(id,name,created_at) VALUES('p1','P',?)`, now)
+	// the admin persona manages p1 as a real project manager (the admin role alone gives no content access)
+	mustExec(t, f.e, `INSERT INTO project_managers(id,project_id,user_id,created_at) VALUES('pm-admin','p1',?,?)`, f.ad, now)
 	for i, b := range []string{"b1", "b2"} {
 		mustExec(t, f.e, `INSERT INTO boards(id,project_id,position,name,created_at) VALUES(?,?,?,?,?)`, b, f.proj, float64(i+1), b, now)
 		mustExec(t, f.e, `INSERT INTO board_memberships(id,board_id,user_id,role,created_at) VALUES(?,?,?,'editor',?)`, "m-ed-"+b, b, f.ed, now)

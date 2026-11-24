@@ -32,7 +32,8 @@ Named tools for daily agent work (all others are reachable through `weave_ops` +
 | `weave_card_get` | `card.get` | Get a card with labels, members and claim; full=true adds tasks, comments, attachments, custom fields, activity |
 | `weave_card_create` | `card.create` | Create a card at the end (or given position) of a list |
 | `weave_card_update` | `card.update` | Update card title, description, due date or completion |
-| `weave_card_move` | `card.move` | Move/reorder a card between lists or boards (applies list-type rules) |
+| `weave_card_move` | `card.move` | Move/reorder a card between lists or boards (applies list-type rules); on a card that is on several boards it moves one board's placement (boardId) |
+| `weave_card_place` | `card.place` | Place a card on another board too (the same card, not a copy): it appears in a column of that board and keeps its place on its other boards. Needs edit access to the card and to that board |
 | `weave_comment_list` | `comment.list` | List a card's comments, newest first |
 | `weave_comment_create` | `comment.create` | Comment on a card (requires comment permission) |
 | `weave_card_next` | `card.next` | Next unclaimed open card of a list in position order, optionally claiming it atomically ({item:null} when none) |

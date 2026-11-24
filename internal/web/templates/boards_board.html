@@ -29,38 +29,43 @@
 <script src="/static/boards_pan.js" defer></script>
 <script src="/static/boards_popover.js" defer></script>
 <script src="/static/boards_keys.js" defer></script>
+<script src="/static/boards_cardkeys.js" defer></script>
 <script src="/static/boards_colors.js" defer></script>
 <script src="/static/boards_listsheet.js" defer></script>
-<script src="/static/boards_inbox.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
+<script src="/static/boards_inbox.js" defer></script>
+<script src="/static/cards_place.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
 
 {{define "boards_help"}}<dialog id="boards-help" class="boards-help" aria-labelledby="boards-help-h">
   <form method="dialog" class="boards-help-close"><button class="boards-btn" aria-label="Close shortcuts">Close</button></form>
   <h2 id="boards-help-h">Keyboard shortcuts</h2>
   <div class="boards-help-grid">
-    <section><h3>Cards</h3><dl>
-      <dt><kbd>c</kbd></dt><dd>Add a card to the focused list</dd>
-      <dt><kbd>C</kbd></dt><dd>Add a card to the top of the list</dd>
+    <section><h3>Navigate</h3><dl>
       <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous card</dd>
       <dt><kbd>h</kbd> <kbd>l</kbd></dt><dd>Previous / next list</dd>
       <dt><kbd>Enter</kbd></dt><dd>Open the focused card</dd>
-      <dt><kbd>e</kbd></dt><dd>Quick edit the focused card</dd>
-      <dt><kbd>Space</kbd></dt><dd>Grab a card, then <kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> to move, <kbd>Space</kbd> to drop, <kbd>Esc</kbd> to cancel</dd>
-    </dl></section>
-    <section><h3>Board</h3><dl>
-      <dt><kbd>n</kbd></dt><dd>Add another list</dd>
-      <dt><kbd>1</kbd>&ndash;<kbd>5</kbd></dt><dd>Views: Kanban, List, Grid, Calendar, Map</dd>
-      <dt><kbd>/</kbd></dt><dd>Filter cards</dd>
-      <dt><kbd>?</kbd></dt><dd>Show this help</dd>
+      <dt><kbd>Space</kbd></dt><dd>Grab a card, then <kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> to move, <kbd>Space</kbd> to drop</dd>
       <dt><kbd>Esc</kbd></dt><dd>Close dialog, popover or composer</dd>
     </dl>
-    <h3>Card detail</h3><dl>
-      <dt><kbd>j</kbd> <kbd>k</kbd> / <kbd>&larr;</kbd> <kbd>&rarr;</kbd></dt><dd>Next / previous card in the list</dd>
-      <dt><kbd>Esc</kbd></dt><dd>Close</dd>
-    </dl>
-    <h3>Composers</h3><dl>
-      <dt><kbd>Enter</kbd></dt><dd>Add and keep typing</dd>
-      <dt>Paste lines</dt><dd>One card (or list) per line</dd>
+    <h3>Board</h3><dl>
+      <dt><kbd>c</kbd> <kbd>C</kbd></dt><dd>Add a card to the bottom / top of the list (<kbd>Enter</kbd> adds and keeps typing; paste lines for several)</dd>
+      <dt><kbd>n</kbd></dt><dd>Add another list</dd>
+      <dt><kbd>/</kbd></dt><dd>Filter cards</dd>
+      <dt><kbd>1</kbd>&ndash;<kbd>5</kbd></dt><dd>Kanban, List, Grid, Calendar, Map</dd>
+      <dt><kbd>?</kbd></dt><dd>Show this help</dd>
     </dl></section>
+    <section><h3>Card actions</h3>
+    <p class="boards-help-note">On the focused or hovered card, and in an open card.</p><dl>
+      <dt><kbd>e</kbd></dt><dd>Quick edit (board)</dd>
+      <dt><kbd>L</kbd></dt><dd>Labels</dd>
+      <dt><kbd>d</kbd></dt><dd>Due date</dd>
+      <dt><kbd>p</kbd></dt><dd>Location (place)</dd>
+      <dt><kbd>s</kbd> <kbd>S</kbd></dt><dd>Start / stop time tracking</dd>
+      <dt><kbd>x</kbd></dt><dd>Close or re-open</dd>
+      <dt><kbd>b</kbd></dt><dd>Add to board&hellip; (the same card on another board too)</dd>
+      <dt><kbd>A</kbd></dt><dd>Archive (on every board the card is on)</dd>
+      <dt><kbd>Del</kbd></dt><dd>Move to trash (asks first)</dd>
+    </dl>
+    <p class="boards-help-note">An open card has more: <kbd>?</kbd> inside it lists them.</p></section>
   </div>
 </dialog>{{end}}
 
@@ -69,7 +74,9 @@
 <symbol id="i-comment" viewBox="0 0 16 16"><path fill="currentColor" d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6l-3 3v-3H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v6h1v1.6L5.6 10H13V4H3z"/></symbol>
 <symbol id="i-clip" viewBox="0 0 16 16"><path fill="currentColor" d="M10.5 2a3.5 3.5 0 0 1 2.5 6l-5 5a2.2 2.2 0 0 1-3.1-3.1l4.6-4.6.9.9-4.6 4.6a.9.9 0 0 0 1.3 1.3l5-5A2.2 2.2 0 0 0 10.5 3.3 2.2 2.2 0 0 0 9 3.9L4.8 8.1l-.9-.9L8.1 3A3.4 3.4 0 0 1 10.5 2z"/></symbol>
 <symbol id="i-check" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3h12v10H2V3zm1.5 1.5v7h9v-7h-9zM7 10 4.8 7.8l.9-.9L7 8.2l3.3-3.3.9.9L7 10z"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1a5 5 0 0 1 5 5c0 3.6-5 9-5 9S3 9.6 3 6a5 5 0 0 1 5-5zm0 1.5A3.5 3.5 0 0 0 4.5 6c0 2.1 2.3 5.3 3.5 6.8 1.2-1.5 3.5-4.7 3.5-6.8A3.5 3.5 0 0 0 8 2.5zM8 4.3a1.7 1.7 0 1 1 0 3.4 1.7 1.7 0 0 1 0-3.4z"/></symbol>
 <symbol id="i-clock" viewBox="0 0 16 16"><path fill="currentColor" d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM7.3 4h1.4v4l2.6 1.6-.7 1.2L7.3 8.8V4z"/></symbol>
+<symbol id="i-boards" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5.5 5.5V3A1.5 1.5 0 0 1 7 1.5h6A1.5 1.5 0 0 1 14.5 3v6a1.5 1.5 0 0 1-1.5 1.5h-2.5"/><rect x="1.5" y="5.5" width="9" height="9" rx="1.5"/></g></symbol>
 <symbol id="i-desc" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3h12v1.5H2V3zm0 4h12v1.5H2V7zm0 4h8v1.5H2V11z"/></symbol>
 <symbol id="i-plus" viewBox="0 0 16 16"><path fill="currentColor" d="M7.2 2h1.6v5.2H14v1.6H8.8V14H7.2V8.8H2V7.2h5.2V2z"/></symbol>
 <symbol id="i-more" viewBox="0 0 16 16"><path fill="currentColor" d="M3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></symbol>
@@ -92,16 +99,67 @@
 
 {{define "boards_quick"}}{{template "boards_quick_in" .Data}}{{end}}
 {{define "boards_quick_oob"}}{{template "boards_quick_in" .Data}}{{template "boards_tile" dict "T" .Data.T "P" .Data.P "OOB" true}}{{end}}
-{{define "boards_quick_in"}}{{$t := .T}}<div class="boards-quick" role="dialog" aria-label="Quick edit card" data-quick="{{$t.ID}}">
+{{define "boards_quick_in"}}{{$t := .T}}<div class="boards-quick" role="dialog" aria-label="Quick edit card" data-quick="{{$t.ID}}" hx-vals='{"board":"{{.P.Board.ID}}"}'>
   <form hx-post="/ui/cards/{{$t.ID}}/quick" hx-swap="none" class="boards-quick-title">
     <label class="boards-sr" for="quick-name-{{$t.ID}}">Card title</label>
     <textarea id="quick-name-{{$t.ID}}" name="name" rows="3" maxlength="1024" required data-quick-name>{{$t.Name}}</textarea>
-    <div class="boards-quick-actions"><button class="btn btn-primary boards-btn-primary">Save</button><a class="btn btn-ghost boards-btn" href="/cards/{{$t.ID}}" data-open-card="{{$t.ID}}">Open card</a></div>
+    <div class="boards-quick-actions"><button class="btn btn-primary boards-btn-primary">Save</button><a class="btn btn-ghost boards-btn" href="/cards/{{$t.ID}}{{if $t.AlsoOn}}?board={{.P.Board.ID}}{{end}}" data-open-card="{{$t.ID}}">Open card</a></div>
   </form>
   {{if .Labels}}<div class="boards-quick-labels" role="group" aria-label="Labels">
     {{range .Labels}}<button type="button" class="boards-qlabel{{if .On}} is-on{{end}}" style="--c:{{boardsColor .Color}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"
       hx-post="/ui/cards/{{$t.ID}}/quick/label" hx-vals='{"labelId":"{{.ID}}","on":"{{if .On}}0{{else}}1{{end}}"}' hx-target="closest .boards-quick" hx-swap="outerHTML"><span class="boards-qlabel-dot"></span>{{if .Name}}{{deref .Name}}{{else}}<em>(no name)</em>{{end}}{{if .On}}<span class="boards-qlabel-tick" aria-hidden="true">&#10003;</span>{{end}}</button>{{end}}
   </div>{{end}}
-  <div class="boards-quick-foot"><button type="button" class="boards-linkbtn boards-danger-link" hx-post="/ui/cards/{{$t.ID}}/quick/archive" hx-swap="none" data-after="archive">Archive card</button></div>
+  {{/* card.unplace ("Remove from this board": this board only) and card.archive (a CARD action: every board the card
+       is on, so a card on other boards says so and asks first) */}}
+  <div class="boards-quick-foot">{{if .CanRemove}}<button type="button" class="boards-linkbtn" data-cap="card-remove-from-board" hx-post="/ui/cards/{{$t.ID}}/placements/{{.P.Board.ID}}/delete" hx-swap="none"
+      hx-confirm="The card stays on its {{$t.AlsoOn}} other board{{if ne $t.AlsoOn 1}}s{{end}}." data-confirm-title="Remove from {{.P.Board.Name}}?" data-confirm-ok="Remove from board">Remove from this board</button>{{end}}
+    <button type="button" class="boards-linkbtn boards-danger-link" hx-post="/ui/cards/{{$t.ID}}/quick/archive" hx-swap="none"{{if $t.AlsoOn}}
+      hx-confirm="This card is also on {{$t.AlsoOn}} other board{{if ne $t.AlsoOn 1}}s{{end}}; it will be archived on all of them." data-confirm-title="Archive this card?" data-confirm-ok="Archive card"{{end}}>Archive card{{if $t.AlsoOn}} <small>(on all {{add1 $t.AlsoOn}} boards)</small>{{end}}</button></div>
+</div>{{end}}
+
+{{/* The "also on N other boards" popover (alsoon.go): the other boards a card is on that the viewer can see, each with
+   the card's column there, linking to the board. Rendered into #boards-pop under the tile's marker (boards_keys.js). */}}
+{{define "boards_also_pop"}}{{$d := .Data}}<div class="boards-quick boards-also-pop" role="dialog" tabindex="-1" aria-labelledby="also-h-{{$d.CardID}}" data-also-pop="{{$d.CardID}}">
+  <div class="boards-kpick-head"><span class="boards-kpick-h" id="also-h-{{$d.CardID}}">Also on {{len $d.Others}} other board{{if ne (len $d.Others) 1}}s{{end}}</span><span class="boards-kpick-card">{{$d.Name}}</span></div>
+  {{if $d.Others}}<ul class="boards-also-list">{{range $d.Others}}<li><a class="boards-also-item" href="/boards/{{.BoardID}}"><span class="boards-also-b">{{.BoardName}}</span>{{if .IsHome}}<span class="boards-also-home">home</span>{{end}}<span class="boards-also-c"><span class="boards-sr">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></a></li>{{end}}</ul>
+  {{else}}<p class="boards-kpick-empty">This card is not on any other board you can see.</p>{{end}}
+</div>{{end}}
+
+{{/* Keyboard pickers of the card shortcuts (boards_cardkeys.js, quick.go renderPicker): L labels, d due date, p location.
+   Rendered into #boards-pop next to the tile (a bottom sheet on phones). No hx-* here: the script posts to the existing
+   routes (quick/label, due, location) so it can keep focus and the filter across the re-render. */}}
+{{define "boards_kpick"}}{{$d := .Data}}{{$t := $d.T}}<div class="boards-quick boards-kpick" role="dialog" tabindex="-1" aria-labelledby="kpick-h-{{$t.ID}}" data-kpick="{{$d.Kind}}" data-card="{{$t.ID}}">
+  <div class="boards-kpick-head"><span class="boards-kpick-h" id="kpick-h-{{$t.ID}}">{{if eq $d.Kind "labels"}}Labels{{else if eq $d.Kind "due"}}Due date{{else}}Location{{end}}</span><span class="boards-kpick-card">{{$t.Name}}</span></div>
+{{- if eq $d.Kind "labels"}}
+  {{if $d.Labels}}<input type="search" class="boards-kpick-filter" placeholder="Type to filter" aria-label="Filter labels" autocomplete="off" data-kpick-filter>
+  <div class="boards-kpick-list" role="group" aria-label="Labels of {{$t.Name}}">
+    {{range $d.Labels}}<button type="button" class="boards-qlabel boards-kopt{{if .On}} is-on{{end}}" style="--c:{{boardsColor .Color}}" aria-pressed="{{if .On}}true{{else}}false{{end}}" data-label="{{.ID}}" data-text="{{deref .Name}}"><kbd class="boards-kn" aria-hidden="true"></kbd><span class="boards-qlabel-dot"></span><span class="boards-kopt-t">{{if .Name}}{{deref .Name}}{{else}}<em>(no name)</em>{{end}}</span>{{if .On}}<span class="boards-qlabel-tick" aria-hidden="true">&#10003;</span>{{end}}</button>{{end}}
+    <p class="boards-kpick-none" hidden>No labels match.</p>
+  </div>
+  <p class="boards-kpick-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> &middot; <kbd>Enter</kbd> toggle &middot; <kbd>1</kbd>&ndash;<kbd>9</kbd> &middot; <kbd>Esc</kbd> done</p>
+  {{else}}<p class="boards-kpick-empty">This board has no labels yet. Add them in the board settings.</p>{{end}}
+{{- else if eq $d.Kind "due"}}
+  <div class="boards-kpick-list" role="group" aria-label="Quick choices">
+    <button type="button" class="boards-kopt boards-kdue" data-due-days="0"><kbd class="boards-kn" aria-hidden="true">1</kbd><span class="boards-kopt-t">Today</span><small data-due-when></small></button>
+    <button type="button" class="boards-kopt boards-kdue" data-due-days="1"><kbd class="boards-kn" aria-hidden="true">2</kbd><span class="boards-kopt-t">Tomorrow</span><small data-due-when></small></button>
+    <button type="button" class="boards-kopt boards-kdue" data-due-days="7"><kbd class="boards-kn" aria-hidden="true">3</kbd><span class="boards-kopt-t">Next week</span><small data-due-when></small></button>
+    <button type="button" class="boards-kopt boards-kdue" data-due-months="1"><kbd class="boards-kn" aria-hidden="true">4</kbd><span class="boards-kopt-t">In a month</span><small data-due-when></small></button>
+    {{if $d.DueValue}}<button type="button" class="boards-kopt boards-kdue is-clear" data-due-clear><kbd class="boards-kn" aria-hidden="true">0</kbd><span class="boards-kopt-t">Remove due date</span></button>{{end}}
+  </div>
+  <form class="boards-kpick-form" data-kpick-form><label class="boards-kpick-lab" for="kdue-{{$t.ID}}">Date and time</label>
+    <div class="boards-kpick-row"><input type="datetime-local" id="kdue-{{$t.ID}}" name="dueDate" value="{{$d.DueValue}}" required><button class="btn btn-primary boards-btn-primary">Set</button></div></form>
+  <p class="boards-kpick-hint"><kbd>1</kbd>&ndash;<kbd>4</kbd> pick{{if $d.DueValue}} &middot; <kbd>0</kbd> remove{{end}} &middot; <kbd>Esc</kbd> cancel</p>
+{{- else}}
+  <form class="boards-kpick-form" data-kpick-form>
+    <label class="boards-kpick-lab" for="kplace-{{$t.ID}}">Place name</label>
+    <input id="kplace-{{$t.ID}}" name="locationName" value="{{$d.Place}}" placeholder="Optional" autocomplete="off" maxlength="256">
+    <div class="boards-kpick-row boards-kpick-coords">
+      <span><label class="boards-kpick-lab" for="klat-{{$t.ID}}">Latitude</label><input id="klat-{{$t.ID}}" name="lat" type="number" step="any" min="-90" max="90" value="{{$d.Lat}}" placeholder="-90 to 90" required inputmode="decimal"></span>
+      <span><label class="boards-kpick-lab" for="klng-{{$t.ID}}">Longitude</label><input id="klng-{{$t.ID}}" name="lng" type="number" step="any" min="-180" max="180" value="{{$d.Lng}}" placeholder="-180 to 180" required inputmode="decimal"></span>
+    </div>
+    <div class="boards-kpick-row boards-kpick-actions"><button class="btn btn-primary boards-btn-primary">Save</button>{{if $d.Lat}}<button type="button" class="boards-linkbtn boards-danger-link" data-place-clear>Remove location</button>{{end}}</div>
+  </form>
+  <p class="boards-kpick-hint"><kbd>Enter</kbd> save &middot; <kbd>Esc</kbd> cancel</p>
+{{- end}}
 </div>{{end}}
 

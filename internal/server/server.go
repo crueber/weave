@@ -33,6 +33,9 @@ type Server struct {
 // Hooks run at startup after the Server is built (seed admin, start workers…).
 var Hooks []func(*Server) error
 
+// legacyRecheck is how often an open `rooms=` stream re-authenticates its caller (tests shorten it).
+var legacyRecheck = 30 * time.Second
+
 func (s *Server) env(r *http.Request) *ops.Env {
 	e := &ops.Env{Ctx: r.Context(), DB: s.DB, Hub: s.Hub, Svc: s.Svc, Req: r}
 	if ops.Authenticate != nil {
@@ -235,10 +238,20 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	// so the stream ends and its per-user slot is released
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
+	// Every signed-in tab holds one of these streams, so credentials are re-checked while it is
+	// open: signing out, idle auto-logout (the stream itself never counts as activity, see
+	// auth.isBackground), deactivation or a rotated key end it instead of delivering to a dead session.
+	recheck := time.NewTicker(legacyRecheck)
+	defer recheck.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-recheck.C:
+			p := ops.Authenticate(&ops.Env{Ctx: r.Context(), DB: s.DB, Hub: s.Hub, Svc: s.Svc, Req: r}, r)
+			if p == nil || p.UserID != e.User.UserID {
+				return
+			}
 		case <-ping.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return

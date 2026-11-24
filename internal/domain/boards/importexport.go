@@ -25,6 +25,7 @@ type impList struct {
 	Key, Name, Type, Color, Desc string
 	Pos                          float64
 	WIP                          int
+	ArchiveAfter                 int // auto-archive (0 = off)
 }
 type impGroup struct {
 	Key, Name    string
@@ -49,6 +50,7 @@ type impCard struct {
 	Key                      string // id inside the document; custom-field values are addressed by it
 	ListKey, Name, Desc, Due string
 	DueDone                  bool
+	Closed                   bool // closed in the file; a card landing in a closed-type column is closed regardless
 	DueOffsetDays            *int // relative due date (days from the moment the board is created); wins over Due
 	Pos                      float64
 	LabelKeys                []string
@@ -64,6 +66,7 @@ type impBoard struct {
 	AgentPrompt   string // the board's own agent prompt text (normalised), "" = default
 	View          string // default view; "" = kanban
 	Flags         impFlags
+	Stated        map[string]bool // settings the document actually names (board.template.apply only applies those)
 	Lists         []impList
 	Groups        []impGroup
 	Labels        []impLabel
@@ -90,13 +93,14 @@ type exportDoc struct {
 	CustomFields []FieldGroupDoc `json:"customFields,omitempty"`
 }
 type exportList struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Type        string  `json:"type"`
-	Color       string  `json:"color,omitempty"`
-	Description string  `json:"description,omitempty"`
-	WIPLimit    int     `json:"wipLimit,omitempty"`
-	Position    float64 `json:"position"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Color        string  `json:"color,omitempty"`
+	Description  string  `json:"description,omitempty"`
+	WIPLimit     int     `json:"wipLimit,omitempty"`
+	ArchiveAfter int     `json:"archiveAfter,omitempty"`
+	Position     float64 `json:"position"`
 }
 type exportGroup struct {
 	ID           string `json:"id"`
@@ -132,6 +136,7 @@ type exportCard struct {
 	DueDate        string           `json:"dueDate,omitempty"`
 	DueOffsetDays  *int             `json:"dueOffsetDays,omitempty"`
 	IsDueCompleted bool             `json:"isDueCompleted,omitempty"`
+	IsClosed       bool             `json:"isClosed,omitempty"`
 	Position       float64          `json:"position"`
 	LabelIDs       []string         `json:"labelIds,omitempty"`
 	MemberEmails   []string         `json:"memberEmails,omitempty"`
@@ -153,14 +158,14 @@ type ExportIn struct {
 }
 
 func registerImportExportOps() {
-	ops.Register(ops.Op{Name: "board.import", Summary: "Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (project manager)", Method: "POST", MaxBody: 64 << 20, Path: "/projects/{projectId}/boards/import",
+	ops.Register(ops.Op{Name: "board.import", Summary: "Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (whoever may create boards in the project, see board.create)", Method: "POST", MaxBody: 64 << 20, Path: "/projects/{projectId}/boards/import",
 		UI: ui("POST", "/projects/{projectId}/boards/import")}, importBoard)
 	ops.Register(ops.Op{Name: "board.export", Summary: "Export a board as JSON (round-trips through board.import) or CSV", Method: "GET", Path: "/boards/{id}/export",
 		Binary: true, UI: ui("GET", "/boards/{id}/export")}, exportBoard)
 }
 
 func importBoard(e *ops.Env, in ImportIn) (Board, error) {
-	if err := authz.RequireProject(e, in.ProjectID, authz.Manage); err != nil {
+	if err := authz.RequireCreateBoard(e, in.ProjectID); err != nil {
 		return Board{}, err
 	}
 	var data []byte
@@ -253,18 +258,80 @@ func dueFromOffset(now time.Time, days *int) (string, bool) {
 }
 
 // writeImport fills a freshly inserted board from ib. now anchors relative due dates (dueOffsetDays).
+//
+// It is composed of the parts board.template.apply reuses on an existing board (see templateapply.go): the board
+// settings, the labels with their groups, the columns, the cards and the custom-field groups. The composition here is
+// the import/instantiate behaviour; the apply path picks other options for labels and settings.
 func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard, nowT time.Time) error {
 	ctx, now := e.Ctx, db.Now()
+	if err := writeImportSettings(ctx, tx, boardID, ib); err != nil {
+		return err
+	}
+	labels, err := writeImportLabels(ctx, tx, boardID, projectID, ib, now)
+	if err != nil {
+		return err
+	}
+	wl, err := writeLists(ctx, tx, boardID, ib.Lists, now, func(i int, l impList) float64 {
+		if l.Pos != 0 {
+			return l.Pos
+		}
+		return float64(i+1) * db.PositionGap
+	})
+	if err != nil {
+		return err
+	}
+	wc, err := writeCards(e, tx, boardID, ib.Cards, wl, labels, nowT, now, nil)
+	if err != nil {
+		return err
+	}
+	// The file's closed state is kept (a card closed in place, an archived closed card); cards that land in a
+	// closed-type column are closed whatever the file says. Files without isClosed import as open elsewhere.
+	if _, err := Landed(ctx, tx, wc.closedLands...); err != nil {
+		return err
+	}
+	// A column with auto-archive keeps its newest N cards from the start (all cards arrive at once: the top of the
+	// column counts as oldest). The board is new, so nobody watches it yet: no per-card events are sent.
+	for _, l := range ib.Lists {
+		id := wl.ids[l.Key]
+		if n, ok := wl.capped[id]; ok {
+			if _, err := trimColumn(ctx, tx, id, n, nil); err != nil {
+				return err
+			}
+		}
+	}
+	if len(ib.FieldGroups) > 0 && ImportCustomFields != nil {
+		if err := ImportCustomFields(ctx, tx, boardID, ib.FieldGroups, wc.values, wc.ids); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeImportSettings writes every board setting of the document, the agent prompt included (a new board).
+func writeImportSettings(ctx context.Context, tx *sql.Tx, boardID string, ib impBoard) error {
 	mode := ib.CardColorMode
 	if mode == "" {
 		mode = CardColorPill
 	}
 	f := ib.Flags
-	if _, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,always_display_card_creator=?,
+	_, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,always_display_card_creator=?,
 		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=?,agent_prompt=? WHERE id=?`, nullStr(ib.Color), mode,
-		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), nullStr(ib.AgentPrompt), boardID); err != nil {
-		return err
+		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), nullStr(ib.AgentPrompt), boardID)
+	return err
+}
+
+// importLabelColor is the stored colour of a document label: its own when valid, else one derived from its name.
+func importLabelColor(l impLabel) string {
+	if validColor(l.Color) {
+		return l.Color
 	}
+	return colorFor(l.Name + l.Key)
+}
+
+// writeImportLabels creates the document's label groups and labels on a new board and returns document key -> label
+// id. With project-wide labels, a project label with the same name and colour is reused, else one is created (and no
+// groups are made).
+func writeImportLabels(ctx context.Context, tx *sql.Tx, boardID, projectID string, ib impBoard, now string) (map[string]string, error) {
 	var useProject bool
 	_ = tx.QueryRowContext(ctx, `SELECT use_project_labels FROM projects WHERE id=?`, projectID).Scan(&useProject)
 	groups := map[string]string{}
@@ -273,16 +340,13 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			id := db.NewID()
 			groups[g.Key] = id
 			if _, err := tx.ExecContext(ctx, `INSERT INTO label_groups(id,board_id,name,single_select,position) VALUES(?,?,?,?,?)`, id, boardID, g.Name, boolInt(g.SingleSelect), float64(i+1)*db.PositionGap); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	labels := map[string]string{}
 	for i, l := range ib.Labels {
-		color := l.Color
-		if !validColor(color) {
-			color = colorFor(l.Name + l.Key)
-		}
+		color := importLabelColor(l)
 		// With project-wide labels, reuse a matching project label by name+colour or create one.
 		if useProject {
 			var id string
@@ -293,7 +357,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 					appendPos(ctx, tx, "labels", "project_id=? AND board_id IS NULL", projectID), now)
 			}
 			if err != nil {
-				return err
+				return nil, err
 			}
 			labels[l.Key] = id
 			continue
@@ -305,56 +369,90 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			grp = g
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO labels(id,board_id,group_id,name,color,position,created_at) VALUES(?,?,?,?,?,?,?)`, id, boardID, grp, nullStr(l.Name), color, float64(i+1)*db.PositionGap, now); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	lists := map[string]string{}
-	var first string
-	for i, l := range ib.Lists {
+	return labels, nil
+}
+
+// writtenLists is what writeLists created: document key -> list id, which of them close cards, their archive-after
+// setting, the first finite column (the fallback for cards whose column is unknown) and the finite ids in order.
+type writtenLists struct {
+	ids    map[string]string
+	closed map[string]bool
+	capped map[string]int
+	first  string
+	order  []string
+}
+
+// writeLists inserts the document's columns at pos(i, list). Archive and trash entries map to the board's system
+// lists (created on demand).
+func writeLists(ctx context.Context, tx *sql.Tx, boardID string, lists []impList, now string, pos func(int, impList) float64) (*writtenLists, error) {
+	w := &writtenLists{ids: map[string]string{}, closed: map[string]bool{}, capped: map[string]int{}}
+	for i, l := range lists {
 		switch l.Type {
 		case "archive", "trash":
 			id, err := SystemList(ctx, tx, boardID, l.Type)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			lists[l.Key] = id
+			w.ids[l.Key] = id
 			continue
 		}
 		typ := "active"
 		if l.Type == "closed" {
 			typ = "closed"
 		}
-		pos := l.Pos
-		if pos == 0 {
-			pos = float64(i+1) * db.PositionGap
-		}
 		id := db.NewID()
-		lists[l.Key] = id
-		if first == "" {
-			first = id
+		w.ids[l.Key] = id
+		w.closed[id] = typ == "closed"
+		w.order = append(w.order, id)
+		if w.first == "" {
+			w.first = id
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, boardID, typ, pos, l.Name, nullStr(l.Color), nullStr(l.Desc), importWIP(l.WIP), now); err != nil {
-			return err
+		keep := importWIP(l.ArchiveAfter) // same bounds as the WIP limit (1-10000); out of range = off
+		if keep != nil {
+			w.capped[id] = keep.(int)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,color,description,wip_limit,archive_after,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, boardID, typ, pos(i, l), l.Name, nullStr(l.Color), nullStr(l.Desc), importWIP(l.WIP), keep, now); err != nil {
+			return nil, err
 		}
 	}
+	return w, nil
+}
+
+// writtenCards is what writeCards created: every card with its column (lands), the ones in closing columns
+// (closedLands), document key -> card id, and the custom-field values to store per document key.
+type writtenCards struct {
+	lands       []Landing
+	closedLands []Landing
+	ids         map[string]string
+	values      map[string][]FieldValueDoc
+}
+
+// writeCards inserts the document's cards with their labels, members (matched by e-mail), task lists and comments.
+// A card whose column is unknown goes to w.first (an "Imported" column is created when the board has none). base
+// offsets the positions per column (nil = none: a new board).
+func writeCards(e *ops.Env, tx *sql.Tx, boardID string, cards []impCard, w *writtenLists, labels map[string]string, nowT time.Time, now string, base map[string]float64) (writtenCards, error) {
+	ctx := e.Ctx
+	out := writtenCards{ids: map[string]string{}, values: map[string][]FieldValueDoc{}}
 	emails := map[string]string{}
-	cardIDs := map[string]string{}
-	values := map[string][]FieldValueDoc{}
-	for ci, c := range ib.Cards {
-		lid, ok := lists[c.ListKey]
+	for ci, c := range cards {
+		lid, ok := w.ids[c.ListKey]
 		if !ok {
-			if first == "" {
-				first = db.NewID()
-				if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES(?,?,?,?,?,?)`, first, boardID, "active", db.PositionGap, "Imported", now); err != nil {
-					return err
+			if w.first == "" {
+				w.first = db.NewID()
+				if _, err := tx.ExecContext(ctx, `INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES(?,?,?,?,?,?)`, w.first, boardID, "active", db.PositionGap, "Imported", now); err != nil {
+					return out, err
 				}
 			}
-			lid = first
+			lid = w.first
 		}
 		pos := c.Pos
 		if pos == 0 {
 			pos = float64(ci+1) * db.PositionGap
 		}
+		pos += base[lid]
 		cid := db.NewID()
 		var due any
 		var done any
@@ -364,14 +462,18 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			due = c.Due
 			done = boolInt(c.DueDone)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_due_completed,comments_total,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), pos, c.Name, nullStr(c.Desc), due, done, len(c.Comments), now, now); err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_due_completed,is_closed,comments_total,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), pos, c.Name, nullStr(c.Desc), due, done, boolInt(c.Closed), len(c.Comments), now, now); err != nil {
+			return out, err
+		}
+		out.lands = append(out.lands, Landing{CardID: cid, ListID: lid})
+		if w.closed[lid] {
+			out.closedLands = append(out.closedLands, Landing{CardID: cid, ListID: lid})
 		}
 		if c.Key != "" {
-			cardIDs[c.Key] = cid
+			out.ids[c.Key] = cid
 			if len(c.Values) > 0 {
-				values[c.Key] = c.Values
+				out.values[c.Key] = c.Values
 			}
 		}
 		seen := map[string]bool{}
@@ -379,7 +481,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			if lab, ok := labels[k]; ok && !seen[lab] {
 				seen[lab] = true
 				if _, err := tx.ExecContext(ctx, `INSERT INTO card_labels(card_id,label_id) VALUES(?,?)`, cid, lab); err != nil {
-					return err
+					return out, err
 				}
 			}
 		}
@@ -391,7 +493,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			}
 			if uid != "" {
 				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO card_memberships(card_id,user_id) VALUES(?,?)`, cid, uid); err != nil {
-					return err
+					return out, err
 				}
 			}
 		}
@@ -399,27 +501,22 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 			tlid := db.NewID()
 			if _, err := tx.ExecContext(ctx, `INSERT INTO task_lists(id,card_id,position,name,show_on_front_of_card,hide_completed_tasks,created_at) VALUES(?,?,?,?,?,?,?)`,
 				tlid, cid, float64(ti+1)*db.PositionGap, nonEmpty(tl.Name, "Tasks"), boolInt(tl.ShowOnFront), boolInt(tl.HideDone), now); err != nil {
-				return err
+				return out, err
 			}
 			for k, t := range tl.Tasks {
 				if _, err := tx.ExecContext(ctx, `INSERT INTO tasks(id,task_list_id,position,name,is_completed,created_at) VALUES(?,?,?,?,?,?)`, db.NewID(), tlid, float64(k+1)*db.PositionGap, t.Name, boolInt(t.Done), now); err != nil {
-					return err
+					return out, err
 				}
 			}
 		}
 		for _, cm := range c.Comments {
 			at := nonEmpty(cm.CreatedAt, now)
 			if _, err := tx.ExecContext(ctx, `INSERT INTO comments(id,card_id,user_id,text,created_at) VALUES(?,?,?,?,?)`, db.NewID(), cid, userOrNil(e), cm.Text, at); err != nil {
-				return err
+				return out, err
 			}
 		}
 	}
-	if len(ib.FieldGroups) > 0 && ImportCustomFields != nil {
-		if err := ImportCustomFields(ctx, tx, boardID, ib.FieldGroups, values, cardIDs); err != nil {
-			return err
-		}
-	}
-	return nil
+	return out, nil
 }
 
 func userOrNil(e *ops.Env) any {
@@ -477,11 +574,15 @@ func impFromDoc(d *exportDoc) impBoard {
 	}
 	// Older exports also carry defaultCardType/limitCardTypesToDefault (and cards a "type"): card types were
 	// removed, so those keys are read past and ignored.
+	ib.Stated = map[string]bool{}
+	for k := range d.Board {
+		ib.Stated[k] = true
+	}
 	ib.Flags = impFlags{AlwaysCreator: flag("alwaysDisplayCardCreator"), ExpandTasks: flag("expandTaskListsByDefault"),
 		CardCounter: flagOn("showCardCounter"), CardAges: flag("showCardAges"), Inbox: flag("hasInbox")}
 	for _, l := range d.Lists {
 		lc, _ := NormalizeColor(l.Color)
-		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position, WIP: l.WIPLimit})
+		ib.Lists = append(ib.Lists, impList{Key: l.ID, Name: l.Name, Type: l.Type, Color: lc, Desc: l.Description, Pos: l.Position, WIP: l.WIPLimit, ArchiveAfter: l.ArchiveAfter})
 	}
 	for _, g := range d.Groups {
 		ib.Groups = append(ib.Groups, impGroup{Key: g.ID, Name: g.Name, SingleSelect: g.SingleSelect})
@@ -490,7 +591,7 @@ func impFromDoc(d *exportDoc) impBoard {
 		ib.Labels = append(ib.Labels, impLabel{Key: l.ID, Name: l.Name, Color: l.Color, Group: l.GroupID})
 	}
 	for _, c := range d.Cards {
-		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, DueOffsetDays: c.DueOffsetDays, Pos: c.Position,
+		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, Closed: c.IsClosed, DueOffsetDays: c.DueOffsetDays, Pos: c.Position,
 			LabelKeys: c.LabelIDs, MemberEmails: c.MemberEmails, Values: c.CustomValues}
 		for _, tl := range c.TaskLists {
 			x := impTaskList{Name: tl.Name, ShowOnFront: tl.ShowOnFront, HideDone: tl.HideCompleted}
@@ -744,13 +845,13 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 	if b.AgentPrompt != "" {
 		doc.Board["agentPrompt"] = b.AgentPrompt
 	}
-	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,''),COALESCE(wip_limit,0) FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
+	rows, err := d.QueryContext(ctx, `SELECT id,type,COALESCE(position,0),COALESCE(name,''),COALESCE(color,''),COALESCE(description,''),COALESCE(wip_limit,0),COALESCE(archive_after,0) FROM lists WHERE board_id=? ORDER BY position IS NULL, position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var l exportList
-		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit)
+		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.ArchiveAfter)
 		doc.Lists = append(doc.Lists, l)
 	}
 	rows.Close()
@@ -764,8 +865,8 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		doc.Groups = append(doc.Groups, g)
 	}
 	rows.Close()
-	rows, err = d.QueryContext(ctx, `SELECT id,COALESCE(name,''),color,COALESCE(group_id,'') FROM labels WHERE board_id=? OR id IN
-		(SELECT cl.label_id FROM card_labels cl JOIN cards c ON c.id=cl.card_id WHERE c.board_id=?) ORDER BY position`, b.ID, b.ID)
+	rows, err = d.QueryContext(ctx, `SELECT l.id,COALESCE(l.name,''),l.color,COALESCE(l.group_id,'') FROM labels l WHERE l.board_id=?1 OR (l.id IN
+		(SELECT cl.label_id FROM card_labels cl JOIN card_placements p ON p.card_id=cl.card_id WHERE p.board_id=?1) AND `+db.LabelOnBoard("l", "?1")+`) ORDER BY l.position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -775,15 +876,15 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		doc.Labels = append(doc.Labels, l)
 	}
 	rows.Close()
-	rows, err = d.QueryContext(ctx, `SELECT id,list_id,name,COALESCE(description,''),COALESCE(due_date,''),COALESCE(is_due_completed,0),COALESCE(position,0)
-		FROM cards WHERE board_id=? AND is_draft=0 AND is_template=0 ORDER BY position`, b.ID)
+	rows, err = d.QueryContext(ctx, `SELECT c.id,p.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(p.position,0)
+		FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, c.id`, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	idx := map[string]int{}
 	for rows.Next() {
 		var c exportCard
-		_ = rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.Position)
+		_ = rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.IsClosed, &c.Position)
 		idx[c.ID] = len(doc.Cards)
 		doc.Cards = append(doc.Cards, c)
 	}
@@ -802,14 +903,15 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		}
 		return rs.Err()
 	}
-	if err := each(`SELECT cl.card_id,cl.label_id,'',0 FROM card_labels cl JOIN cards c ON c.id=cl.card_id WHERE c.board_id=?`, func(id, a, _ string, _ bool) {
+	if err := each(`SELECT cl.card_id,cl.label_id,'',0 FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id
+		WHERE p.board_id=?1 AND `+db.LabelOnBoard("l", "?1")+` ORDER BY cl.card_id, cl.label_id`, func(id, a, _ string, _ bool) {
 		if i, ok := idx[id]; ok {
 			doc.Cards[i].LabelIDs = append(doc.Cards[i].LabelIDs, a)
 		}
 	}); err != nil {
 		return nil, err
 	}
-	if err := each(`SELECT cm.card_id,u.email,'',0 FROM card_memberships cm JOIN users u ON u.id=cm.user_id JOIN cards c ON c.id=cm.card_id WHERE c.board_id=?`, func(id, a, _ string, _ bool) {
+	if err := each(`SELECT cm.card_id,u.email,'',0 FROM card_memberships cm JOIN users u ON u.id=cm.user_id JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=?`, func(id, a, _ string, _ bool) {
 		if i, ok := idx[id]; ok {
 			doc.Cards[i].MemberEmails = append(doc.Cards[i].MemberEmails, a)
 		}
@@ -817,7 +919,7 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		return nil, err
 	}
 	tlIdx := map[string][2]int{}
-	tlRows, err := d.QueryContext(ctx, `SELECT tl.card_id,tl.id,tl.name,tl.show_on_front_of_card,tl.hide_completed_tasks FROM task_lists tl JOIN cards c ON c.id=tl.card_id WHERE c.board_id=? ORDER BY tl.position`, b.ID)
+	tlRows, err := d.QueryContext(ctx, `SELECT tl.card_id,tl.id,tl.name,tl.show_on_front_of_card,tl.hide_completed_tasks FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY tl.position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -831,7 +933,7 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 		}
 	}
 	tlRows.Close()
-	if err := each(`SELECT t.task_list_id,t.name,'',t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN cards c ON c.id=tl.card_id WHERE c.board_id=? ORDER BY t.position`, func(tlid, name, _ string, done bool) {
+	if err := each(`SELECT t.task_list_id,t.name,'',t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY t.position`, func(tlid, name, _ string, done bool) {
 		if p, ok := tlIdx[tlid]; ok {
 			tl := &doc.Cards[p[0]].TaskLists[p[1]]
 			tl.Tasks = append(tl.Tasks, exportTask{name, done})
@@ -839,7 +941,7 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if err := each(`SELECT cm.card_id,cm.text,cm.created_at,0 FROM comments cm JOIN cards c ON c.id=cm.card_id WHERE c.board_id=? ORDER BY cm.created_at`, func(id, text, at string, _ bool) {
+	if err := each(`SELECT cm.card_id,cm.text,cm.created_at,0 FROM comments cm JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=? ORDER BY cm.created_at`, func(id, text, at string, _ bool) {
 		if i, ok := idx[id]; ok {
 			doc.Cards[i].Comments = append(doc.Cards[i].Comments, exportComment{Text: text, CreatedAt: at})
 		}
@@ -893,7 +995,8 @@ func exportCSV(doc *exportDoc) []byte {
 	return buf.Bytes()
 }
 
-// importWIP validates a limit read from a file (untrusted): out-of-range values are dropped.
+// importWIP validates a limit read from a file (untrusted): out-of-range values are dropped. It serves the WIP limit
+// and the auto-archive setting (both 1-10000; MaxWIPLimit == MaxArchiveAfter).
 func importWIP(n int) any {
 	if n < 1 || n > MaxWIPLimit {
 		return nil

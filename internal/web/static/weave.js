@@ -3,6 +3,16 @@ document.body.addEventListener('toast', e => {
   const t = document.createElement('div'); t.className = 'toast'; t.textContent = e.detail.value || e.detail;
   document.getElementById('toasts').append(t); setTimeout(() => t.remove(), 4000);
 });
+// A toast for the next page (HX-Trigger "toastNext" sent with HX-Redirect): kept in sessionStorage across the
+// navigation and shown once when the next page loads.
+document.body.addEventListener('toastNext', e => {
+  try { sessionStorage.setItem('weave-toast', String(e.detail.value || e.detail)); } catch (x) { /* storage off: no toast */ }
+});
+(function () {
+  let msg = null;
+  try { msg = sessionStorage.getItem('weave-toast'); sessionStorage.removeItem('weave-toast'); } catch (x) { return; }
+  if (msg) document.body.dispatchEvent(new CustomEvent('toast', { detail: { value: msg } }));
+})();
 document.body.addEventListener('htmx:afterSwap', e => {
   const m = document.getElementById('modal');
   if (e.detail.target === m && !m.open) m.showModal();
@@ -79,3 +89,32 @@ document.addEventListener('htmx:configRequest', function (e) {
   var el = e.detail && e.detail.elt;
   if (el && el.getAttribute && el.hasAttribute('data-bool-param')) e.detail.parameters[el.getAttribute('data-bool-param')] = el.checked;
 });
+
+// Help tips ("?" buttons, templates/_help_tip.html): hover, keyboard focus or a tap shows the tip; it is fixed-positioned
+// below (or above) the button and clamped to the viewport so no container can clip it. Escape or a click elsewhere hides it.
+(function () {
+  function tipOf(b) { return b.querySelector('.help-tip-pop'); }
+  function hide(b) { var p = tipOf(b); if (p) { p.hidden = true; } b.removeAttribute('aria-expanded'); }
+  function hideAll(except) { document.querySelectorAll('[data-help-tip][aria-expanded]').forEach(function (b) { if (b !== except) hide(b); }); }
+  function show(b) {
+    var p = tipOf(b); if (!p) return;
+    hideAll(b);
+    p.hidden = false; p.style.left = '0px'; p.style.top = '0px';
+    var r = b.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight, vw = document.documentElement.clientWidth, vh = window.innerHeight, M = 8;
+    var left = Math.max(M, Math.min(r.left + r.width / 2 - w / 2, vw - w - M));
+    var top = r.bottom + 6; if (top + h > vh - M) top = Math.max(M, r.top - 6 - h);
+    p.style.left = left + 'px'; p.style.top = top + 'px';
+    b.setAttribute('aria-expanded', 'true'); b.__shownAt = Date.now();
+  }
+  function btn(e) { return e.target && e.target.closest ? e.target.closest('[data-help-tip]') : null; }
+  document.addEventListener('mouseover', function (e) { var b = btn(e); if (b) show(b); });
+  document.addEventListener('mouseout', function (e) { var b = btn(e); if (b && !b.contains(e.relatedTarget)) hide(b); });
+  document.addEventListener('focusin', function (e) { var b = btn(e); if (b) show(b); });
+  document.addEventListener('focusout', function (e) { var b = btn(e); if (b) hide(b); });
+  document.addEventListener('click', function (e) { var b = btn(e); if (b) { e.preventDefault(); if (!b.getAttribute('aria-expanded')) show(b); else if (Date.now() - (b.__shownAt || 0) > 400) hide(b); /* a tap fires mouseover then click: do not undo the show */ } else hideAll(null); });
+  // Escape closes an open tip first (capture phase, so a dialog or popover behind it stays open)
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !document.querySelector('[data-help-tip][aria-expanded]')) return;
+    hideAll(null); e.preventDefault(); e.stopPropagation();
+  }, true);
+})();

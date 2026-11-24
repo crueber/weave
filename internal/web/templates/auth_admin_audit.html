@@ -1,0 +1,24 @@
+{{define "title"}}Audit log - Weave{{end}}
+{{define "page"}}{{template "admin_top" dict "Active" "audit" "Crumb" .User.Name}}{{template "audit-body" .}}{{template "admin_bottom"}}{{end}}
+
+{{/* The admin audit log (audit.list): who rotated an agent's key, added a person to a group or unlinked an SSO identity,
+   and when. People, agents and groups only, never project, board or card content, and never a key. */}}
+{{define "audit-body"}}{{with .Data}}<div id="adm-audit" class="adm-audit">
+<section class="boards-sec" aria-labelledby="adm-audit-h">
+  <div class="bs-sec-head"><h2 id="adm-audit-h">Audit log</h2></div>
+  <p class="bs-desc">Changes made from the admin side that give someone a way in: rotating an agent's API key, adding a person to a group, and unlinking an SSO identity (here, through the API or with the host command <code>weave admin relink</code>). Entries are written with the change, keep the names as they were, and cannot be edited or removed. Recoveries of orphaned projects have their own log in <a href="/admin/orphans">Orphaned projects</a>.</p>
+  <form class="bs-add adm-audit-filter" role="search" hx-get="/admin/audit" hx-trigger="change" hx-target="#adm-audit" hx-select="#adm-audit" hx-swap="outerHTML" hx-replace-url="true" method="get" action="/admin/audit">
+    <label class="adm-audit-k" for="adm-audit-action">Show</label>
+    <select id="adm-audit-action" name="action">{{$a := .Action}}{{range .Actions}}<option value="{{.Value}}"{{if eq .Value $a}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+    <noscript><button type="submit">Filter</button></noscript>
+  </form>
+  <ul class="bs-members adm-audit-list">
+  {{range .Rows}}<li class="bs-member adm-rec" data-audit-action="{{.Action}}">
+    <span class="bs-member-t"><b>{{.What}}</b><small>{{if .Detail}}{{.Detail}} &middot; {{end}}by {{.By}}{{if ne .Source "host"}} &middot; {{if eq .Source "ui"}}admin console{{else}}API{{end}}{{end}}</small></span>
+    {{if .Self}}<span class="boards-badge is-warn" title="The person who made the change added themself">self</span>{{end}}
+    <time class="adm-rec-t" datetime="{{.At}}">{{auth_when .At}}</time>
+  </li>{{else}}<li class="bs-empty-row">{{if .Action}}No entries for this action.{{else}}Nothing recorded yet.{{end}}</li>{{end}}
+  </ul>
+  {{if or .Next .Older}}<nav class="adm-audit-pager" aria-label="Audit log pages">{{if .Older}}<a href="/admin/audit{{if .Action}}?action={{.Action}}{{end}}">Newest</a>{{end}}{{if .Next}}<a href="/admin/audit?{{if .Action}}action={{.Action}}&amp;{{end}}before={{.Next}}">Older entries</a>{{end}}</nav>{{end}}
+</section>
+</div>{{end}}{{end}}

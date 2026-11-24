@@ -106,7 +106,7 @@ func Stats(e *ops.Env, boardIDs []string) (map[string]BoardStats, error) {
 		COALESCE(SUM(c.is_closed=0 AND COALESCE(c.due_date,'')<>'' AND c.due_date<? AND COALESCE(c.is_due_completed,0)=0),0),
 		COALESCE(SUM(c.is_closed=0 AND c.due_date>=? AND c.due_date<? AND COALESCE(c.is_due_completed,0)=0),0),
 		COALESCE(SUM(c.claimed_by IS NOT NULL AND c.claimed_until>=?),0)
-		FROM lists l LEFT JOIN cards c ON c.list_id=l.id AND c.is_draft=0 AND c.is_template=0
+		FROM lists l LEFT JOIN card_placements p ON p.list_id=l.id LEFT JOIN cards c ON c.id=p.card_id AND c.is_draft=0 AND c.is_template=0
 		WHERE l.board_id IN (`+in+`) AND l.type IN ('active','closed')
 		GROUP BY l.id ORDER BY l.board_id, l.position, l.id`, with(nowS, nowS, now.Add(statsWindow).Format(time.RFC3339), nowS)...)
 	if err != nil {

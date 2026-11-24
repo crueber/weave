@@ -19,8 +19,8 @@ Connect (do this first; never print or log the key)
 
 About the key
   $WEAVE_TOKEN is an API key and it acts with the FULL role of whoever owns it. A personal key (browser: Settings ->
-  API key) acts as that person; a dedicated agent account (created by a Weave admin under /admin/agents) acts as
-  itself and is the better choice for unattended work. Claiming a card (`weave card claim`, the lease behind `weave
+  API key) acts as that person; a dedicated agent account (created by the board's owner in Board settings -> Agents)
+  acts as itself, reaches only the boards it was given and is the better choice for unattended work. Claiming a card (`weave card claim`, the lease behind `weave
   listen --claim` and `weave agent run`) needs Edit access on the board: a worker or viewer role can read and comment
   where allowed but cannot claim cards. If `weave whoami` shows a role that cannot edit the board, tell the user.
 

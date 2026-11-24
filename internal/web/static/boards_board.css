@@ -148,7 +148,10 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 .boards-tile{position:relative;background:var(--tile-bg,var(--surface,#fff));border:1px solid var(--tile-border,var(--border,#d4d4d8));border-radius:var(--radius,6px);box-shadow:var(--tile-shadow,0 1px 1px rgba(0,0,0,.08));padding:.5rem .6rem;cursor:pointer;display:flex;flex-direction:column;gap:.35rem;transition:box-shadow var(--dur-fast,.12s) var(--ease,ease),border-color var(--dur-fast,.12s) var(--ease,ease);-webkit-touch-callout:none}
 .boards-tile:hover{box-shadow:var(--tile-shadow-hover,0 3px 8px rgba(0,0,0,.18));border-color:var(--border-strong,#a1a1aa)}
 .boards-tile:focus-within{border-color:var(--accent,#4f46e5);box-shadow:0 0 0 2px var(--focus-ring,#6366f1)}
-.boards-tile.is-closed{opacity:.7}
+/* a closed card: the round check before the title (_closed_mark.html) and a secondary title colour; no opacity fade
+   (it would lower contrast where check-contrast.py cannot measure it) and no strike-through (titles stay readable) */
+.boards-tile.is-closed .boards-tile-link{color:var(--fg-2)}
+.boards-table tr.is-closed td:first-child{color:var(--fg-2)}
 .boards-tile-cover{margin:-.5rem -.6rem 0;border-radius:var(--radius,6px) var(--radius,6px) 0 0;overflow:hidden;max-height:9rem}
 .boards-tile-cover img{display:block;width:100%;height:auto;object-fit:cover;max-height:9rem}
 .boards-tile-link{color:var(--fg,#111);text-decoration:none;word-break:break-word;overflow-wrap:anywhere}
@@ -226,7 +229,9 @@ body.boards-dragging,body.boards-dragging *{cursor:grabbing!important}
 .boards-qlabel-dot{width:1.1rem;height:.7rem;border-radius:var(--radius-pill,999px);background:var(--c,#888);flex:none}
 .boards-qlabel.is-on{border-color:var(--c,var(--accent,#4f46e5));box-shadow:inset 3px 0 0 var(--c,var(--accent,#4f46e5))}
 .boards-qlabel-tick{margin-left:auto;color:var(--success,#2e8540)}
-.boards-quick-foot{display:flex;justify-content:flex-end}
+.boards-quick-foot{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:baseline;gap:.35rem 1rem}
+.boards-quick-foot .boards-linkbtn{white-space:nowrap}
+.boards-quick-foot small{color:var(--muted);font-size:var(--text-xs)}
 .boards-toasts{position:fixed;left:50%;bottom:1.25rem;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:.5rem;align-items:center}
 .boards-toast{display:flex;align-items:center;gap:.9rem;padding:.6rem .9rem;border-radius:var(--radius,6px);background:var(--fg,#18181b);color:var(--bg,#fff);box-shadow:var(--shadow-3,0 8px 24px rgba(0,0,0,.35));animation:boards-pop-in .2s var(--ease,ease-out)}
 .boards-toast button{border:0;background:none;color:inherit;text-decoration:underline;font:inherit;font-weight:600;cursor:pointer}
@@ -269,7 +274,7 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-settings[data-active=views] #set-views,.boards-settings[data-active=filters] #set-filters,.boards-settings[data-active=sharing] #set-sharing,
 .boards-settings[data-active=profile] #set-profile,.boards-settings[data-active=appearance] #set-appearance,.boards-settings[data-active=workspace] #set-workspace,
 .boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,.boards-settings[data-active=watching] #set-watching,
-.boards-settings[data-active=agents] #set-agents,.boards-settings[data-active=background] #set-background,.boards-settings[data-active=managers] #set-managers,.boards-settings[data-active=fields] #set-fields,.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=danger] #set-danger{display:block}
+.boards-settings[data-active=agents] #set-agents,.boards-settings[data-active=background] #set-background,.boards-settings[data-active=managers] #set-managers,.boards-settings[data-active=fields] #set-fields,.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=webhooks] #set-webhooks,.boards-settings[data-active=danger] #set-danger{display:block}
 .bs-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-2)}
 .bs-sec-head h2{margin:0;font-size:var(--text-lg);font-weight:700;letter-spacing:-.01em}
 .bs-status{min-height:1.2em;font-size:var(--text-sm)}.bs-saved{color:var(--success);font-weight:600}
@@ -315,6 +320,7 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .bs-label,.bs-group{display:flex;align-items:center;gap:var(--space-2);padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
 .bs-label.dragging{opacity:.5}.bs-label>input[name=name]{flex:1 1 8rem;min-width:0}.bs-group{margin-bottom:6px}.bs-group>input:first-of-type{flex:1 1 8rem;min-width:0}.bs-group>.bs-mono{flex:2 1 10rem}.bs-mono{font-family:var(--font-mono);font-size:var(--text-sm)}
 .bs-label select{flex:0 1 9rem;min-width:0}
+.bs-ro{min-height:2.75rem}.bs-ro-name{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}.bs-ro-name i{color:var(--muted)} /* read-only label and group rows */
 .bs-grip{cursor:grab;color:var(--muted);letter-spacing:-3px;user-select:none;padding:0 4px}
 .bs-moves{display:inline-flex;flex:none}.bs-moves button{width:1.6rem;height:2rem;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:.6rem}.bs-moves button:disabled{opacity:.3}
 .bs-pop{position:relative;flex:none}.bs-pop summary{list-style:none;cursor:pointer}.bs-pop summary::-webkit-details-marker{display:none}
@@ -391,8 +397,91 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-watch-btn.is-on:hover{color:var(--accent-hover);border-color:var(--accent-hover)}
 .boards-col-watch{display:inline-flex;align-items:center;flex:none;color:var(--accent)}
 .boards-col-watch .watch-ico{width:.9rem;height:.9rem}
+/* a column that closes cards that land here (lists.type closed): the closed mark in the header, named for screen readers */
+.boards-col-closes{display:inline-flex;align-items:center;flex:none;color:var(--success)}
+.boards-col-closes .closed-mark-ico{width:.9rem;height:.9rem}
+/* the same setting in the column "..." menu (menuitemcheckbox), and the confirm that swaps in below it */
+.boards-menu-pop .boards-closes-item{display:flex;align-items:center;gap:.5rem}
+.boards-closes-item .closed-mark-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
+.boards-closes-item.is-on .closed-mark-ico{color:var(--success)}
+.boards-closes-item small{margin-left:auto;padding-left:.5rem;color:var(--muted);font-size:var(--text-xs)}
+.boards-closes-item.is-on small{color:var(--success);font-weight:600}
+.boards-menu-confirm:empty{display:none}
+.boards-menu-confirm .closes-confirm{margin:.3rem .3rem .35rem}
+.boards-menu-confirm+.boards-menu-colour{margin-top:.35rem;padding-top:.45rem;border-top:1px solid var(--border)}
+/* auto-archive (lists.archive_after): the header glyph, named for screen readers, and the "..." menu row */
+.boards-col-archive{display:inline-flex;align-items:center;flex:none;color:var(--fg-2)}
+.boards-col-archive .archive-after-ico{width:.9rem;height:.9rem}
+.boards-menu-archive{display:flex;flex-direction:column;gap:.4rem;margin:.25rem 0 0;padding:.5rem .55rem;border-top:1px solid var(--border)}
+.boards-menu-archive .boards-menu-h{display:flex;align-items:center;gap:.4rem}
+.boards-menu-archive .boards-menu-h small{margin-left:auto;color:var(--fg-2);font-weight:600;letter-spacing:0;text-transform:none}
+.boards-menu-archive .archive-after-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
+.boards-menu-archive-row{display:flex;align-items:center;gap:.4rem}
+.boards-menu-archive-l{font-size:var(--text-sm);color:var(--fg-2);white-space:nowrap}
+.boards-menu-archive-row input{width:5.5rem;min-width:0;flex:1 1 auto}
+.boards-menu-archive-row button{flex:none}
+.boards-menu-pop .boards-archive-off{font-size:var(--text-sm);color:var(--fg-2)}
 .boards-menu-pop .boards-watch-item{display:flex;align-items:center;gap:.5rem}
 .boards-watch-item .watch-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
 .boards-watch-item.is-on .watch-ico{color:var(--accent)}
 .boards-watch-item small{margin-left:auto;color:var(--muted);font-size:var(--text-xs)}
-.boards-watch-item+.boards-menu-colour{margin-top:.35rem;padding-top:.45rem;border-top:1px solid var(--border)}
+
+/* ---- card shortcuts (boards_cardkeys.js): tile state, keyboard pickers, delete confirm ---- */
+.boards-timer{color:var(--fg-2,#3f3f46);font-weight:600}
+.boards-timer-dot{width:.5rem;height:.5rem;border-radius:var(--radius-pill,999px);background:var(--success,#2e8540);flex:none;animation:boards-timer-pulse 1.6s var(--ease,ease-in-out) infinite}
+@keyframes boards-timer-pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.boards-timer-dot{animation:none}}
+.boards-kpick{gap:.5rem;max-height:inherit;overflow:auto;box-sizing:border-box}
+.boards-kpick-head{display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.boards-kpick-h{font-weight:650;font-size:var(--text-sm,.8125rem)}
+.boards-kpick-card{color:var(--muted,#6b7280);font-size:var(--text-xs,.75rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.boards-kpick-filter{width:100%;box-sizing:border-box}
+.boards-kpick-list{display:flex;flex-direction:column;gap:.25rem;max-height:15rem;overflow:auto;padding:4px;margin:0 -4px}
+.boards-pop:has(>.boards-kpick){width:20.5rem}
+.boards-kopt{display:flex;align-items:center;gap:.5rem;width:100%;padding:.35rem .5rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);background:var(--surface,#fff);color:var(--fg,#111);font:inherit;text-align:left;cursor:pointer}
+.boards-kopt:hover{background:var(--surface-2,#f1f1f4)}
+.boards-kopt[hidden]{display:none}
+.boards-kopt:disabled{opacity:.6;cursor:progress}
+.boards-kopt-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.boards-kopt small{color:var(--muted,#6b7280);font-size:var(--text-xs,.75rem);white-space:nowrap}
+.boards-kopt .boards-qlabel-tick{margin-left:0}
+.boards-kdue.is-clear{color:var(--danger,#c9372c)}
+.boards-kn{flex:none;min-width:1.2rem;text-align:center;font:inherit;font-family:var(--font-mono,monospace);font-size:var(--text-xs,.75rem);color:var(--fg-2,#3f3f46);padding:0 .25rem;border:1px solid var(--border-strong,#a1a1aa);border-bottom-width:2px;border-radius:var(--radius-sm,4px);background:var(--surface-2,#f4f4f5);line-height:1.35}
+.boards-kn:empty{visibility:hidden}
+.boards-kpick-hint{margin:0;color:var(--muted,#6b7280);font-size:var(--text-xs,.75rem);line-height:1.8}
+.boards-kpick-hint kbd{font:inherit;font-family:var(--font-mono,monospace);padding:0 .3rem;border:1px solid var(--border-strong,#a1a1aa);border-bottom-width:2px;border-radius:var(--radius-sm,4px);background:var(--surface-2,#f4f4f5);color:var(--fg-2,#3f3f46)}
+.boards-kpick-none,.boards-kpick-empty{margin:.25rem 0;color:var(--muted,#6b7280);font-size:var(--text-sm,.8125rem)}
+.boards-kpick-form{display:flex;flex-direction:column;gap:.35rem}
+.boards-kpick-form input{width:100%;box-sizing:border-box;min-width:0}
+.boards-kpick-lab{font-size:var(--text-xs,.75rem);color:var(--fg-2,#3f3f46);font-weight:600}
+.boards-kpick-row{display:flex;gap:.5rem;align-items:flex-end}
+.boards-kpick-row>input{flex:1}
+.boards-kpick-coords>span{flex:1;display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.boards-kpick-actions{justify-content:space-between;align-items:center;margin-top:.15rem}
+.boards-confirm{margin:auto;height:fit-content;border:1px solid var(--border-strong,#a1a1aa);border-radius:var(--radius-lg,10px);background:var(--surface,#fff);color:var(--fg,#111);padding:.9rem 1rem;width:20rem;max-width:calc(100vw - 2rem);box-sizing:border-box;box-shadow:var(--shadow-3,0 8px 24px rgba(0,0,0,.3))}
+.boards-confirm.is-placed{margin:0}
+.boards-confirm::backdrop{background:var(--overlay,rgba(0,0,0,.5));opacity:.35}
+.boards-confirm-h{margin:0 0 .3rem;font-weight:650}
+.boards-confirm-p{margin:0 0 .9rem;color:var(--fg-2,#3f3f46);font-size:var(--text-sm,.8125rem);overflow-wrap:anywhere}
+.boards-confirm-row{display:flex;justify-content:flex-end;gap:.5rem}
+.boards-confirm :focus-visible{outline:2px solid var(--focus-ring,#6366f1);outline-offset:2px}
+@media(max-width:640px){.boards-confirm{margin:auto auto 1rem;width:calc(100vw - 2rem);border-radius:var(--radius-lg,10px);border:1px solid var(--border-strong,#a1a1aa)}}
+.boards-help-note{margin:-.1rem 0 .45rem;color:var(--muted,#6b7280);font-size:var(--text-sm,.8125rem)}
+
+/* ---- "also on N other boards" (a card on several boards; docs/DESIGN-SYSTEM.md "Also-on marker") ----
+   A small neutral pill (two-squares glyph + count) in the tile's meta row, never colour coded. It is a <button>: its
+   visual box stays small, the ::after extends the hit area (44px on touch) without growing the tile. */
+.boards-also{position:relative;display:inline-flex;align-items:center;gap:.2rem;height:auto;min-height:1.25rem;padding:0 .4rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-pill,999px);background:var(--surface-2,#f1f1f4);color:var(--fg-2,#3f3f46);font:inherit;font-size:var(--text-xs,.75rem);font-weight:600;line-height:1;white-space:nowrap;box-shadow:none;cursor:pointer;vertical-align:middle}
+.boards-also:hover,.boards-also[aria-expanded="true"]{background:var(--surface-3,#e4e4e7);color:var(--fg,#111);border-color:var(--border-strong,#a1a1aa)}
+.boards-also:active{transform:none}
+.boards-also .ico{width:.8rem;height:.8rem;flex:none}
+.boards-also::after{content:"";position:absolute;inset:-.35rem -.25rem}
+@media (pointer:coarse){.boards-also::after{inset:-12px -8px}}
+.boards-table .boards-also{margin-left:.35rem}
+/* the popover (in #boards-pop): the other boards, each with the card's column there */
+.boards-also-list{display:flex;flex-direction:column;gap:.15rem;margin:0;padding:0;list-style:none;max-height:16rem;overflow:auto}
+.boards-also-item{display:flex;flex-wrap:wrap;align-items:center;gap:.1rem .5rem;padding:.4rem .5rem;border-radius:var(--radius-sm,4px);color:var(--fg,#111);text-decoration:none}
+.boards-also-item:hover{background:var(--surface-3,#e4e4e7);color:var(--fg,#111)}
+.boards-also-b{min-width:0;font-weight:600;font-size:var(--text-sm,.8125rem);overflow-wrap:anywhere}
+.boards-also-c{flex-basis:100%;color:var(--fg-2,#3f3f46);font-size:var(--text-xs,.75rem)}
+.boards-also-home{margin-left:auto;padding:0 .45rem;border:1px solid var(--border-strong,#a1a1aa);border-radius:var(--radius-pill,999px);color:var(--fg-2,#3f3f46);font-size:var(--text-xs,.75rem);line-height:1.5}

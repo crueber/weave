@@ -27,8 +27,8 @@ var (
 	outsider  = &ops.Principal{UserID: "uout", Role: "boardUser", Name: "Otto"}
 )
 
-// fixture builds project p1 / board b1 (public=false) / list l1 / cards c1,c2 and users with
-// editor, viewer and commenter memberships.
+// fixture builds project p1 (managed by the admin persona) / board b1 (public=false) / list l1 / cards c1,c2 and
+// users with editor, viewer and commenter memberships.
 func fixture(t *testing.T) *ops.Env {
 	t.Helper()
 	e := testutil.Env(t, editor)
@@ -37,6 +37,8 @@ func fixture(t *testing.T) *ops.Env {
 	stmts := []string{
 		`INSERT INTO users(id,email,name,role,created_at) VALUES('uadmin','a@x','Admin','admin','` + now + `'),('ued','e@x','Edith','boardUser','` + now + `'),('uview','v@x','Vic','boardUser','` + now + `'),('ucom','c@x','Cora','boardUser','` + now + `'),('uout','o@x','Otto','boardUser','` + now + `')`,
 		`INSERT INTO projects(id,name,created_at) VALUES('p1','P','` + now + `')`,
+		// the admin persona manages p1 as a real project manager (the admin role alone gives no content access)
+		`INSERT INTO project_managers(id,project_id,user_id,created_at) VALUES('pm-admin','p1','uadmin','` + now + `')`,
 		`INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'B','` + now + `')`,
 		`INSERT INTO board_memberships(id,board_id,user_id,role,can_comment,created_at) VALUES('m1','b1','ued','editor',NULL,'` + now + `'),('m2','b1','uview','viewer',0,'` + now + `'),('m3','b1','ucom','viewer',1,'` + now + `')`,
 		`INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('l1','b1','active',1,'L','` + now + `')`,

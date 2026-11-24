@@ -2,6 +2,11 @@
 // lists, saved filters, public boards, templates, import/export and the board
 // page (kanban / list / grid views).
 //
+// Card positions: the cards domain owns card_placements (migration 0404); the boards writers that move cards
+// (list.sort, list.moveCards, archive/delete a column, archive-after, template apply, drop positions) update the
+// placements directly and never the mirrored cards columns (board_id, list_id, position, prev_list_id,
+// list_changed_at), which a guard trigger refuses. See placements.go and docs/DESIGN.md "Placements".
+//
 // Exported helpers for other domains:
 //
 //	GetBoard(ctx, q, id) (Board, error)           load a board row (no authz)
@@ -11,14 +16,22 @@
 //	EnsureSystemLists(ctx, q, boardID)            create archive+trash lists
 //	PlaceBetween(ctx, q, table, scope, args, afterID, beforeID) float64
 //	                                              position for a drop between two rows (rebalances)
-//	Rebalance(ctx, q, table, scope, args)         renumber a scope with PositionGap spacing
+//	Rebalance(ctx, q, table, scope, args)         renumber a scope with PositionGap spacing (not for the cards table: card
+//	                                              positions live on card_placements, see placements.go)
+//	PlaceCardBetween(ctx, q, listID, cardID, afterID, beforeID) (float64, error)
+//	                                              PlaceBetween over the card placements of a column (rebalances them)
 //	SingleSelectConflicts(ctx, db, cardID, labelID) ([]string, error)
 //	                                              label ids to remove when adding labelID (single-select groups)
 //	CallByForm(env, opName, url.Values)           call another domain's op via its own input tags
 //	Stats(env, boardIDs) (map[string]BoardStats, error)
 //	                                              at-a-glance counts for many boards (authz-filtered, constant queries)
 //	ActivityLess(a, b BoardStats) bool            most recently active first, then position, then id
+//	EmitAutoArchived(env, LandResult)             after a landing: the archive-after rule's card.archived events (board-only)
+//	EmitClosedElsewhere(env, boardID, LandResult) after a landing: quiet card.updated isClosed for cards on several boards
 //	LoadDrafts func(e, boardID) ([]Draft, error)  set by cards: the board's drafts for the Inbox column (inbox.go), one query
+//	RemoveFromBoards, BeforeBoardsDelete          set by cards: take a card off boards (re-home, prune) for list.clear and
+//	                                              board/project deletion (placement_hooks.go); DeleteBoards(e, ids, del) runs
+//	                                              the hook in the deleting transaction
 //
 // Realtime events (room board:<id>): board.created|updated|deleted,
 // boardMembership.created|updated|deleted, label.created|updated|deleted,

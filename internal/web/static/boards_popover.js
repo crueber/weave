@@ -118,7 +118,11 @@
     if (d.matches('details.boards-menu, details.boards-dd')) {
       if (d.open) {
         openOnes().forEach(function (o) { if (o !== d) o.removeAttribute('open'); });
-        if (d.matches('.boards-menu')) { if (!portal(d)) return; }   // move BEFORE focusing: moving a node drops focus
+        if (d.matches('.boards-menu')) {
+          if (!portal(d)) return; // move BEFORE focusing: moving a node drops focus
+          // a confirm left from the last time the menu was open is dropped (not on close: its request may be in flight)
+          [].forEach.call(popOf(d).querySelectorAll('.boards-menu-confirm'), function (c) { c.textContent = ''; });
+        }
         placeDetails(d);
         if (d.matches('.boards-menu')) { var f = items(popOf(d))[0]; f && f.focus({ preventScroll: true }); }
       } else reset(d);
@@ -161,9 +165,20 @@
   function mountQuick() { var q = document.getElementById('boards-pop'); if (q && q.parentNode !== document.body) document.body.appendChild(q); }
   mountQuick(); document.addEventListener('DOMContentLoaded', mountQuick);
 
+  // a list menu whose content grew (the closing-setting confirm swapped in): place it again so it stays on screen
+  document.addEventListener('htmx:afterSwap', function (e) {
+    var t = e.target; if (!t || !t.closest || !t.closest('.boards-menu-pop')) return;
+    var d = POP.menuOf(t); if (d && d.open) placeDetails(d);
+  });
   // quick-edit popover: keep it on screen when its content grows (labels toggled etc.)
   document.addEventListener('htmx:afterSwap', function (e) {
     var p = document.getElementById('boards-pop');
-    if (p && !p.hidden && e.target && p.contains(e.target) && p._anchor) place(p, p._anchor, { align: 'left', cover: true });
+    if (!(p && !p.hidden && e.target && p.contains(e.target) && p._anchor)) return;
+    // A label toggle makes the board re-render the card's column (live refresh), which detaches the tile this popover
+    // is anchored to: a detached element measures as 0,0 and the popover would jump to the top-left corner. Follow the
+    // tile to its fresh copy (same id); if it is gone, stay where we are.
+    var a = p._anchor;
+    if (!a.isConnected) { a = a.id ? document.getElementById(a.id) : null; if (a) p._anchor = a; }
+    if (a) place(p, a, { align: 'left', cover: true });
   });
 })();

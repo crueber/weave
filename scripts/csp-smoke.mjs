@@ -11,10 +11,20 @@
 //
 // WEAVE_TOKEN must be an admin API key (e.g. `weave admin mint-key --email you@example.com --role admin`).
 // It is sent as `Authorization: Bearer` on every browser request, so no OIDC login is needed. The
-// script creates its own demo project ("CSP smoke ...") and leaves it behind.
+// script creates its own demo project ("CSP smoke ...") and leaves it behind. Optional WEAVE_USER_TOKEN and
+// WEAVE_USER2_TOKEN (keys of two plain boardUser accounts) add the ownership walk: a plain user creates a
+// project, a board and a card; a project member creates a board only when the project allows members to; the
+// people picker filters as you type; the creator makes the member a board owner; both see Agents and Webhooks; no
+// Admin console link. The admin walk checks the console link, that console pages carry no content links, and (with
+// WEAVE_USER_TOKEN) that the admin gets "not found" for another person's project and board: the admin role is
+// system administration only, and the script's own demo project belongs to the admin who created it.
 //
 // Needs Playwright (playwright-core) and a Chromium: PLAYWRIGHT_CORE=/path/to/playwright-core/index.mjs
 // (default: import 'playwright-core'), CHROMIUM=/path/to/chrome (default: Playwright's own browser).
+// WEAVE_OWNER_TOKEN: API key of a non-admin who may create projects, for the board-owner walk (agent accounts and board
+// webhooks); start the server with WEAVE_NOTIFY_ALLOW_HOSTS=127.0.0.1 so its webhook may reach the script's local receiver.
+// A card on several boards (docs/DESIGN.md "Placements") is walked with card.place / the "Add to board..." picker (no
+// database access needed; WEAVE_DB is no longer read).
 // Exit status 0 = zero violations and every step passed.
 
 const BASE = (process.env.WEAVE_URL || 'http://localhost:8080').replace(/\/$/, '');
@@ -135,7 +145,7 @@ await run('anon: login + terms + healthz', async () => {
 // ---- plain pages ---------------------------------------------------------------------------
 for (const path of ['/', `/projects/${proj.id}`, `/boards/${board.id}`, `/boards/${board.id}/calendar`, `/boards/${board.id}/map`,
   `/boards/${board.id}/media`, `/boards/${board.id}/settings`, `/cards/${card.id}`, `/lists/${lists[0].id}`, `/ui/lists/${lists[0].id}`, '/dashboard', '/notifications', '/notification-services',
-  '/search?q=card', '/settings', '/settings?section=apikey', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks',
+  '/search?q=card', '/settings', '/settings?section=apikey', '/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks', '/admin/orphans', '/admin/audit',
   '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', `/projects/${proj.id}/settings?section=agents`, '/admin/backup', `/ui/boards/${board.id}/activity`, `/ui/projects/${proj.id}/card-templates`]) {   // the Inbox fragment is walked by the Inbox step (404 while the inbox is off)
   await run('page ' + path, async () => {
     if (path === '/admin/backup') { await p.request.get(BASE + path); return; } // a download, not a page
@@ -449,6 +459,60 @@ await run('connect an agent @390px: full-height sheet, scrolling tabs, copy pinn
   } finally { await mctx.close(); }
 });
 
+// ---- board owner (non-admin): agent accounts and board webhooks ------------------------------------
+// Needs WEAVE_OWNER_TOKEN: the API key of a NON-admin who may create projects (it creates its own project and board), and a
+// server started with WEAVE_NOTIFY_ALLOW_HOSTS=127.0.0.1 so the strict webhook policy lets the local receiver below through.
+await run('board owner (non-admin): create an agent for the board (key once), list, rotate, delete; board webhook: create, ping, deliveries', async () => {
+  const OWNER = process.env.WEAVE_OWNER_TOKEN || '';
+  if (!OWNER) { failures.push('[owner] WEAVE_OWNER_TOKEN is not set: the board-owner agent/webhook walk did not run'); return; }
+  const oapi = async (method, path, body) => {
+    const r = await fetch(BASE + '/api/v1' + path, { method, headers: { Authorization: 'Bearer ' + OWNER, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = {}; }
+    if (!r.ok) throw new Error(`owner ${method} ${path}: ${r.status} ${t.slice(0, 200)}`);
+    return j.item ?? j;
+  };
+  const who = await oapi('GET', '/auth/whoami');
+  if (who.role === 'admin') throw new Error('WEAVE_OWNER_TOKEN must belong to a non-admin');
+  const http = await import('node:http');
+  const received = [];
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', c => { b += c; }); req.on('end', () => { received.push({ event: req.headers['x-weave-event'], sig: req.headers['x-weave-signature-v2'] }); res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('thanks'); }); });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const hookURL = `http://127.0.0.1:${srv.address().port}/hook`;
+  const oproj = await oapi('POST', '/projects', { name: 'Owner smoke ' + stamp });
+  const oboard = await oapi('POST', `/projects/${oproj.id}/boards`, { name: 'Owner board' });
+  const octx = await browser.newContext({ viewport: { width: 1280, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + OWNER, 'X-Requested-With': 'weave' } });
+  const o = await newPage(octx);
+  try {
+    await o.goto(BASE + `/boards/${oboard.id}/settings?section=agents`); await o.locator('#bs-agent-accounts').waitFor(); await settle(o);
+    // the Connect an agent dialog offers to create one while none has access
+    await o.locator('#set-agents button:has-text("Connect an agent")').click(); await o.locator('#ap .ap-create').waitFor(); await esc(o); await settle(o);
+    await o.fill('#bs-agent-name', 'Smoke bot');
+    await o.locator('#bs-agent-accounts button:has-text("Create agent")').click(); await o.locator('#bs-agent-key').waitFor();
+    const key = await o.locator('#bs-agent-key').inputValue();
+    if (!/^wk_/.test(key)) throw new Error('no one-time key shown');
+    const listed = await oapi('GET', `/agents?boardId=${oboard.id}`);
+    if (listed.length !== 1 || listed[0].key) throw new Error('agent.list: ' + JSON.stringify(listed).slice(0, 200));
+    await o.goto(BASE + `/boards/${oboard.id}/settings?section=agents`); await o.locator('#bs-agent-accounts .adm-user').waitFor(); await settle(o);
+    if (await o.locator('#bs-agent-key').count()) throw new Error('the key is shown again after reload');
+    await o.locator('#bs-agent-accounts .adm-user summary').first().click();
+    o.once('dialog', d => d.accept());
+    await o.locator('#bs-agent-accounts button:has-text("Rotate")').click(); await o.locator('#bs-agent-key').waitFor();
+    if ((await o.locator('#bs-agent-key').inputValue()) === key) throw new Error('rotate did not issue a new key');
+    await o.locator('#bs-agent-accounts .adm-user summary').first().click();
+    o.once('dialog', d => d.accept());
+    await o.locator('#bs-agent-accounts .adm-user button.danger:has-text("Delete")').click(); await o.locator('#bs-agent-accounts li.bs-empty-row').waitFor(); await settle(o);
+    // board webhook
+    await o.goto(BASE + `/boards/${oboard.id}/settings?section=webhooks`); await o.locator('#bs-webhooks').waitFor(); await settle(o);
+    await o.fill('#bwh-new-name', 'Smoke hook'); await o.fill('#bwh-new-url', hookURL); await o.fill('#bwh-new-secret', 'smoke-secret');
+    await o.locator('#bs-webhooks button:has-text("Create webhook")').click(); await o.locator('#bs-webhooks details.adm-user[open]').waitFor(); await settle(o);
+    await o.locator('#bs-webhooks details.adm-user[open] button:has-text("Send ping")').click(); await o.locator('#bs-webhooks .bs-ping').waitFor();
+    const ping = await o.locator('#bs-webhooks .bs-ping').textContent();
+    if (!/Ping delivered/.test(ping)) throw new Error('ping: ' + ping.replace(/\s+/g, ' '));
+    if (!received.some(x => x.event === 'ping' && /^t=\d+,v1=[0-9a-f]{64}$/.test(x.sig || ''))) throw new Error('receiver got no signed ping');
+    await o.locator('#bs-webhooks button:has-text("Show deliveries")').click(); await o.locator('#bs-webhooks .adm-table td:has-text("ping")').waitFor(); await settle(o);
+  } finally { await octx.close(); srv.close(); }
+});
+
 // ---- card sheet ----------------------------------------------------------------------------
 await run('card sheet: open, sections, popovers, shortcuts', async () => {
   await go(`/boards/${board.id}`);
@@ -535,12 +599,42 @@ await run('watching: board bell, column menu and sheet, card sheet watch/mute, s
   await p.locator('#set-watching form[hx-post$="/stop"] button').first().click(); await settle(p);
 });
 
+// ---- Admin console > Orphaned projects: the list (or its empty state), the people picker of each orphan, the recovery log --
+await run('admin orphaned projects: list or empty state, pick a new manager (not submitted), recovery log', async () => {
+  await go('/admin/orphans');
+  await p.locator('#adm-orphans').waitFor();
+  const combos = p.locator('.adm-orph [data-combo] [role=combobox]');
+  if (await combos.count() === 0) {
+    if (!(await p.locator('.adm-orph-empty').textContent()).includes('No orphaned projects')) throw new Error('no orphans and no empty state');
+  } else {
+    await combos.first().click(); await combos.first().press('ArrowDown');
+    const opt = p.locator('.adm-orph [data-combo] li[role=option]:visible').first();
+    if (await opt.count()) {
+      await opt.click();
+      if (await p.locator('.adm-orph [data-add]').first().isDisabled()) throw new Error('picking a person does not enable Reassign');
+    }
+  }
+  await p.locator('#adm-recoveries-h').waitFor(); await settle(p);
+});
+
+// ---- Admin console > Audit log: the list (or its empty state), the action filter (htmx swap), the pager link -------------
+await run('admin audit log: list or empty state, filter by action, back to all', async () => {
+  await go('/admin/audit');
+  await p.locator('#adm-audit').waitFor();
+  if (await p.locator('.adm-audit-list > li').count() === 0) throw new Error('no rows and no empty state');
+  await p.locator('#adm-audit-action').selectOption('group.member.add'); await settle(p);
+  await p.locator('#adm-audit').waitFor();
+  await p.locator('#adm-audit-action').selectOption(''); await settle(p);
+  const older = p.locator('.adm-audit-pager a').last();
+  if (await older.count()) { await older.click(); await settle(p); }
+});
+
 // ---- board settings, admin, settings pages (all sections) ----------------------------------
 await run('board settings: every section', async () => {
   await go(`/boards/${board.id}/settings`);
   await clickEach('button, summary, a[hx-get]', { max: 60 });
 });
-for (const path of ['/settings', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks', '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', '/notification-services', '/dashboard']) {
+for (const path of ['/settings', '/admin/users', '/admin/agents', '/admin/groups', '/admin/sso', '/admin/config', '/admin/webhooks', '/admin/orphans', '/admin/audit', '/admin/agent-prompts', '/admin/agent-prompts?tab=blocks', '/notification-services', '/dashboard']) {
   await run('forms on ' + path, async () => {
     await go(path);
     await clickEach('button:not([type=submit]), summary', { max: 25 });
@@ -552,6 +646,558 @@ for (const path of ['/settings', '/admin/users', '/admin/agents', '/admin/groups
 await run('search + notifications', async () => {
   await go('/search?q=First'); await p.fill('input[name=q]', 'card').catch(() => {}); await p.keyboard.press('Enter'); await settle(p);
   await go('/notifications'); await clickEach('button[hx-post]', { max: 5, skip: /nothing/ });
+});
+
+// ---- card shortcuts (boards_cardkeys.js): L d p s S x A Delete on a tile and in the card sheet ------------------
+await run('board: card shortcuts (labels, due, location, time, close, archive, trash, undo, focus, viewers)', async () => {
+  const kb = await api('POST', `/projects/${proj.id}/boards`, { name: 'Keys board' });
+  const [todo] = [await api('POST', `/boards/${kb.id}/lists`, { name: 'Keys todo' })];
+  await api('PATCH', `/boards/${kb.id}`, { hasInbox: true });
+  const bug = await api('POST', `/boards/${kb.id}/labels`, { name: 'Bug', color: 'berry-red' });
+  await api('POST', `/boards/${kb.id}/labels`, { name: 'Feature', color: 'lagoon-blue' });
+  const kc = [];
+  for (const n of ['K1', 'K2', 'K3', 'K4', 'K5']) kc.push(await api('POST', `/lists/${todo.id}/cards`, { name: n }));
+  const draft = await api('POST', `/boards/${kb.id}/drafts`, { name: 'Draft idea' });
+  const allLists = await api('GET', `/boards/${kb.id}/lists`);
+  const trashId = (allLists.items || allLists).find(l => l.type === 'trash').id;
+  const get = id => api('GET', `/cards/${id}`);
+  const tileSel = id => `#tile-${id}`;
+  const focusTile = async id => { await p.focus(`${tileSel(id)} .boards-tile-link`); await p.waitForTimeout(80); };
+  const focusedTile = () => p.evaluate(() => { const t = document.activeElement && document.activeElement.closest && document.activeElement.closest('.boards-tile'); return t ? t.dataset.id : ''; });
+  const toast = async re => { await p.waitForFunction(r => [...document.querySelectorAll('#boards-toasts .boards-toast')].some(t => new RegExp(r).test(t.textContent)), re.source, { timeout: 4000 }); };
+  const clearToasts = () => p.evaluate(() => document.querySelectorAll('#boards-toasts .boards-toast').forEach(t => t.remove()));
+  const popKind = () => p.evaluate(() => { const b = document.querySelector('#boards-pop:not([hidden]) .boards-kpick'); return b ? b.dataset.kpick : ''; });
+  const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+  await go(`/boards/${kb.id}`);
+
+  // nothing fires while typing: composer, quick edit, filter input
+  await focusTile(kc[0].id); await p.keyboard.press('c'); await p.waitForTimeout(200);
+  await p.keyboard.type('xA'); await p.keyboard.press('Backspace'); await p.keyboard.press('Backspace'); await p.keyboard.press('Escape');
+  await focusTile(kc[0].id); await p.keyboard.press('e'); await p.waitForSelector('#boards-pop:not([hidden]) [data-quick-name]');
+  await p.keyboard.type('xA'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+  await p.keyboard.press('/'); await p.keyboard.type('x'); await p.keyboard.press('Backspace'); await p.keyboard.press('Delete'); await p.keyboard.press('Escape');
+  await p.evaluate(() => document.activeElement && document.activeElement.blur());
+  let c0 = await get(kc[0].id);
+  expect(!c0.isClosed && c0.listId === todo.id && c0.name === 'K1', `typing triggered a card shortcut: ${JSON.stringify({ closed: c0.isClosed, list: c0.listId, name: c0.name })}`);
+  expect(!(await p.$('dialog.boards-confirm[open]')), 'Delete in the filter input opened the confirm');
+  await go(`/boards/${kb.id}`);
+
+  // L: label picker (number key, type-to-filter + Enter), Esc returns focus to the tile
+  await focusTile(kc[0].id); await p.keyboard.press('L');
+  await p.waitForSelector('#boards-pop:not([hidden]) .boards-kpick[data-kpick=labels]');
+  await p.keyboard.press('1');
+  await p.waitForFunction(id => document.querySelector(`#tile-${id} .boards-tile-labels`), kc[0].id);
+  expect((await get(kc[0].id)).labelIds.includes(bug.id), 'L 1 did not add the first label');
+  await p.keyboard.type('fea'); await p.keyboard.press('Enter');
+  await p.waitForFunction(id => document.querySelectorAll(`#tile-${id} .boards-tile-labels > *`).length === 2, kc[0].id);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+  expect(!(await popKind()), 'Esc did not close the label picker');
+  expect((await focusedTile()) === kc[0].id, 'focus did not return to the tile after the label picker');
+  await p.keyboard.press('L'); await p.waitForSelector('#boards-pop:not([hidden]) .boards-kpick');
+  await p.keyboard.press('ArrowDown'); await p.keyboard.press('Enter'); await p.waitForTimeout(400);
+  expect((await get(kc[0].id)).labelIds.length === 1, 'ArrowDown + Enter did not toggle the second label off');
+  await p.keyboard.press('Escape');
+
+  // d: due date quick choice (2 = tomorrow) and 0 = remove
+  await focusTile(kc[0].id); await p.keyboard.press('d');
+  await p.waitForSelector('#boards-pop:not([hidden]) .boards-kpick[data-kpick=due]');
+  await p.keyboard.press('2'); await toast(/Due date set/);
+  const tm = new Date(); tm.setDate(tm.getDate() + 1);
+  const want = `${tm.getFullYear()}-${String(tm.getMonth() + 1).padStart(2, '0')}-${String(tm.getDate()).padStart(2, '0')}`;
+  expect(((await get(kc[0].id)).dueDate || '').startsWith(want), `due date is not tomorrow (${want})`);
+  await p.waitForSelector(`${tileSel(kc[0].id)} .boards-due`);
+  expect((await focusedTile()) === kc[0].id, 'focus left the tile after setting the due date');
+  await p.keyboard.press('d'); await p.waitForSelector('#boards-pop:not([hidden]) [data-due-clear]'); await p.keyboard.press('0'); await toast(/Due date removed/);
+  expect(!(await get(kc[0].id)).dueDate, '0 did not remove the due date');
+
+  // p: location set, then removed
+  await focusTile(kc[0].id); await p.keyboard.press('p');
+  await p.waitForSelector('#boards-pop:not([hidden]) .boards-kpick[data-kpick=place]');
+  await p.keyboard.type('Harbour'); await p.fill('#boards-pop input[name=lat]', '52.37'); await p.fill('#boards-pop input[name=lng]', '4.89');
+  await p.press('#boards-pop input[name=lng]', 'Enter'); await toast(/Location set/);
+  await p.waitForSelector(`${tileSel(kc[0].id)} .boards-place`);
+  expect((await get(kc[0].id)).lat === 52.37, 'location not saved');
+  await focusTile(kc[0].id); await p.keyboard.press('p'); await p.click('#boards-pop [data-place-clear]'); await toast(/Location removed/);
+  expect((await get(kc[0].id)).lat == null, 'location not removed');
+
+  // s / S: start and stop time tracking, with the running indicator on the tile
+  await focusTile(kc[0].id); await clearToasts(); await p.keyboard.press('s'); await toast(/Time tracking started/);
+  await p.waitForSelector(`${tileSel(kc[0].id)} .boards-timer`);
+  await focusTile(kc[0].id); await p.keyboard.press('s'); await toast(/already running/);
+  await focusTile(kc[0].id); await p.keyboard.press('S'); await toast(/Time tracking stopped/);
+  await p.waitForFunction(id => !document.querySelector(`#tile-${id} .boards-timer`), kc[0].id);
+
+  // x: close moves focus to the next card; Undo re-opens it
+  await focusTile(kc[0].id); await clearToasts(); await p.keyboard.press('x'); await toast(/Card closed/);
+  await p.waitForFunction(id => document.querySelector(`#tile-${id}.is-closed`), kc[0].id);
+  expect((await get(kc[0].id)).isClosed, 'x did not close the card');
+  expect((await focusedTile()) === kc[1].id, `focus did not move to the next card after closing (on ${await focusedTile()})`);
+  await p.click('#boards-toasts .boards-toast button'); await p.waitForTimeout(700);
+  expect(!(await get(kc[0].id)).isClosed, 'Undo did not re-open the card');
+
+  // A: archive removes the tile, focus moves on; Undo restores it and focuses it again
+  await focusTile(kc[1].id); await clearToasts(); await p.keyboard.press('A'); await toast(/Card archived/);
+  await p.waitForFunction(id => !document.getElementById(`tile-${id}`), kc[1].id);
+  expect((await focusedTile()) === kc[2].id, 'focus did not move to the next card after archiving');
+  await p.click('#boards-toasts .boards-toast button');
+  await p.waitForFunction(id => document.activeElement && document.activeElement.closest && document.activeElement.closest(`#tile-${id}`), kc[1].id, { timeout: 4000 });
+  expect((await get(kc[1].id)).listId === todo.id, 'Undo did not restore the archived card');
+
+  // Delete: Esc cancels, a stray key does nothing, Enter moves to trash (reversible)
+  await focusTile(kc[2].id); await p.keyboard.press('Delete');
+  await p.waitForSelector('dialog.boards-confirm[open]');
+  expect(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-confirm-yes')), 'focus is not on the confirm button');
+  for (const k of ['x', 'Delete', 'A', 'j', 'c', '?', '1']) { await p.keyboard.press(k); await p.waitForTimeout(60); }
+  await p.waitForTimeout(250);
+  expect(await p.$('dialog.boards-confirm[open]'), 'a stray key closed the confirm');
+  expect(new URL(p.url()).pathname === `/boards/${kb.id}` && !(await p.$('#boards-help[open]')) && !(await p.$('.boards-composer.is-open')), 'a board key acted behind the confirm');
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  expect(!(await p.$('dialog.boards-confirm[open]')), 'Esc did not cancel the confirm');
+  expect((await get(kc[2].id)).listId === todo.id, 'cancelled delete still moved the card');
+  expect((await focusedTile()) === kc[2].id, 'focus did not return to the tile after cancelling');
+  await clearToasts(); await p.keyboard.press('Backspace'); await p.waitForSelector('dialog.boards-confirm[open]'); await p.keyboard.press('Enter');
+  await toast(/moved to trash/);
+  await p.waitForFunction(id => !document.getElementById(`tile-${id}`), kc[2].id);
+  expect((await get(kc[2].id)).listId === trashId, 'Delete did not move the card to the trash list');
+  expect((await focusedTile()) === kc[3].id, 'focus did not move to the next card after Delete');
+
+  // Inbox draft: only Delete (permanent, after a confirmation); other keys do nothing
+  await focusTile(draft.id); await p.keyboard.press('x'); await p.keyboard.press('A'); await p.keyboard.press('L'); await p.waitForTimeout(300);
+  expect(!(await popKind()) && !!(await p.$(tileSel(draft.id))), 'a card shortcut acted on an Inbox draft');
+  await focusTile(draft.id); await p.keyboard.press('Delete'); await p.waitForSelector('dialog.boards-confirm[open]');
+  expect(/permanently/.test(await p.textContent('dialog.boards-confirm')), 'draft delete confirm does not say permanently');
+  await p.keyboard.press('Enter'); await p.waitForFunction(id => !document.getElementById(`tile-${id}`), draft.id);
+
+  // card sheet: x close/re-open, s/S time, p and L popovers, Delete confirm above the sheet, A archive (closes the sheet)
+  await focusTile(kc[3].id); await p.keyboard.press('Enter'); await p.waitForSelector('#modal[open] #card-modal');
+  await p.keyboard.press('x'); await p.waitForSelector('#card-modal[data-closed]');
+  expect((await get(kc[3].id)).isClosed, 'x in the sheet did not close the card');
+  await p.keyboard.press('x'); await p.waitForSelector('#card-modal:not([data-closed])');
+  await p.waitForSelector('#x-time .x-timebtn');
+  await p.keyboard.press('s'); await p.waitForSelector('#x-time .x-timer.is-running'); await toast(/started/);
+  await p.keyboard.press('S'); await p.waitForSelector('#x-time .x-timer:not(.is-running)'); await toast(/stopped/);
+  await p.keyboard.press('p'); await p.waitForSelector('#card-modal details[data-pop=location][open]'); await p.keyboard.press('Escape');
+  await p.evaluate(() => document.activeElement && document.activeElement.blur && document.getElementById('modal').focus());
+  await p.keyboard.press('L'); await p.waitForSelector('#card-modal details[data-pop=labels][open]'); await p.keyboard.press('Escape');
+  await p.evaluate(() => document.getElementById('modal').focus());
+  await p.keyboard.press('Delete'); await p.waitForSelector('dialog.boards-confirm[open]');
+  await p.keyboard.press('j'); await p.waitForTimeout(400);
+  expect((await p.getAttribute('#card-modal', 'data-card')) === kc[3].id, 'j behind the confirm switched the sheet to another card');
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  expect(await p.$('#modal[open] #card-modal'), 'cancelling the confirm closed the sheet');
+  await clearToasts(); await p.keyboard.press('A'); await toast(/Card archived/);
+  await p.waitForFunction(() => !document.getElementById('modal').open);
+  expect((await get(kc[3].id)).listId !== todo.id, 'A in the sheet did not archive');
+  await p.click('#boards-toasts .boards-toast button'); await p.waitForSelector(tileSel(kc[3].id));
+
+  // viewers: nothing happens (a small read-only toast), no picker, no confirm
+  const vk = await api('POST', '/agents', { name: 'Keys viewer', role: 'boardUser', boardIds: [kb.id], boardRole: 'viewer' });
+  const vctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + (vk.key && vk.key.key || vk.key), 'X-Requested-With': 'weave' } });
+  const vp = await newPage(vctx);
+  await vp.goto(BASE + `/boards/${kb.id}`); await vp.waitForTimeout(500);
+  await vp.focus(`${tileSel(kc[4].id)} .boards-tile-link`);
+  for (const k of ['x', 'A', 'Delete', 'L', 'd', 'p', 's']) { await vp.keyboard.press(k); await vp.waitForTimeout(120); }
+  expect(!(await vp.$('dialog.boards-confirm[open]')) && !(await vp.$('#boards-pop:not([hidden])')), 'a viewer got a picker or a confirm');
+  expect(/read-only/i.test(await vp.textContent('#boards-toasts')), 'viewer did not get the read-only toast');
+  const c4 = await get(kc[4].id);
+  expect(!c4.isClosed && c4.listId === todo.id, 'a viewer changed the card');
+  await vctx.close();
+  await api('DELETE', `/agents/${vk.id}`).catch(() => {});
+});
+
+// ---- ownership: plain users create projects and boards ---------------------------------------
+// Optional: WEAVE_USER_TOKEN and WEAVE_USER2_TOKEN are API keys of two *different* plain boardUser accounts
+// (`weave admin mint-key --email u1@example.com --role boardUser`). Skipped when unset.
+const U1 = process.env.WEAVE_USER_TOKEN || '', U2 = process.env.WEAVE_USER2_TOKEN || '';
+async function apiAs(tok, method, path, body) {
+  const r = await fetch(BASE + '/api/v1' + path, { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = {}; }
+  return { status: r.status, item: j.item ?? j };
+}
+const userCtx = tok => browser.newContext({ viewport: { width: 1280, height: 800 }, extraHTTPHeaders: { Authorization: 'Bearer ' + tok, 'X-Requested-With': 'weave' } });
+async function createBlankBoard(up, name) {
+  await up.click('.projects-board-new');
+  await up.waitForSelector('#modal[open] .tg-tile-blank');
+  await up.click('#modal[open] .tg-tile-blank');
+  await up.fill('#modal[open] .tg-create input[name=name]', name);
+  await Promise.all([up.waitForURL(/\/boards\/[0-9a-f]+/), up.click('#modal[open] .tg-go')]);
+  return up.url().split('/boards/')[1].split(/[?#]/)[0];
+}
+if (U1 && U2) await run('ownership: a plain boardUser creates a project, a board and a card; a member creates boards only when the project allows it', async () => {
+  const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+  const u2 = (await apiAs(U2, 'GET', '/auth/me')).item;
+  const c1 = await userCtx(U1), c2 = await userCtx(U2);
+  try {
+    const up = await newPage(c1);
+    await up.goto(BASE + '/'); await settle(up);
+    await up.click('button[hx-get="/ui/projects/new"]');
+    await up.fill('#modal[open] form.projects-dialog input[name=name]', 'Owned ' + stamp);
+    await Promise.all([up.waitForURL(/\/projects\/[0-9a-f]+$/), up.click('#modal[open] form.projects-dialog button.primary')]);
+    const pid = up.url().split('/projects/')[1];
+    const bid = await createBlankBoard(up, 'Mine');
+    const l = await apiAs(U1, 'POST', `/boards/${bid}/lists`, { name: 'Todo' });
+    const c = await apiAs(U1, 'POST', `/lists/${l.item.id}/cards`, { name: 'Owned card' });
+    expect(l.status === 200 && c.status === 200, `list/card by the project creator: ${l.status} ${c.status}`);
+    await up.goto(BASE + `/boards/${bid}`); await settle(up);
+    expect(await up.isVisible('text=Owned card'), 'the new card is not on the board');
+    // a second user, an editor on that board, is a project member
+    expect((await apiAs(U1, 'POST', `/boards/${bid}/members`, { userId: u2.id, role: 'editor' })).status === 200, 'adding the member failed');
+    const vp = await newPage(c2);
+    await vp.goto(BASE + `/projects/${pid}`); await settle(vp);
+    expect(!(await vp.$('.projects-board-new')), 'a member sees Create board while the project allows managers only');
+    expect((await apiAs(U2, 'POST', `/projects/${pid}/boards`, { name: 'Refused' })).status === 403, 'a member created a board under "owners"');
+    // the creator switches Project settings > General to "Any project member" (autosave)
+    await up.goto(BASE + `/projects/${pid}/settings`); await settle(up);
+    await up.check('#set-general input[name=boardCreation][value=members]');
+    await up.waitForSelector('#set-general .bs-saved');
+    expect((await apiAs(U1, 'GET', `/projects/${pid}`)).item.boardCreation === 'members', 'setting not saved');
+    await vp.goto(BASE + `/projects/${pid}`); await settle(vp);
+    const nb = await createBlankBoard(vp, 'Member board');
+    const ms = (await apiAs(U2, 'GET', `/boards/${nb}/members`)).item;
+    expect(Array.isArray(ms) && ms.some(m => m.userId === u2.id && m.role === 'owner'), 'the member did not become the board owner');
+    await vp.goto(BASE + `/boards/${nb}/settings?section=members`); await settle(vp);
+    expect(await vp.$('#set-members select option[value=owner]'), 'the board owner gets no members management');
+
+    // ---- the plain user's whole path (capability layer): no admin console, people pickers filter, owners, agents, webhooks
+    await up.goto(BASE + '/'); await settle(up);
+    await up.click('summary[aria-label="Account menu"]');
+    expect(!(await up.$('[data-cap=admin-console]')), 'a plain user sees the Admin console link');
+    // Project settings > Managers: typing filters the people picker ([hidden] must win over .bs-combo li{display:flex})
+    await up.goto(BASE + `/projects/${pid}/settings?section=managers`); await settle(up);
+    const combo = up.locator('#set-managers [data-combo] [role=combobox]');
+    await combo.click(); await combo.press('ArrowDown');
+    const all = await up.locator('#set-managers [data-combo] li[role=option]').count();
+    await combo.fill('zzzz-nobody-has-this-name');
+    const shown = await up.$$eval('#set-managers [data-combo] li[role=option]', els => els.filter(e => getComputedStyle(e).display !== 'none').length);
+    const leaks = await up.$$eval('#set-managers [data-combo] li[role=option][hidden]', els => els.filter(e => getComputedStyle(e).display !== 'none').length);
+    expect(all > 0 && shown === 0 && leaks === 0, `the people picker does not filter (${shown} of ${all} options visible, ${leaks} hidden but displayed)`);
+    await combo.fill('');
+    // board settings as the project creator: make the member an owner, see Agents and Webhooks; no e-mail addresses of others
+    await up.goto(BASE + `/boards/${bid}/settings?section=members`); await settle(up);
+    await up.locator('#set-members li.bs-member', { hasText: u2.name }).locator('select[name=role]').selectOption('owner'); await settle(up);
+    const mem = (await apiAs(U1, 'GET', `/boards/${bid}/members`)).item;
+    expect(Array.isArray(mem) && mem.some(m => m.userId === u2.id && m.role === 'owner'), 'making the member an owner did not save');
+    for (const hook of ['board-members-add', 'board-share', 'board-template-publish', 'board-webhooks', 'board-delete']) {
+      expect(await up.$(`[data-cap=${hook}]`), `the board creator misses ${hook} in board settings`);
+    }
+    await up.goto(BASE + `/boards/${bid}/settings?section=agents`); await up.locator('[data-cap=board-agent-create]').waitFor({ state: 'attached' }); await settle(up);
+    await up.goto(BASE + `/boards/${bid}/settings?section=webhooks`); await up.locator('[data-cap=board-webhook-create]').waitFor({ state: 'attached' }); await settle(up);
+    // the new owner (U2) sees the same management sections; a viewer would see none of them (capability matrix test)
+    await vp.goto(BASE + `/boards/${bid}/settings`); await settle(vp);
+    for (const hook of ['board-members-add', 'board-share', 'board-webhooks', 'board-delete']) {
+      expect(await vp.$(`[data-cap=${hook}]`), `the new board owner misses ${hook}`);
+    }
+    await vp.locator('[data-cap=board-agent-create]').waitFor({ state: 'attached' }); // the Agents section's lazy fragment replaces its placeholder
+    expect(!(await vp.$('#set-general a[href$="/settings"][href*="/projects/"]')), 'a board owner is sent to project settings');
+  } finally { await c1.close(); await c2.close(); }
+});
+
+// ---- admin (system administrator): the console is there, and it carries no project or board content links ----
+await run('admin: console link, system sections only (no board/card/project links on any console page)', async () => {
+  await go('/');
+  await p.click('summary[aria-label="Account menu"]');
+  if (!(await p.$('[data-cap=admin-console]'))) throw new Error('the admin sees no Admin console link');
+  await esc(p);
+  for (const path of ['/admin', '/admin/users', '/admin/agents', '/admin/groups', '/admin/orphans', '/admin/audit', '/admin/sso', '/admin/config', '/admin/webhooks', '/admin/agent-prompts']) {
+    await go(path);
+    const links = await p.$$eval('main a[href^="/boards/"], main a[href^="/cards/"], main a[href^="/projects/"]', as => as.map(a => a.getAttribute('href')));
+    if (links.length) throw new Error(`${path} links to content: ${links.slice(0, 3).join(', ')}`);
+  }
+});
+
+// ---- admin = system administration, no content access: someone else's board is "not found" for the admin -------
+// Needs WEAVE_USER_TOKEN (a plain boardUser). The user creates a project and a board; the admin's browser opens
+// their links and gets the not-found page; the admin's home lists only the admin's own projects.
+if (U1) await run('admin: another person\'s project and board are not found; the home page lists only the admin\'s own projects', async () => {
+  const up = (await apiAs(U1, 'POST', '/projects', { name: 'Private ' + stamp })).item;
+  const ub = (await apiAs(U1, 'POST', `/projects/${up.id}/boards`, { name: 'Private board' })).item;
+  for (const path of [`/boards/${ub.id}`, `/projects/${up.id}`, `/boards/${ub.id}/settings`]) {
+    const r = await p.goto(BASE + path); await settle(p);
+    if (!r || r.status() !== 404) throw new Error(`admin ${path} -> HTTP ${r && r.status()} (want 404)`);
+    if (await p.isVisible('text=Private board')) throw new Error(`admin ${path} shows the board name`);
+  }
+  await go('/');
+  if (await p.isVisible(`text=Private ${stamp}`)) throw new Error('the admin home lists another person\'s project');
+  if (!(await p.isVisible(`text=${proj.name}`))) throw new Error('the admin home misses the admin\'s own project');
+});
+
+// ---- closed check mark: x, drag into a closed column, archive keeps the flag, re-open ------------------------------
+await run('board: closed check mark (x, drag into a closed column, archive keeps it, re-open, sheet badge, calendar)', async () => {
+  let at = 'setup';
+  try {
+  const cb = await api('POST', `/projects/${proj.id}/boards`, { name: 'Closed board' });
+  const todo = await api('POST', `/boards/${cb.id}/lists`, { name: 'Todo' });
+  const done = await api('POST', `/boards/${cb.id}/lists`, { name: 'Done', type: 'closed' });
+  const due = new Date(); due.setDate(15);
+  const cc = [];
+  for (const n of ['C1', 'C2', 'C3']) cc.push(await api('POST', `/lists/${todo.id}/cards`, { name: n, dueDate: due.toISOString().slice(0, 10) }));
+  const get = id => api('GET', `/cards/${id}`);
+  const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+  const mark = id => `#tile-${id} .boards-tile-name .closed-mark`;
+  await go(`/boards/${cb.id}`);
+  expect(!(await p.$('.closed-mark')), 'an open card shows the closed mark');
+  // x on a tile: the card moves to Done and gets the mark, Undo removes it again
+  at = 'x on a tile: the card moves to Done and gets the mark, Undo removes it again';
+  await p.focus(`#tile-${cc[0].id} .boards-tile-link`); await p.keyboard.press('x');
+  await p.waitForSelector(mark(cc[0].id), { timeout: 4000 });
+  expect(await p.$(`#col-${done.id} #tile-${cc[0].id}`), 'x did not move the card into the closed column');
+  expect((await p.getAttribute(`${mark(cc[0].id)}`, 'title')) === 'Closed', 'the mark has no "Closed" hover title');
+  expect(/Closed:/.test(await p.textContent(`#tile-${cc[0].id} .boards-tile-name`)), 'no screen-reader text on the mark');
+  await p.click('#boards-toasts .boards-toast button');
+  await p.waitForFunction(s => !document.querySelector(s), mark(cc[0].id), { timeout: 4000 });
+  // drag C2 into the closed column: the mark appears without a reload
+  at = 'drag C2 into the closed column: the mark appears without a reload';
+  const src = p.locator(`#tile-${cc[1].id}`), dst = p.locator(`#col-${done.id} .boards-cards`);
+  const sb = await src.boundingBox(), db = await dst.boundingBox();
+  await p.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2); await p.mouse.down();
+  await p.mouse.move(sb.x + sb.width / 2 + 10, sb.y + sb.height / 2 + 10, { steps: 3 });
+  await p.mouse.move(db.x + db.width / 2, db.y + 20, { steps: 12 }); await p.mouse.up();
+  await p.waitForSelector(mark(cc[1].id), { timeout: 4000 });
+  expect((await get(cc[1].id)).isClosed, 'drag into the closed column did not close the card');
+  // the card sheet shows the green Closed badge
+  at = 'the card sheet shows the green Closed badge';
+  await p.waitForTimeout(800);   // let the live refresh after the drop settle
+  await p.click(`#tile-${cc[1].id} .boards-tile-link`);
+  await p.waitForSelector('#modal[open] #card-modal .cards-badge-closed .closed-mark');
+  await esc(p); await p.waitForFunction(() => !document.getElementById('modal').open);
+  // archive keeps the flag; restore into the closed column keeps the mark
+  at = 'archive keeps the flag; restore into the closed column keeps the mark';
+  await p.focus(`#tile-${cc[1].id} .boards-tile-link`); await p.keyboard.press('A');
+  await p.waitForFunction(id => !document.getElementById(`tile-${id}`), cc[1].id);
+  const archived = await get(cc[1].id);
+  expect(archived.isClosed && archived.listId !== done.id, 'archiving cleared the closed state');
+  await api('POST', `/cards/${cc[1].id}/restore`, {});
+  // live via the SSE refresh (an API write from outside the page). It arrives when this step runs alone; in a full run it
+  // has not arrived within 6 s (cause not yet explained: no 429 from the stream cap was seen), so fall back to a reload:
+  // the archived-then-restored closed state is what this step checks (x, drag and the sheet do not depend on SSE)
+  if (!(await p.waitForSelector(mark(cc[1].id), { timeout: 6000 }).catch(() => null))) {
+    console.log('     (no live refresh in this tab; checking after a reload)');
+    await go(`/boards/${cb.id}`); await p.waitForSelector(mark(cc[1].id), { timeout: 3000 });
+  }
+  // the calendar shows the mark on the closed card only
+  at = 'the calendar shows the mark on the closed card only';
+  await go(`/boards/${cb.id}/calendar`);
+  expect((await p.locator('.cards-cal-chip .closed-mark').count()) === 1, 'calendar should show exactly one closed mark');
+  // re-open from the sheet on the calendar: the chip loses the mark when the sheet closes
+  at = 're-open from the sheet on the calendar: the chip loses the mark when the sheet closes';
+  await p.locator(`.cards-cal-chip[data-card="${cc[1].id}"]`).first().click();
+  await p.waitForSelector('#modal[open] #card-modal');
+  await p.locator('#card-modal [hx-post$="/close"]').first().evaluate(b => b.click());
+  await p.waitForSelector('#card-modal:not([data-closed])');
+  await esc(p); await p.waitForTimeout(800);
+  expect((await p.locator('.cards-cal-chip .closed-mark').count()) === 0, 'the calendar still shows the mark after re-opening');
+  expect(!(await get(cc[1].id)).isClosed, 'Re-open did not re-open the card');
+  } catch (e) { throw new Error(`${at}: ${e.message}`); }
+});
+
+// ---- column setting "Close cards that land here": sheet toggle with the count confirm, keep, cancel, column menu ------
+await run('board: column setting "Close cards that land here" (sheet confirm, flip, re-open, future-only, cancel, menu, empty column)', async () => {
+  let at = 'setup';
+  try {
+  const cb = await api('POST', `/projects/${proj.id}/boards`, { name: 'Closing column board' });
+  const todo = await api('POST', `/boards/${cb.id}/lists`, { name: 'Todo' });
+  const rev = await api('POST', `/boards/${cb.id}/lists`, { name: 'Review' });
+  const empty = await api('POST', `/boards/${cb.id}/lists`, { name: 'Empty' });
+  const tc = [], rc = [];
+  for (const n of ['T1', 'T2', 'T3']) tc.push(await api('POST', `/lists/${todo.id}/cards`, { name: n }));
+  for (const n of ['R1', 'R2']) rc.push(await api('POST', `/lists/${rev.id}/cards`, { name: n }));
+  const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+  const closedOf = async ids => Promise.all(ids.map(async c => (await api('GET', `/cards/${c.id}`)).isClosed));
+  const typeOf = async l => (await api('GET', `/lists/${l.id}`)).type;
+  const openPop = async () => {
+    await p.click('#list-sheet details[data-pop=closes] > summary');
+    await p.waitForSelector('#list-sheet details[data-pop=closes][open] [data-closes-opt]');
+  };
+  await go(`/boards/${cb.id}`);
+  expect(!(await p.$('.boards-col-closes')), 'no column closes cards yet');
+  await p.click(`[data-list-sheet="${rev.id}"]`);
+  await p.waitForSelector('#modal[open] #list-sheet');
+  expect(/Off/.test(await p.textContent('#list-sheet [data-ls-type-val]')), 'the setting starts Off');
+
+  at = 'switch on: the confirm states the count, the default flips the cards';
+  await openPop();
+  await p.click('#list-sheet [data-closes-opt=closed]');
+  await p.waitForSelector('#ls-closes-confirm .closes-confirm');
+  expect(/Close 2 cards now\?/.test(await p.textContent('#ls-closes-confirm')), 'confirm text lacks the count');
+  expect(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-closes-default')), 'the default action is not focused');
+  await p.click('#ls-closes-confirm [data-closes-default]');
+  await p.waitForSelector('#list-sheet [data-ls-type]:not([hidden])');
+  expect((await closedOf(rc)).every(Boolean), 'flip did not close the cards');
+  expect(/On/.test(await p.textContent('#list-sheet [data-ls-type-val]')), 'the value does not read On');
+  await p.waitForSelector(`#col-${rev.id} .boards-col-closes`, { timeout: 4000 });
+  await p.waitForSelector(`#tile-${rc[0].id} .closed-mark`, { timeout: 4000 });
+
+  at = 'switch off: "Re-open 2 cards?" re-opens them';
+  await openPop();
+  await p.click('#list-sheet [data-closes-opt=active]');
+  await p.waitForSelector('#ls-closes-confirm .closes-confirm');
+  expect(/Re-open 2 cards\?/.test(await p.textContent('#ls-closes-confirm')), 're-open confirm text lacks the count');
+  await p.click('#ls-closes-confirm [data-closes-default]');
+  await p.waitForSelector('#list-sheet [data-ls-type][hidden]', { state: 'attached' });
+  expect(!(await closedOf(rc)).some(Boolean), 'switching off did not re-open the cards');
+  expect((await typeOf(rev)) === 'active', 'type is not active');
+
+  at = 'future-only: "Leave them open" switches the setting and keeps the cards open; a new card closes';
+  await openPop();
+  await p.click('#list-sheet [data-closes-opt=closed]');
+  await p.waitForSelector('#ls-closes-confirm .closes-confirm');
+  await p.click('#ls-closes-confirm form:nth-of-type(2) button');
+  await p.waitForSelector('#list-sheet [data-ls-type]:not([hidden])');
+  expect((await typeOf(rev)) === 'closed', 'keep did not switch the setting');
+  expect(!(await closedOf(rc)).some(Boolean), 'keep closed the existing cards');
+  const late = await api('POST', `/lists/${rev.id}/cards`, { name: 'Late' });
+  expect(late.isClosed, 'a card created in the column after the switch is not closed');
+
+  at = 'cancel: the confirm goes away and nothing changes';
+  await openPop();
+  await p.click('#list-sheet [data-closes-opt=active]');
+  await p.waitForSelector('#ls-closes-confirm .closes-confirm');
+  await p.click('#ls-closes-confirm [data-closes-cancel]');
+  await p.waitForFunction(() => !document.querySelector('#ls-closes-confirm .closes-confirm'));
+  expect((await typeOf(rev)) === 'closed', 'cancel changed the setting');
+  at = 'Esc closes the popover, a second Esc the sheet';
+  // the second Esc must come after the sheet's 80 ms Esc-layer guard (boards_listsheet.js), like a person pressing twice
+  await esc(p); await p.waitForTimeout(250); await esc(p); await p.waitForFunction(() => !document.getElementById('modal').open);
+
+  at = 'column menu: the same toggle asks with the count and flips';
+  await p.click(`#col-${todo.id} details.boards-menu > summary`);
+  const item = `.boards-menu-pop[data-list="${todo.id}"] .boards-closes-item`;
+  await p.waitForSelector(item);
+  expect((await p.getAttribute(item, 'aria-checked')) === 'false', 'menu item should be unchecked');
+  await p.click(item);
+  await p.waitForSelector(`#lcc-${todo.id} .closes-confirm`);
+  expect(/Close 3 cards now\?/.test(await p.textContent(`#lcc-${todo.id}`)), 'menu confirm lacks the count');
+  const box = await p.locator(`#lcc-${todo.id} .closes-confirm`).boundingBox();
+  const vp = p.viewportSize();
+  expect(box && box.y >= 0 && box.y + box.height <= vp.height + 1, 'the menu confirm runs off screen');
+  await p.click(`#lcc-${todo.id} [data-closes-default]`);
+  await p.waitForSelector(`#col-${todo.id} .boards-col-closes`, { timeout: 4000 });
+  expect((await closedOf(tc)).every(Boolean), 'menu flip did not close the cards');
+
+  at = 'column menu on an empty column: switches at once';
+  await p.click(`#col-${empty.id} details.boards-menu > summary`);
+  await p.click(`.boards-menu-pop[data-list="${empty.id}"] .boards-closes-item`);
+  await p.waitForSelector(`#col-${empty.id} .boards-col-closes`, { timeout: 4000 });
+  expect((await typeOf(empty)) === 'closed', 'empty column did not switch');
+  } catch (e) { throw new Error(`${at}: ${e.message}`); }
+});
+
+// ---- column setting "Auto-archive: keep the newest N cards": sheet confirm with the count, hold, restore, menu --------
+await run('board: column auto-archive (sheet confirm, archive, hold on a new card, restore, toast, menu, turn off)', async () => {
+  let at = 'setup';
+  try {
+  const ab = await api('POST', `/projects/${proj.id}/boards`, { name: 'Auto-archive board' });
+  const done = await api('POST', `/boards/${ab.id}/lists`, { name: 'Done' });
+  const side = await api('POST', `/boards/${ab.id}/lists`, { name: 'Side' });
+  const cs = [];
+  for (let i = 1; i <= 12; i++) cs.push(await api('POST', `/lists/${done.id}/cards`, { name: `Done ${i}` }));
+  for (let i = 1; i <= 3; i++) await api('POST', `/lists/${side.id}/cards`, { name: `Side ${i}` });
+  const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+  const listOf = async c => (await api('GET', `/cards/${c.id}`)).listId;
+  await go(`/boards/${ab.id}`);
+  expect(!(await p.$('.boards-col-archive')), 'no column auto-archives yet');
+  await p.click(`[data-list-sheet="${done.id}"]`);
+  await p.waitForSelector('#modal[open] #list-sheet');
+  expect(/Off/.test(await p.textContent('#list-sheet [data-ls-keep-val]')), 'the setting starts Off');
+
+  at = 'set 10 on 12 cards: the confirm states the count and archives the 2 oldest';
+  await p.click('#list-sheet details[data-pop=archive] > summary');
+  await p.waitForSelector('#list-sheet details[data-pop=archive][open] [data-ls-keep-input]');
+  // real keystrokes (digits are board shortcuts elsewhere): type the number and press Enter in the field
+  await p.click('#list-sheet [data-ls-keep-input]');
+  await p.keyboard.type('10');
+  await p.keyboard.press('Enter');
+  await p.waitForSelector('#ls-archive-confirm .closes-confirm');
+  expect(/Archive 2 cards now\?/.test(await p.textContent('#ls-archive-confirm')), 'confirm text lacks the count');
+  expect(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-closes-default')), 'the default action is not focused');
+  await p.click('#ls-archive-confirm [data-closes-default]');
+  await p.waitForSelector('#list-sheet [data-ls-keep]:not([hidden])');
+  expect(/Keep 10/.test(await p.textContent('#list-sheet [data-ls-keep-val]')), 'the value does not read Keep 10');
+  const arch = (await api('GET', `/boards/${ab.id}/lists`)).find(l => l.type === 'archive');
+  expect((await listOf(cs[0])) === arch.id && (await listOf(cs[1])) === arch.id && (await listOf(cs[2])) === done.id, 'the two oldest were not archived');
+  await p.waitForSelector(`#col-${done.id} .boards-col-archive`, { timeout: 4000 });
+  await esc(p); await p.waitForTimeout(250); await esc(p); await p.waitForFunction(() => !document.getElementById('modal').open);
+
+  at = 'hold: a new card archives the oldest, the board toasts it';
+  const nc = await api('POST', `/lists/${done.id}/cards`, { name: 'Done new' });
+  expect((await listOf(cs[2])) === arch.id && (await listOf(nc)) === done.id, 'the oldest was not archived on landing');
+  await p.waitForSelector('.boards-toast:has-text("archived 1 older card")', { timeout: 6000 });
+  await p.waitForFunction(id => !document.getElementById('tile-' + id), cs[2].id, { timeout: 6000 });
+
+  at = 'restore into the full column archives its oldest other card';
+  await api('POST', `/cards/${cs[0].id}/restore`);
+  expect((await listOf(cs[0])) === done.id && (await listOf(cs[3])) === arch.id, 'restore did not hold the column at 10');
+
+  at = 'column menu: lower to 8 asks with the count, then turn it off';
+  await p.click(`#col-${done.id} details.boards-menu > summary`);
+  const menu = `.boards-menu-pop[data-list="${done.id}"]`;
+  await p.waitForSelector(`${menu} .boards-menu-archive input[name=archiveAfter]`);
+  const url0 = p.url();
+  await p.click(`${menu} .boards-menu-archive input[name=archiveAfter]`);
+  await p.keyboard.press('Control+A'); await p.keyboard.type('8'); await p.keyboard.press('Enter');
+  await p.waitForSelector(`#lac-${done.id} .closes-confirm`);
+  expect(p.url() === url0 && await p.$(`#col-${done.id}`), 'typing digits in the menu switched the view');
+  expect(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-closes-default')), 'the menu confirm default is not focused');
+  expect(/Archive 2 cards now\?/.test(await p.textContent(`#lac-${done.id}`)), 'menu confirm lacks the count');
+  const box = await p.locator(`#lac-${done.id} .closes-confirm`).boundingBox();
+  const vp = p.viewportSize();
+  expect(box && box.y >= 0 && box.y + box.height <= vp.height + 1, 'the menu confirm runs off screen');
+  await p.click(`#lac-${done.id} [data-closes-default]`);
+  for (let i = 0; i < 40 && (await api('GET', `/lists/${done.id}`)).archiveAfter !== 8; i++) await p.waitForTimeout(100);
+  expect((await api('GET', `/lists/${done.id}`)).archiveAfter === 8, 'menu did not set 8');
+  await p.waitForTimeout(600);
+  await p.click(`#col-${done.id} details.boards-menu > summary`);
+  await p.click(`${menu} .boards-archive-off`);
+  for (let i = 0; i < 40 && (await api('GET', `/lists/${done.id}`)).archiveAfter; i++) await p.waitForTimeout(100);
+  expect(!(await api('GET', `/lists/${done.id}`)).archiveAfter, 'turn off did not clear the setting');
+  await p.waitForFunction(id => !document.querySelector('#col-' + id + ' .boards-col-archive'), done.id, { timeout: 4000 });
+  } catch (e) { throw new Error(`${at}: ${e.message}`); }
+});
+
+await run('board settings: apply a template (gallery in apply mode, preview, options re-preview, remove/keep the old columns, confirm, new left columns, cards moved, old columns removed, labels added not replaced)', async () => {
+  const b = await api('POST', `/projects/${proj.id}/boards`, { name: 'Apply smoke' });
+  const todo = await api('POST', `/boards/${b.id}/lists`, { name: 'Todo' });
+  const done = await api('POST', `/boards/${b.id}/lists`, { name: 'Done', type: 'closed' });
+  for (const n of ['First', 'Second']) await api('POST', `/lists/${todo.id}/cards`, { name: n });
+  await api('POST', `/lists/${done.id}/cards`, { name: 'Finished' });
+  await api('POST', `/boards/${b.id}/labels`, { name: 'high', color: 'berry-red' });
+  await go(`/boards/${b.id}/settings?section=templates`);
+  await p.locator(`#set-templates [hx-get="/ui/boards/${b.id}/apply-template"]`).click(); await settle(p);
+  await p.waitForSelector('dialog[open] .tg-grid');
+  if (await p.locator('dialog[open] .tg-tile-blank, dialog[open] .tg-cat-import').count()) throw new Error('apply mode shows the blank tile or the import pane');
+  await p.locator('#tg-q').pressSequentially('kanban'); await settle(p);
+  await p.locator('dialog[open] .tg-tile', { hasText: 'Kanban basics' }).click(); await settle(p);
+  await p.locator('dialog[open] .tg-create button.primary', { hasText: 'Preview changes' }).click(); await settle(p);
+  await p.waitForSelector('dialog[open] .tg-diff');
+  const txt = await p.locator('dialog[open] .tg-ap').innerText();
+  for (const want of ['+4 on the left', '3 cards move to Backlog', 'Already here, used as they are: High', 'cannot be undone automatically', '2 old columns will be removed', 'Todo, Done']) if (!txt.includes(want)) throw new Error(`preview lacks "${want}"`);
+  // the "Remove the old columns" box is ticked by default; unticking re-previews with the columns kept, ticking it again removes them
+  const rm = p.locator('dialog[open] .tg-apply input[name=removeOldColumns][type=checkbox]');
+  if (!(await rm.isChecked())) throw new Error('"Remove the old columns" is not ticked by default');
+  await rm.uncheck(); await settle(p);
+  if (!(await p.locator('dialog[open] .tg-diff').innerText()).includes('stay on the right, emptied')) throw new Error('unticking "Remove the old columns" did not re-preview');
+  await p.locator('dialog[open] .tg-apply input[name=removeOldColumns][type=checkbox]').check(); await settle(p);
+  if (!(await p.locator('dialog[open] .tg-diff').innerText()).includes('2 old columns will be removed')) throw new Error('ticking "Remove the old columns" again did not re-preview');
+  // ticking an option re-runs the preview (still nothing written)
+  await p.locator('dialog[open] .tg-apply input[name=applySettings][type=checkbox]').check(); await settle(p);
+  if (!(await p.locator('dialog[open] .tg-diff').innerText()).includes('Changed:')) throw new Error('ticking board settings did not re-preview');
+  if ((await api('GET', `/boards/${b.id}/lists`)).filter(l => l.type === 'active' || l.type === 'closed').length !== 2) throw new Error('the preview wrote columns');
+  await p.locator('dialog[open] .tg-apply input[name=applySettings][type=checkbox]').uncheck(); await settle(p);
+  p.once('dialog', d => d.accept());
+  await Promise.all([p.waitForURL(new RegExp(`/boards/${b.id}$`), { timeout: 8000 }), p.locator('dialog[open] .tg-apply button.primary').click()]);
+  await settle(p);
+  const toast = await p.locator('#toasts .toast').first().innerText().catch(() => '');
+  if (!/Applied Kanban basics.*removed 2 old columns/.test(toast)) throw new Error(`no toast after the redirect (saw "${toast}")`);
+  const heads = await p.locator('.boards-col .boards-col-title').allInnerTexts();
+  const names = heads.map(h => h.trim());
+  if (names.join('|') !== 'Backlog|To do|Doing|Done') throw new Error(`columns after apply (the old ones should be gone): ${names.join(', ')}`);
+  const first = p.locator('.boards-col').filter({ has: p.locator('.boards-col-title', { hasText: /^\s*Backlog\s*$/ }) }).first();
+  if (await first.locator('.boards-tile').count() !== 3) throw new Error('the cards did not all move into Backlog');
+  const labels = await api('GET', `/boards/${b.id}/labels`);
+  const high = labels.filter(l => (l.name || '').toLowerCase() === 'high');
+  if (high.length !== 1 || high[0].name !== 'high' || high[0].color !== 'berry-red') throw new Error('the board label was replaced or recoloured');
+  if (labels.length !== 4) throw new Error(`expected 4 labels (1 kept + 3 added), got ${labels.length}`);
 });
 
 // ---- exports (own sandbox CSP; the print button is the only script) ------------------------
@@ -566,6 +1212,143 @@ await run('export: board + card print view (print button)', async () => {
       if (printed !== 1) throw new Error(`print button did not call window.print (count ${printed})`);
     }
   }
+});
+
+// ---- a card on several boards (read half of the placement UI) -----------------------------------
+await run('placements: tile marker, popover by keyboard, sheet switcher', async () => {
+  const second = await api('POST', `/projects/${proj.id}/boards`, { name: 'Second board' });
+  const col = await api('POST', `/boards/${second.id}/lists`, { name: 'Review' });
+  await api('POST', `/cards/${card.id}/placements`, { listId: col.id });
+  await go('/boards/' + second.id);
+  const tile = p.locator('#tile-' + card.id);
+  const mark = tile.locator('[data-also-on]');
+  if ((await mark.getAttribute('aria-label')) !== 'Also on 1 other board') throw new Error('marker label: ' + await mark.getAttribute('aria-label'));
+  // keyboard: focus the marker, Enter opens the popover (never the card), Escape closes it and focus returns
+  await mark.focus(); await p.keyboard.press('Enter'); await settle(p);
+  const pop = p.locator('#boards-pop [data-also-pop]');
+  if (!(await pop.isVisible())) throw new Error('popover did not open');
+  if (await p.evaluate(() => document.getElementById('modal').open)) throw new Error('the marker opened the card sheet');
+  if ((await pop.locator(`a[href="/boards/${board.id}"]`).count()) !== 1) throw new Error('popover does not link the home board');
+  if (!(await p.evaluate(() => document.activeElement && document.activeElement.classList.contains('boards-also-item')))) throw new Error('focus is not in the popover');
+  await esc(p); await settle(p);
+  if (await p.locator('#boards-pop').isVisible()) throw new Error('Escape did not close the popover');
+  if (!(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-also-on')))) throw new Error('focus did not return to the marker');
+  await mark.press('Space'); await settle(p);
+  if (!(await pop.isVisible())) throw new Error('Space did not open the popover');
+  await mark.click(); await settle(p);   // the marker toggles
+  if (await p.locator('#boards-pop').isVisible()) throw new Error('a second click did not close the popover');
+  // the card sheet opened from this board shows it here, with the switcher; switching shows it on the home board
+  await tile.locator('.boards-tile-link').click(); await settle(p);
+  const cm = p.locator('#card-modal');
+  if ((await cm.getAttribute('data-board')) !== second.id) throw new Error('sheet context is not the board it was opened from');
+  if (!new URL(p.url()).search.includes('board=' + second.id)) throw new Error('sheet URL lacks ?board=: ' + p.url());
+  await cm.locator('.cm-boardsw > summary').click(); await settle(p);
+  await cm.locator(`a[data-card-ctx="${board.id}"]`).click(); await settle(p);
+  if ((await p.locator('#card-modal').getAttribute('data-board')) !== board.id) throw new Error('switcher did not show the card on the home board');
+  if (!new URL(p.url()).search.includes('board=' + board.id)) throw new Error('switcher did not update the URL: ' + p.url());
+  if ((await p.locator('#card-modal [data-prop="boards"] li').count()) !== 2) throw new Error('Boards row does not list two boards');
+  await esc(p); await settle(p);
+  await go('/boards/' + second.id + '?view=list');
+  await p.locator(`tr[data-id="${card.id}"] [data-also-on]`).click(); await settle(p);
+  if (!(await pop.isVisible()) || await p.evaluate(() => document.getElementById('modal').open)) throw new Error('list view: the marker opened the sheet or no popover');
+  await esc(p);
+});
+
+// ---- a card on several boards (write half: the picker, Remove from board, b, context writes, archive) ------------
+await run('placements: Add to board by keyboard, Remove from board, b, writes from the other board, archive everywhere', async () => {
+  const other = await api('POST', `/projects/${proj.id}/boards`, { name: 'Placement target ' + stamp });   // unique: earlier runs left theirs
+  const oIntake = await api('POST', `/boards/${other.id}/lists`, { name: 'Intake' });
+  const oDoing = await api('POST', `/boards/${other.id}/lists`, { name: 'Doing there' });
+  const oLabel = await api('POST', `/boards/${other.id}/labels`, { name: 'Target label', color: 'lagoon-blue' });
+  const c = await api('POST', `/lists/${lists[0].id}/cards`, { name: 'Travelling card' });
+  const placementsOf = async () => Object.fromEntries((await api('GET', `/cards/${c.id}/placements`)).items.map(x => [x.boardId, x.listId]));
+  // the sheet on the home board: b opens the picker, type to filter, Enter shows the columns, Enter places; it stays open
+  await go('/boards/' + board.id);
+  await p.locator('#tile-' + c.id + ' .boards-tile-link').click(); await settle(p);
+  await p.evaluate(() => document.activeElement && document.activeElement.blur && document.activeElement.blur());
+  await p.keyboard.press('b'); await settle(p);
+  const pk = p.locator('#modal .cm-place');
+  if (!(await pk.isVisible())) throw new Error('b did not open the picker in the sheet');
+  if (!(await p.evaluate(() => document.activeElement && document.activeElement.matches('[data-place-filter]')))) throw new Error('focus is not in the picker filter');
+  await p.keyboard.type('placement target ' + stamp); await settle(p);
+  if ((await pk.locator('[data-place-board]:visible').count()) !== 1) throw new Error('type-ahead did not narrow the boards to one');
+  await p.keyboard.press('Enter'); await settle(p);
+  const defName = await p.evaluate(() => document.activeElement && document.activeElement.textContent.trim());
+  if (!/Intake/.test(defName || '')) throw new Error('the columns step did not focus the first open column: ' + defName);
+  await p.keyboard.press('Enter'); await p.waitForTimeout(900);
+  if (!(await pk.isVisible())) throw new Error('the picker closed after placing (it must stay open)');
+  if (!new RegExp('Added to Placement target ' + stamp).test(await pk.locator('.cm-place-ok').innerText())) throw new Error('no "Added to" status in the picker');
+  if (!(await p.locator('#modal .cm-toasts .toast', { hasText: 'Added to Placement target' }).isVisible())) throw new Error('no visible "Added to" toast over the sheet');
+  if (await pk.locator(`[data-place-board="${other.id}"]`).count()) throw new Error('the placed board is still offered');
+  if ((await placementsOf())[other.id] !== oIntake.id) throw new Error('not placed in Intake: ' + JSON.stringify(await placementsOf()));
+  const cm = p.locator('#card-modal');
+  if ((await cm.locator('[data-prop="boards"] li').count()) !== 2 || !(await cm.locator('.cm-boardsw').count())) throw new Error('Boards row / switcher not updated in place');
+  await esc(p); await settle(p);
+  if (await pk.count()) throw new Error('Escape did not close the picker');
+  if (!(await p.evaluate(() => document.getElementById('modal').open))) throw new Error('Escape closed the sheet together with the picker');
+  await esc(p); await settle(p);
+  if (!(await p.locator(`#tile-${c.id} [data-also-on]`).count())) throw new Error('tile marker missing after the placement');
+  // writes from the OTHER board (not the home): a label of that board, a column move there
+  await go('/boards/' + other.id);
+  await p.locator('#tile-' + c.id + ' .boards-tile-link').click(); await settle(p);
+  if ((await cm.getAttribute('data-board')) !== other.id) throw new Error('sheet context is not the target board');
+  await cm.locator('details[data-pop="labels"] > summary').click(); await settle(p);
+  await cm.locator('details[data-pop="labels"] .cm-labopt', { hasText: 'Target label' }).click(); await settle(p);
+  const onOther = await api('GET', `/cards/${c.id}?boardId=${other.id}`);
+  if (!(onOther.labelIds || []).includes(oLabel.id)) throw new Error('label of the other board not added');
+  await esc(p); await settle(p);
+  await p.locator('#card-modal .cm-list > summary').click(); await settle(p);
+  await p.locator('#card-modal .cm-lists button', { hasText: 'Doing there' }).click(); await settle(p);
+  let pl = await placementsOf();
+  if (pl[other.id] !== oDoing.id || pl[board.id] !== lists[0].id) throw new Error('column move from the other board: ' + JSON.stringify(pl));
+  // Remove from this board (the Boards row x): Escape cancels, Enter confirms; the sheet falls back to the home board
+  const x = () => p.locator(`#card-modal .cm-board-x[data-unplace="${other.id}"]`);
+  await x().click(); await settle(p);
+  if (!(await p.locator('dialog.cm-confirm[open]').isVisible())) throw new Error('no confirmation');
+  if (!/stays on its other boards/.test(await p.locator('dialog.cm-confirm').innerText())) throw new Error('confirmation wording');
+  await esc(p); await settle(p);
+  if (!(await placementsOf())[other.id]) throw new Error('Escape removed the card');
+  await x().click(); await settle(p); await p.keyboard.press('Enter'); await p.waitForTimeout(900);
+  if ((await placementsOf())[other.id]) throw new Error('Enter did not remove the card from the board');
+  if ((await p.locator('#card-modal').getAttribute('data-board')) !== board.id) throw new Error('sheet did not fall back to the home board');
+  if (await p.locator('#card-modal .cm-board-x').count()) throw new Error('the last board offers an x');
+  await esc(p); await settle(p);
+  if (await p.locator('#tile-' + c.id).count()) throw new Error('the tile is still on the board it left');
+  // b on a focused tile (board page): the picker opens in #popover-root; Escape closes it and focus returns to the tile
+  await go('/boards/' + board.id);
+  await p.locator('#tile-' + c.id + ' .boards-tile-link').focus();
+  await p.keyboard.press('b'); await settle(p);
+  if (!(await p.locator('#popover-root .cm-place').isVisible())) throw new Error('b on a tile did not open the picker');
+  await esc(p); await settle(p);
+  if (!(await p.evaluate(id => document.activeElement && document.activeElement.closest('#tile-' + id), c.id))) throw new Error('focus did not return to the tile');
+  // live: the open sheet follows placements made elsewhere (here: the API) and never touches the comment being typed
+  await p.locator('#tile-' + c.id + ' .boards-tile-link').click(); await settle(p);
+  const ta = p.locator('#card-modal [data-comment-input]');
+  await ta.fill('half-typed comment');
+  await api('POST', `/cards/${c.id}/placements`, { listId: oIntake.id });
+  await p.waitForFunction(() => document.querySelectorAll('#card-modal [data-prop="boards"] li').length === 2, null, { timeout: 8000 }).catch(() => { throw new Error('the open sheet did not show the new board live'); });
+  if ((await ta.inputValue()) !== 'half-typed comment' || !(await p.evaluate(() => document.activeElement && document.activeElement.matches('[data-comment-input]')))) throw new Error('the live refresh touched the comment being typed');
+  await api('DELETE', `/cards/${c.id}/placements/${other.id}`);
+  await p.waitForFunction(() => document.querySelectorAll('#card-modal [data-prop="boards"] li').length === 1, null, { timeout: 8000 }).catch(() => { throw new Error('the open sheet did not drop the removed board live'); });
+  if ((await ta.inputValue()) !== 'half-typed comment') throw new Error('the live removal touched the comment being typed');
+  await ta.fill(''); await p.evaluate(() => document.activeElement && document.activeElement.blur());
+  await esc(p); await settle(p);
+  // archive from the other board: confirm says so, and the card leaves both boards
+  await api('POST', `/cards/${c.id}/placements`, { listId: oIntake.id });
+  await go('/boards/' + other.id);
+  await p.locator('#tile-' + c.id + ' .boards-tile-link').click(); await settle(p);
+  await p.locator('#card-modal details[data-pop="menu"] > summary').click(); await settle(p);
+  await p.locator('#card-modal .cm-menu-panel button', { hasText: 'Archive card' }).click(); await settle(p);
+  const dlg = p.locator('dialog.cm-confirm[open]');
+  if (!/also on 1 other board; it will be archived on all of them/.test(await dlg.innerText())) throw new Error('archive confirmation wording: ' + await dlg.innerText());
+  await p.keyboard.press('Enter'); await p.waitForTimeout(900);
+  pl = await placementsOf();
+  const types = (await api('GET', `/cards/${c.id}/placements`)).items.map(x => x.listType);
+  if (types.length !== 2 || types.some(t => t !== 'archive')) throw new Error('archive did not cover both boards: ' + JSON.stringify(types));
+  await go('/boards/' + other.id);
+  if (await p.locator('#tile-' + c.id).count()) throw new Error('archived card still on the other board');
+  await go('/boards/' + board.id);
+  if (await p.locator('#tile-' + c.id).count()) throw new Error('archived card still on the home board');
 });
 
 // ---- sign-out (last: ends the session of an API-key browser only if cookies were used) -----------

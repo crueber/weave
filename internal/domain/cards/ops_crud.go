@@ -7,6 +7,8 @@ import (
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/boards"
+	"github.com/crueber/weave/internal/events"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -26,8 +28,9 @@ type ListCardsIn struct {
 }
 
 type GetIn struct {
-	ID   string `path:"id"`
-	Full bool   `query:"full" desc:"true adds tasks, comments (last 50), attachments, custom fields and activity (last 50)"`
+	ID      string `path:"id"`
+	BoardID string `query:"boardId" desc:"context board when the card is on several boards: boardId, listId and position (and the labels and board fields shown) describe the card on that board; default: the home board when you can see it, else the board where you have the most access"`
+	Full    bool   `query:"full" desc:"true adds tasks, comments (last 50), attachments, custom fields and activity (last 50)"`
 }
 
 type CreateIn struct {
@@ -49,6 +52,7 @@ type UpdateIn struct {
 type MoveIn struct {
 	ID       string   `path:"id"`
 	ListID   string   `json:"listId" required:"true" desc:"target list (may be on another board of the caller)"`
+	BoardID  string   `json:"boardId" desc:"which placement moves when the card is on several boards (the board it moves on or away from); default: its placement on listId's board, else the only board you can see it on"`
 	Position *float64 `json:"position" desc:"explicit position"`
 	AfterID  string   `json:"afterId" desc:"place after this sibling card"`
 	BeforeID string   `json:"beforeId" desc:"place before this sibling card"`
@@ -60,13 +64,15 @@ type ArchiveIn struct {
 }
 
 type DuplicateIn struct {
-	ID   string `path:"id"`
-	Name string `json:"name" desc:"name of the copy (default '<name> (copy)')"`
+	ID      string `path:"id"`
+	Name    string `json:"name" desc:"name of the copy (default '<name> (copy)')"`
+	BoardID string `json:"boardId" desc:"the board to copy the card on when it is on several boards (the copy is on that board only, next to the card); default: its home board when you can see it"`
 }
 
 type CloseIn struct {
-	ID     string `path:"id"`
-	Closed *bool  `json:"closed" desc:"default true; false re-opens"`
+	ID      string `path:"id"`
+	Closed  *bool  `json:"closed" desc:"default true; false re-opens"`
+	BoardID string `json:"boardId" desc:"when the card is on several boards: the board whose placement moves into its closing column (or out of it when re-opening); closed is per card either way. Default: its home board when you can edit there; a board you may not edit there falls back to that default"`
 }
 
 type CoverIn struct {
@@ -115,19 +121,19 @@ func init() {
 		UI: "POST /ui/lists/{listId}/cards"}, cardCreate)
 	ops.Register(ops.Op{Name: "card.update", Summary: "Update card title, description, due date or completion", Method: "PATCH", Path: "/cards/{id}",
 		UI: "POST /ui/cards/{id}/update"}, cardUpdate)
-	ops.Register(ops.Op{Name: "card.delete", Summary: "Delete a card (must be in the trash list, or a draft/template)", Method: "DELETE", Path: "/cards/{id}",
+	ops.Register(ops.Op{Name: "card.delete", Summary: "Delete a card permanently, from every board (it must be in the trash on every board it is on, or be a draft/template)", Method: "DELETE", Path: "/cards/{id}",
 		UI: "POST /ui/cards/{id}/delete"}, cardDelete)
-	ops.Register(ops.Op{Name: "card.move", Summary: "Move/reorder a card between lists or boards (applies list-type rules)", Method: "POST", Path: "/cards/{id}/move",
+	ops.Register(ops.Op{Name: "card.move", Summary: "Move/reorder a card between lists or boards (applies list-type rules); on a card that is on several boards it moves one board's placement (boardId)", Method: "POST", Path: "/cards/{id}/move",
 		UI: "POST /ui/cards/{id}/move"}, func(e *ops.Env, in MoveIn) (Card, error) {
-		return doMove(e, in.ID, in.ListID, in.Position, in.AfterID, in.BeforeID)
+		return doMove(e, in.ID, in.BoardID, in.ListID, in.Position, in.AfterID, in.BeforeID)
 	})
-	ops.Register(ops.Op{Name: "card.archive", Summary: "Move a card to the board's archive (or trash) list", Method: "POST", Path: "/cards/{id}/archive",
+	ops.Register(ops.Op{Name: "card.archive", Summary: "Archive (or trash) a card: it moves to the archive (trash) list of every board it is on", Method: "POST", Path: "/cards/{id}/archive",
 		UI: "POST /ui/cards/{id}/archive"}, cardArchive)
-	ops.Register(ops.Op{Name: "card.restore", Summary: "Restore an archived/trashed card to its previous list", Method: "POST", Path: "/cards/{id}/restore",
+	ops.Register(ops.Op{Name: "card.restore", Summary: "Restore an archived/trashed card: on every board it is on, it returns to its previous list (or that board's first open list)", Method: "POST", Path: "/cards/{id}/restore",
 		UI: "POST /ui/cards/{id}/restore"}, cardRestore)
 	ops.Register(ops.Op{Name: "card.duplicate", Summary: "Duplicate a card (labels, members, extras via hooks)", Method: "POST", Path: "/cards/{id}/duplicate",
 		UI: "POST /ui/cards/{id}/duplicate"}, cardDuplicate)
-	ops.Register(ops.Op{Name: "card.close", Summary: "Close (or re-open) a card; moves to the closed list when the board has one", Method: "POST", Path: "/cards/{id}/close",
+	ops.Register(ops.Op{Name: "card.close", Summary: "Close (or re-open) a card (closed is per card, on every board); moves it to the closing list of its board when that board has one", Method: "POST", Path: "/cards/{id}/close",
 		UI: "POST /ui/cards/{id}/close"}, cardClose)
 	ops.Register(ops.Op{Name: "card.cover.set", Summary: "Set or clear the card cover (an image attachment)", Method: "PUT", Path: "/cards/{id}/cover",
 		UI: "POST /ui/cards/{id}/cover"}, cardCover)
@@ -140,16 +146,19 @@ func init() {
 }
 
 func cardGet(e *ops.Env, in GetIn) (Card, error) {
-	if _, err := viewCard(e, in.ID); err != nil {
-		return Card{}, err
-	}
-	c, err := loadCard(e, e.DB, in.ID)
+	a, err := authz.CardAccessFor(e, in.ID, in.BoardID)
 	if err != nil {
 		return Card{}, err
 	}
-	if authz.BoardLevel(e, c.BoardID) < authz.Edit {
+	c, err := loadCardOn(e, e.DB, in.ID, a.BoardID)
+	if err != nil {
+		return Card{}, err
+	}
+	if a.HomeBoardID == "" || a.Boards[a.HomeBoardID] < authz.Edit { // a share link is the home board's decision
 		c.ShareToken = nil
 	}
+	c.HomeBoardID, c.Placements = a.HomeBoardID, placementsFor(e, a)
+	c.AlsoOnBoards = len(c.Placements) - 1
 	out := c
 	if !in.Full {
 		return out, nil
@@ -165,8 +174,8 @@ func cardGet(e *ops.Env, in GetIn) (Card, error) {
 	out.Tasks = pull("tasklist.list", map[string]any{"cardId": in.ID})
 	out.Comments = pull("comment.list", map[string]any{"cardId": in.ID, "limit": 50})
 	out.Attachments = pull("attachment.list", map[string]any{"cardId": in.ID})
-	out.CustomFields = pull("customfieldgroup.list", map[string]any{"cardId": in.ID})
-	out.Activity = pull("activity.card", map[string]any{"cardId": in.ID, "limit": 50})
+	out.CustomFields = pull("customfieldgroup.list", map[string]any{"cardId": in.ID, "boardId": a.BoardID})
+	out.Activity = pull("activity.card", map[string]any{"cardId": in.ID, "boardId": a.BoardID, "limit": 50})
 	return out, nil
 }
 
@@ -174,26 +183,27 @@ func cardList(e *ops.Env, in ListCardsIn) (ListOut, error) {
 	if err := authz.RequireBoard(e, in.BoardID, authz.View); err != nil {
 		return ListOut{}, err
 	}
-	q := `SELECT id FROM cards WHERE board_id=? AND is_draft=0 AND is_template=0`
+	// the cards placed on this board, each once, with this board's column and position
+	q := `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=?1 AND c.is_draft=0 AND c.is_template=0`
 	args := []any{in.BoardID}
 	if in.ListID != "" {
-		q += ` AND list_id=?`
+		q += ` AND p.list_id=?`
 		args = append(args, in.ListID)
 	}
-	if in.LabelID != "" {
-		q += ` AND id IN (SELECT card_id FROM card_labels WHERE label_id=?)`
+	if in.LabelID != "" { // only a label shown on this board matches (another board's label on the same card does not)
+		q += ` AND c.id IN (SELECT cl.card_id FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.label_id=? AND ` + db.LabelOnBoard("l", "?1") + `)`
 		args = append(args, in.LabelID)
 	}
 	if in.MemberID != "" {
-		q += ` AND id IN (SELECT card_id FROM card_memberships WHERE user_id=?)`
+		q += ` AND c.id IN (SELECT card_id FROM card_memberships WHERE user_id=?)`
 		args = append(args, in.MemberID)
 	}
 	switch strings.ToLower(in.Claimed) {
 	case "true", "1":
-		q += ` AND claimed_by IS NOT NULL AND claimed_until>=?`
+		q += ` AND c.claimed_by IS NOT NULL AND c.claimed_until>=?`
 		args = append(args, db.Now())
 	case "false", "0":
-		q += ` AND (claimed_by IS NULL OR claimed_until IS NULL OR claimed_until<?)`
+		q += ` AND (c.claimed_by IS NULL OR c.claimed_until IS NULL OR c.claimed_until<?)`
 		args = append(args, db.Now())
 	case "", "any":
 	default:
@@ -201,10 +211,10 @@ func cardList(e *ops.Env, in ListCardsIn) (ListOut, error) {
 	}
 	if t := strings.TrimSpace(in.Q); t != "" {
 		like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(t) + "%"
-		q += ` AND (name LIKE ? ESCAPE '\' OR COALESCE(description,'') LIKE ? ESCAPE '\')`
+		q += ` AND (c.name LIKE ? ESCAPE '\' OR COALESCE(c.description,'') LIKE ? ESCAPE '\')`
 		args = append(args, like, like)
 	}
-	q += ` ORDER BY (SELECT position FROM lists WHERE id=cards.list_id), list_id, position, created_at, id`
+	q += ` ORDER BY (SELECT position FROM lists WHERE id=p.list_id), p.list_id, p.position, c.created_at, c.id`
 	offset := 0
 	if in.Cursor != "" {
 		n, err := strconv.Atoi(in.Cursor)
@@ -230,12 +240,17 @@ func cardList(e *ops.Env, in ListCardsIn) (ListOut, error) {
 		ids = ids[:limit]
 		out.NextCursor = strconv.Itoa(offset + limit)
 	}
+	also := map[string]int{}
+	if len(ids) > 0 {
+		also = authz.AlsoOn(e, in.BoardID, ids)
+	}
 	for _, id := range ids {
-		c, err := loadCard(e, e.DB, id)
+		c, err := loadCardOn(e, e.DB, id, in.BoardID)
 		if err != nil {
 			continue
 		}
 		c.ShareToken = nil
+		c.AlsoOnBoards = also[id]
 		out.Items = append(out.Items, c)
 	}
 	return out, nil
@@ -276,11 +291,18 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 	}
 	id := db.NewID()
 	now := db.Now()
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		pos := positionFor(e.Ctx, tx, in.ListID, "", "", "", in.Position)
-		_, err := tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_closed,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, boardID, in.ListID, e.User.UserID, pos, name, desc, due, ltype == "closed", now, now)
+		pos, err := positionFor(e.Ctx, tx, in.ListID, "", "", "", in.Position)
 		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?)`, id, boardID, in.ListID, e.User.UserID, pos, name, desc, due, now, now)
+		if err != nil {
+			return err
+		}
+		if landed, err = boards.Landed(e.Ctx, tx, boards.Landing{CardID: id, ListID: in.ListID}); err != nil {
 			return err
 		}
 		autoWatch(e.Ctx, tx, id, e.User.UserID, "subscribe_own_cards") // "Watch cards I create"
@@ -294,6 +316,7 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 		return c, err
 	}
 	emit(e, "cardCreate", "card.created", boardID, id, map[string]any{"card": c, "listId": in.ListID})
+	boards.EmitAutoArchived(e, landed) // the column's archive-after rule (never the new card itself)
 	return c, nil
 }
 
@@ -350,13 +373,13 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 		changed = append(changed, "isDueCompleted")
 	}
 	if len(sets) == 0 {
-		return loadCard(e, e.DB, in.ID)
+		return loadCardOn(e, e.DB, in.ID, boardID)
 	}
 	sets, args = append(sets, "updated_at=?"), append(args, db.Now(), in.ID)
 	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET `+strings.Join(sets, ",")+` WHERE id=?`, args...); err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, in.ID)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err == nil {
 		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c, "changed": changed})
 	}
@@ -364,17 +387,25 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 }
 
 func cardDelete(e *ops.Env, in IDIn) (Deleted, error) {
-	boardID, err := editCard(e, in.ID)
+	a, err := authz.CardEditAccess(e, in.ID, "")
 	if err != nil {
 		return Deleted{}, err
 	}
-	var ltype string
+	boardID := a.BoardID
+	// "in the trash" is every placement in a trash list (card.archive trash=true trashes the card on every board)
+	var placed, inTrash int
 	var draft, tmpl bool
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT l.type,c.is_draft,c.is_template FROM cards c JOIN lists l ON l.id=c.list_id WHERE c.id=?`, in.ID).Scan(&ltype, &draft, &tmpl)
-	if ltype != "trash" && !draft && !tmpl {
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*),COALESCE(SUM(l.type='trash'),0) FROM card_placements p JOIN lists l ON l.id=p.list_id WHERE p.card_id=?`, in.ID).Scan(&placed, &inTrash)
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT is_draft,is_template FROM cards WHERE id=?`, in.ID).Scan(&draft, &tmpl)
+	if inTrash < placed && !draft && !tmpl {
+		if placed > 1 {
+			return Deleted{}, ops.Invalid("card must be in the trash on every board it is on before it can be deleted (trash it with card.archive trash=true)")
+		}
 		return Deleted{}, ops.Invalid("card must be in the trash list before it can be deleted")
 	}
-	c, _ := loadCard(e, e.DB, in.ID)
+	c, _ := loadCardOn(e, e.DB, in.ID, boardID) // the context placement: the event's origin board names its own column
+	// the boards the card is on, read before the delete (its placements cascade away): card.deleted reaches each of them
+	gone := placementBoards(e, e.DB, in.ID)
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		_, _ = tx.ExecContext(e.Ctx, `DELETE FROM card_editing WHERE card_id=?`, in.ID)
 		_, err := tx.ExecContext(e.Ctx, `DELETE FROM cards WHERE id=?`, in.ID)
@@ -383,26 +414,25 @@ func cardDelete(e *ops.Env, in IDIn) (Deleted, error) {
 	if err != nil {
 		return Deleted{}, err
 	}
-	emit(e, "cardDelete", "card.deleted", boardID, in.ID, map[string]any{"name": c.Name, "listId": c.ListID})
+	// a card-level event: it concerns every board the card was on (named, as the placements are gone)
+	emitScoped(e, "", "cardDelete", "card.deleted", boardID, in.ID, map[string]any{"name": c.Name, "listId": c.ListID}, gone)
 	return Deleted{in.ID}, nil
 }
 
-// doMove implements card.move; shared by archive/restore/close/publish.
-func doMove(e *ops.Env, id, listID string, explicit *float64, afterID, beforeID string) (Card, error) {
-	srcBoard, err := editCard(e, id)
+// doMove moves ONE placement of a card (card.move, the claim/release moves, closing into a closing column): the one
+// resolveMove picks (boardHint, else the placement on listID's board, else the only one the caller sees). A reorder
+// or a column change stays on its board; a move to another board relocates that placement there (Conflict when the
+// card is already on it; the home stays the home). It returns the card as seen on listID's board.
+func doMove(e *ops.Env, id, boardHint, listID string, explicit *float64, afterID, beforeID string) (Card, error) {
+	a, err := authz.CardEditAccess(e, id, "")
 	if err != nil {
 		return Card{}, err
 	}
-	dstBoard, dtype, err := listRef(e.Ctx, e.DB, listID)
+	srcBoard, dstBoard, dtype, err := resolveMove(e, a, id, boardHint, listID)
 	if err != nil {
 		return Card{}, err
 	}
-	if dstBoard != srcBoard {
-		if err := authz.RequireBoard(e, dstBoard, authz.Edit); err != nil {
-			return Card{}, err
-		}
-	}
-	old, err := loadCard(e, e.DB, id)
+	old, err := loadCardOn(e, e.DB, id, srcBoard)
 	if err != nil {
 		return Card{}, err
 	}
@@ -415,11 +445,24 @@ func doMove(e *ops.Env, id, listID string, explicit *float64, afterID, beforeID 
 	var stype string
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT type FROM lists WHERE id=?`, old.ListID).Scan(&stype)
 	listChanged := old.ListID != listID
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		pos := positionFor(e.Ctx, tx, listID, id, afterID, beforeID, explicit)
+		landed = boards.LandResult{}
+		if dstBoard != srcBoard && placedOn(e.Ctx, tx, id, dstBoard) { // placed there meanwhile
+			return ops.Conflict("the card is already on that board")
+		}
+		pos, err := positionFor(e.Ctx, tx, listID, id, afterID, beforeID, explicit)
+		if err != nil {
+			return err
+		}
 		now := db.Now()
+		// the move is a write of the card's placement on the source board (migration 0404); the cards columns follow
+		// the home placement through the mirror triggers, and updated_at stays a card write
 		if !listChanged {
-			_, err := tx.ExecContext(e.Ctx, `UPDATE cards SET position=?,updated_at=? WHERE id=?`, pos, now, id)
+			if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET position=? WHERE card_id=? AND board_id=?`, pos, id, srcBoard)); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, id)
 			return err
 		}
 		var prev any // remember where an archived/trashed/closed card came from
@@ -431,33 +474,22 @@ func doMove(e *ops.Env, id, listID string, explicit *float64, afterID, beforeID 
 				prev = old.ListID
 			}
 		}
-		_, err := tx.ExecContext(e.Ctx, `UPDATE cards SET list_id=?,board_id=?,position=?,prev_list_id=?,is_closed=?,list_changed_at=?,updated_at=? WHERE id=?`,
-			listID, dstBoard, pos, prev, dtype == "closed", now, now, id)
-		if err != nil {
+		if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET board_id=?,list_id=?,position=?,prev_list_id=?,list_changed_at=? WHERE card_id=? AND board_id=?`,
+			dstBoard, listID, pos, prev, now, id, srcBoard)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, id); err != nil {
+			return err
+		}
+		// the closed state follows the destination (archive/trash keep it), and the destination's archive-after rule
+		// runs (restoring into a full column archives its oldest other card); a reorder above never gets here
+		if landed, err = boards.Landed(e.Ctx, tx, boards.Landing{CardID: id, ListID: listID}); err != nil {
 			return err
 		}
 		if dstBoard != srcBoard {
-			// drop labels and members that do not exist on the destination board
-			rows, _ := tx.QueryContext(e.Ctx, `SELECT label_id FROM card_labels WHERE card_id=?`, id)
-			var drop []string
-			for rows != nil && rows.Next() {
-				var l string
-				_ = rows.Scan(&l)
-				if !labelAllowed(e.Ctx, tx, dstBoard, l) {
-					drop = append(drop, l)
-				}
-			}
-			if rows != nil {
-				rows.Close()
-			}
-			for _, l := range drop {
-				_, _ = tx.ExecContext(e.Ctx, `DELETE FROM card_labels WHERE card_id=? AND label_id=?`, id, l)
-			}
-			members := boardMemberIDs(e.Ctx, tx, dstBoard)
-			for _, u := range old.MemberIDs {
-				if !members[u] {
-					_, _ = tx.ExecContext(e.Ctx, `DELETE FROM card_memberships WHERE card_id=? AND user_id=?`, id, u)
-				}
+			// drop labels and members that no board the card is on now allows (with one placement: the destination's)
+			if err := pruneAfterLeaving(e.Ctx, tx, id, old.MemberIDs); err != nil {
+				return err
 			}
 			_, _ = tx.ExecContext(e.Ctx, `DELETE FROM card_editing WHERE card_id=?`, id)
 		}
@@ -466,12 +498,13 @@ func doMove(e *ops.Env, id, listID string, explicit *float64, afterID, beforeID 
 	if err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, id)
+	c, err := loadCardOn(e, e.DB, id, dstBoard)
 	if err != nil {
 		return c, err
 	}
 	if dstBoard != srcBoard {
-		emit(e, "cardDelete", "card.deleted", srcBoard, id, map[string]any{"movedToBoardId": dstBoard, "listId": old.ListID})
+		// the source half of a relocation concerns the source board only (the card's other boards keep it)
+		emitScoped(e, "", "cardDelete", "card.deleted", srcBoard, id, map[string]any{"movedToBoardId": dstBoard, "listId": old.ListID}, []string{srcBoard})
 	}
 	kind := ""
 	switch {
@@ -481,7 +514,12 @@ func doMove(e *ops.Env, id, listID string, explicit *float64, afterID, beforeID 
 	case (stype == "archive" || stype == "trash") && dtype != "archive" && dtype != "trash":
 		kind = "card.restored"
 	}
+	// one placement moved: a placement event (events.PlacementScoped), recorded on its board only (an archive kind
+	// here is that board's placement only); the card's other boards get the card.placement.changed nudge, and a close
+	// or re-open it causes still notifies everyone following the card (closed is per card)
 	emitKind(e, kind, "cardMove", "card.moved", dstBoard, id, map[string]any{"card": c, "fromListId": old.ListID, "toListId": listID, "fromBoardId": srcBoard, "trash": dtype == "trash"})
+	boards.EmitClosedElsewhere(e, dstBoard, landed)
+	boards.EmitAutoArchived(e, landed)
 	return c, nil
 }
 
@@ -491,11 +529,15 @@ func firstList(e *ops.Env, boardID, typ string) string {
 	return id
 }
 
+// cardArchive archives (or trashes) the CARD: every placement, on every board (hidden ones included), moves to its
+// board's archive (trash) list, remembering its column for card.restore. The context board must have the list (as
+// before); another board without one gets it created. A placement already there only moves to the end of it.
 func cardArchive(e *ops.Env, in ArchiveIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	a, err := authz.CardEditAccess(e, in.ID, "")
 	if err != nil {
 		return Card{}, err
 	}
+	boardID := editContext(a)
 	typ := "archive"
 	if in.Trash {
 		typ = "trash"
@@ -504,46 +546,208 @@ func cardArchive(e *ops.Env, in ArchiveIn) (Card, error) {
 	if l == "" {
 		return Card{}, ops.Invalid("board has no " + typ + " list")
 	}
-	return doMove(e, in.ID, l, nil, "", "")
-}
-
-func cardRestore(e *ops.Env, in IDIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	old, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, in.ID)
+	if old.IsTemplate {
+		return Card{}, ops.Invalid("templates cannot be moved")
+	}
+	if old.IsDraft {
+		return Card{}, ops.Invalid("publish the draft before moving it")
+	}
+	var stype string                // the context placement's column type (the event describes it)
+	moves := map[string][2]string{} // every board's placement move (events.PlacementLists)
+	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		clear(moves)
+		pls, err := placementsTx(e.Ctx, tx, in.ID)
+		if err != nil {
+			return err
+		}
+		now := db.Now()
+		for _, p := range pls {
+			target := l
+			if p.Board != boardID {
+				if target, err = boards.SystemList(e.Ctx, tx, p.Board, typ); err != nil {
+					return err
+				}
+			} else {
+				stype = p.ListType
+			}
+			pos, err := positionFor(e.Ctx, tx, target, in.ID, "", "", nil)
+			if err != nil {
+				return err
+			}
+			moves[p.Board] = [2]string{p.List, target}
+			if p.List == target { // already there: to the end of it
+				if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET position=? WHERE card_id=? AND board_id=?`, pos, in.ID, p.Board)); err != nil {
+					return err
+				}
+				continue
+			}
+			prev := p.List // remember where it came from (an archived card trashed keeps its original column)
+			if (p.ListType == "archive" || p.ListType == "trash") && p.Prev != nil {
+				prev = *p.Prev
+			}
+			if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET list_id=?,position=?,prev_list_id=?,list_changed_at=? WHERE card_id=? AND board_id=?`,
+				target, pos, prev, now, in.ID, p.Board)); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, in.ID)
+		return err // archive/trash lists keep the closed state: no landing
+	})
+	if err != nil {
+		return Card{}, err
+	}
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err != nil {
 		return c, err
 	}
-	var stype string
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT type FROM lists WHERE id=?`, c.ListID).Scan(&stype)
-	if stype != "archive" && stype != "trash" {
-		return c, ops.Invalid("card is not archived or trashed")
+	kind := ""
+	if old.ListID != l && stype != "archive" && stype != "trash" {
+		kind = "card.archived"
 	}
-	target := ""
-	if c.PrevListID != nil {
-		var pt, pb string
-		if e.DB.QueryRowContext(e.Ctx, `SELECT type,board_id FROM lists WHERE id=?`, *c.PrevListID).Scan(&pt, &pb) == nil && pb == boardID && (pt == "active" || pt == "closed") {
-			target = *c.PrevListID
-		}
-	}
-	if target == "" {
-		target = firstList(e, boardID, "active")
-	}
-	if target == "" {
-		return c, ops.Invalid("board has no active list to restore into")
-	}
-	return doMove(e, in.ID, target, nil, "", "")
+	// a card-level event (events.CardLevel): the fan-out reaches every board the card is on, each copy with that
+	// board's own placement (its archive or trash column), even when the context placement was already there
+	emitKind(e, kind, "cardMove", "card.moved", boardID, in.ID, map[string]any{"card": c, "fromListId": old.ListID, "toListId": l, "fromBoardId": boardID, "trash": in.Trash, events.CardLevel: true, events.PlacementLists: moves})
+	return c, nil
 }
 
-func cardClose(e *ops.Env, in CloseIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+// cardRestore restores the CARD: every placement in an archive or trash list (on every board, hidden ones included)
+// returns to its previous column when that column is still an open or closing column of its board, else to that
+// board's first open column. Placements that are not archived stay where they are (an auto-archive archives one
+// board's placement only). Landings in closing columns run last: one closing column closes the card.
+func cardRestore(e *ops.Env, in IDIn) (Card, error) {
+	a, err := authz.CardEditAccess(e, in.ID, "")
 	if err != nil {
 		return Card{}, err
 	}
+	boardID := editContext(a)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
+	if err != nil {
+		return c, err
+	}
+	pls, err := placementsTx(e.Ctx, e.DB, in.ID)
+	if err != nil {
+		return c, err
+	}
+	type restore struct {
+		p      placementRow
+		target string
+	}
+	var todo []restore
+	ctxTarget := ""
+	for _, p := range pls {
+		if p.ListType != "archive" && p.ListType != "trash" {
+			continue
+		}
+		target := ""
+		if p.Prev != nil {
+			var pt, pb string
+			if e.DB.QueryRowContext(e.Ctx, `SELECT type,board_id FROM lists WHERE id=?`, *p.Prev).Scan(&pt, &pb) == nil && pb == p.Board && (pt == "active" || pt == "closed") {
+				target = *p.Prev
+			}
+		}
+		if target == "" {
+			target = firstList(e, p.Board, "active")
+		}
+		if target == "" {
+			if p.Board == boardID {
+				return c, ops.Invalid("board has no active list to restore into")
+			}
+			return c, ops.Invalid("a board the card is on has no active list to restore into")
+		}
+		if p.Board == boardID {
+			ctxTarget = target
+		}
+		todo = append(todo, restore{p, target})
+	}
+	if len(todo) == 0 {
+		return c, ops.Invalid("card is not archived or trashed")
+	}
+	if c.IsTemplate {
+		return Card{}, ops.Invalid("templates cannot be moved")
+	}
+	if c.IsDraft {
+		return Card{}, ops.Invalid("publish the draft before moving it")
+	}
+	var landed boards.LandResult
+	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		landed = boards.LandResult{}
+		now := db.Now()
+		var lands []boards.Landing
+		for _, r := range todo {
+			pos, err := positionFor(e.Ctx, tx, r.target, in.ID, "", "", nil)
+			if err != nil {
+				return err
+			}
+			var prev any // restoring into a closing column remembers where the card was before it was archived
+			if listType(e.Ctx, tx, r.target) == "closed" {
+				prev = r.p.List
+				if r.p.Prev != nil {
+					prev = *r.p.Prev
+				}
+			}
+			if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET list_id=?,position=?,prev_list_id=?,list_changed_at=? WHERE card_id=? AND board_id=?`,
+				r.target, pos, prev, now, in.ID, r.p.Board)); err != nil {
+				return err
+			}
+			lands = append(lands, boards.Landing{CardID: in.ID, ListID: r.target})
+		}
+		if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, in.ID); err != nil {
+			return err
+		}
+		var err error
+		landed, err = boards.Landed(e.Ctx, tx, orderLandings(e.Ctx, tx, lands)...)
+		return err
+	})
+	if err != nil {
+		return Card{}, err
+	}
+	// the event names the context board's placement when it was archived, else the first restored one
+	evBoard, from, to := boardID, c.ListID, ctxTarget
+	if ctxTarget == "" {
+		evBoard, from, to = todo[0].p.Board, todo[0].p.List, todo[0].target
+	}
+	ev, err := loadCardOn(e, e.DB, in.ID, evBoard)
+	if err != nil {
+		return ev, err
+	}
+	// a card-level event (events.CardLevel): every board the card is on hears it with its own placement
+	moves := map[string][2]string{} // every restored placement's move (events.PlacementLists)
+	for _, r := range todo {
+		moves[r.p.Board] = [2]string{r.p.List, r.target}
+	}
+	emitKind(e, "card.restored", "cardMove", "card.moved", evBoard, in.ID, map[string]any{"card": ev, "fromListId": from, "toListId": to, "fromBoardId": evBoard, "trash": false, events.CardLevel: true, events.PlacementLists: moves})
+	boards.EmitClosedElsewhere(e, evBoard, landed)
+	boards.EmitAutoArchived(e, landed)
+	return loadCardOn(e, e.DB, in.ID, boardID)
+}
+
+// cardClose closes (or re-opens) the CARD (closed is per card: it shows closed on every board). On the context board
+// it moves as before: into that board's first closing column when it has one, out of a closing column (to its
+// previous or the first open column) when re-opening; otherwise the flag is set in place.
+func cardClose(e *ops.Env, in CloseIn) (Card, error) {
+	a, err := authz.CardEditAccess(e, in.ID, in.BoardID)
+	if err != nil {
+		return Card{}, err
+	}
+	if in.BoardID != "" && a.BoardID != in.BoardID { // not a placement the caller can see
+		return Card{}, ops.NotFound("card")
+	}
+	// the placement that moves: the board given (the card sheet's context) when the caller may change it there, else
+	// the default (closing is a card-level write: Edit on any placement is enough, the flag is the card's)
+	boardID := in.BoardID
+	switch {
+	case boardID != "" && a.EditableOn(boardID):
+	case a.HomeBoardID != "" && a.EditableOn(a.HomeBoardID):
+		boardID = a.HomeBoardID
+	default:
+		boardID = editContext(a)
+	}
 	closing := in.Closed == nil || *in.Closed
-	c, err := loadCard(e, e.DB, in.ID)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err != nil {
 		return c, err
 	}
@@ -554,7 +758,7 @@ func cardClose(e *ops.Env, in CloseIn) (Card, error) {
 	}
 	if closing {
 		if cl := firstList(e, boardID, "closed"); cl != "" && stype != "closed" {
-			return doMove(e, in.ID, cl, nil, "", "")
+			return doMove(e, in.ID, boardID, cl, nil, "", "")
 		}
 	} else if stype == "closed" {
 		target := ""
@@ -568,14 +772,14 @@ func cardClose(e *ops.Env, in CloseIn) (Card, error) {
 			target = firstList(e, boardID, "active")
 		}
 		if target != "" {
-			return doMove(e, in.ID, target, nil, "", "")
+			return doMove(e, in.ID, boardID, target, nil, "", "")
 		}
 	}
 	was := c.IsClosed
 	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET is_closed=?,updated_at=? WHERE id=?`, closing, db.Now(), in.ID); err != nil {
 		return c, err
 	}
-	c, _ = loadCard(e, e.DB, in.ID)
+	c, _ = loadCardOn(e, e.DB, in.ID, boardID)
 	changed := []string{}
 	if was != closing {
 		changed = append(changed, "isClosed")
@@ -601,7 +805,7 @@ func cardCover(e *ops.Env, in CoverIn) (Card, error) {
 	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET cover_attachment_id=?,updated_at=? WHERE id=?`, v, db.Now(), in.ID); err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, in.ID)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err == nil {
 		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c})
 	}
@@ -663,7 +867,7 @@ func cardLocation(e *ops.Env, in LocationIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, in.ID)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err == nil {
 		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c})
 	}

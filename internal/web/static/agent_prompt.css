@@ -34,3 +34,7 @@ dialog#modal:has(.ap)[open]{display:flex;flex-direction:column;animation:cards-s
 }
 .ap-custom{margin:0;font-size:var(--text-sm);color:var(--fg-2)}
 .ap-badge{display:inline-block;margin-right:var(--space-1);padding:0 .35rem;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--fg);font-size:var(--text-xs);font-weight:600}
+/* Board/Runner tab for a board manager when no agent account has access yet */
+.ap-create{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;margin:0;padding:var(--space-3);border:1px solid var(--border);border-radius:var(--radius);background:var(--accent-soft)}
+.ap-create p{margin:0;flex:1 1 18rem;font-size:var(--text-sm);color:var(--fg)}
+.ap-create .btn{flex:0 0 auto}

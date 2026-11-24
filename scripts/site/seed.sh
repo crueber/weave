@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Seeds a THROWAWAY Weave instance with fictional data for the project website screenshots (scripts/site/shots.mjs).
 # Same recipe as scripts/demo/seed.sh, different scenarios: a personal "My week" board, an Apollo project with a
-# software board, a dated timeline board, two template boards, and an agent that listens and holds a claim.
+# software board (its Done column closes cards and keeps the newest 20), a dated timeline board, two template boards,
+# the launch checklist card on two boards, and an agent that listens and holds a claim.
 #
 #   export DEMO_DIR=$HOME/.cache/weave-site               # work dir (keys, sessions, state); never committed
 #   export WEAVE_DATA_DIR=$DEMO_DIR/data WEAVE_ADDR=:18130 WEAVE_BASE_URL=http://localhost:18130 \

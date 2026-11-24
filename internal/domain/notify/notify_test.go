@@ -42,6 +42,8 @@ func seed(t *testing.T) *world {
 	}
 	w.admin, w.alice, w.bob, w.carol, w.dave = mk("admin", "admin"), mk("alice", "boardUser"), mk("bob", "boardUser"), mk("carol", "boardUser"), mk("dave", "boardUser")
 	x(t, root, `INSERT INTO projects(id,name,created_at) VALUES('p1','Apollo',?)`, db.Now())
+	// the admin persona manages p1 as a real project manager (the admin role alone gives no content access)
+	x(t, root, `INSERT INTO project_managers(id,project_id,user_id,created_at) VALUES('pm-admin','p1','admin',?)`, db.Now())
 	x(t, root, `INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'Launch board',?),('b2','p1',2,'Secret board',?)`, db.Now(), db.Now())
 	x(t, root, `INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('l1','b1','active',1,'Todo',?),('l2','b1','active',2,'Done',?),('l3','b2','active',1,'Hidden',?)`, db.Now(), db.Now(), db.Now())
 	for _, u := range []string{"alice", "bob", "carol"} {
@@ -131,7 +133,7 @@ func TestCommentNotificationsAndActions(t *testing.T) {
 func TestMoveAndMembershipNotifications(t *testing.T) {
 	w := seed(t)
 	// the real card.move shape: the card already sits in l2, the event names both list ids
-	x(t, w.alice, `UPDATE cards SET list_id='l2' WHERE id='c1'`)
+	x(t, w.alice, `UPDATE card_placements SET list_id='l2' WHERE card_id='c1' AND is_home=1`)
 	ops.Emit(w.alice, ops.Event{Type: "cardMove", BoardID: "b1", CardID: "c1", Data: map[string]any{"fromListId": "l1", "toListId": "l2"}})
 	ops.Emit(w.alice, ops.Event{Type: "cardMembershipCreate", BoardID: "b1", CardID: "c1", Data: map[string]any{"userId": "carol"}})
 	notify.Wait()
@@ -477,7 +479,7 @@ func TestSearchRespectsAccess(t *testing.T) {
 	if !strings.Contains(res.Items[0].SnippetHTML, "<mark>") && !strings.Contains(res.Items[1].SnippetHTML, "<mark>") {
 		t.Fatal("no highlighted snippet")
 	}
-	// zebra is only on the secret board: dave and carol must not see it, admin must
+	// zebra is only on the secret board: dave and carol must not see it, admin (a manager of the project) must
 	for _, e := range []*ops.Env{w.carol, w.dave} {
 		r, _ := ops.Typed[notify.SearchOut](e, "search.query", notify.SearchIn{Q: "zebra"})
 		if len(r.Items) != 0 {
@@ -489,7 +491,7 @@ func TestSearchRespectsAccess(t *testing.T) {
 		}
 	}
 	if r, _ := ops.Typed[notify.SearchOut](w.admin, "search.query", notify.SearchIn{Q: "zebra"}); len(r.Items) != 1 {
-		t.Fatal("admin should see the secret card")
+		t.Fatal("the project manager (admin persona) should see the secret card")
 	}
 	// project search + hostile input does not blow up
 	if r, _ := ops.Typed[notify.SearchOut](w.carol, "search.query", notify.SearchIn{Q: "apollo"}); len(r.Items) != 1 || r.Items[0].Kind != "project" {

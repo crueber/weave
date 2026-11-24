@@ -21,11 +21,13 @@ type MemberRemoveIn struct {
 type LabelIn struct {
 	ID      string `path:"id"`
 	LabelID string `json:"labelId" required:"true"`
+	BoardID string `json:"boardId" desc:"the board whose label it is (labels belong to a board); required when the card is on several boards you can see"`
 }
 
 type LabelRemoveIn struct {
 	ID      string `path:"id"`
 	LabelID string `path:"labelId"`
+	BoardID string `query:"boardId" desc:"the board whose label it is; required when the card is on several boards you can see"`
 }
 
 type SubscribeOut struct {
@@ -82,11 +84,19 @@ func init() {
 }
 
 func memberAdd(e *ops.Env, in MemberIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	a, err := authz.CardEditAccess(e, in.ID, "")
 	if err != nil {
 		return Card{}, err
 	}
-	if !boardMemberIDs(e.Ctx, e.DB, boardID)[in.UserID] {
+	boardID := a.BoardID
+	member := false // a member of a board the card is on (one the caller can see)
+	for b := range a.Boards {
+		if boardMemberIDs(e.Ctx, e.DB, b)[in.UserID] {
+			member = true
+			break
+		}
+	}
+	if !member {
 		return Card{}, ops.Invalid("user is not a member of this board")
 	}
 	res, err := e.DB.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_memberships(card_id,user_id) VALUES(?,?)`, in.ID, in.UserID)
@@ -96,10 +106,10 @@ func memberAdd(e *ops.Env, in MemberIn) (Card, error) {
 	if n, _ := res.RowsAffected(); n > 0 {
 		autoWatch(e.Ctx, e.DB, in.ID, in.UserID, "") // being added to a card watches it (never over a mute; not for agents)
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCard(e, e.DB, in.ID)
+		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
 		emit(e, "cardMembershipCreate", "card.member.added", boardID, in.ID, map[string]any{"userId": in.UserID, "card": c})
 	}
-	return loadCard(e, e.DB, in.ID)
+	return loadCardOn(e, e.DB, in.ID, boardID)
 }
 
 func memberRemove(e *ops.Env, in MemberRemoveIn) (Card, error) {
@@ -113,14 +123,14 @@ func memberRemove(e *ops.Env, in MemberRemoveIn) (Card, error) {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCard(e, e.DB, in.ID)
+		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
 		emit(e, "cardMembershipDelete", "card.member.removed", boardID, in.ID, map[string]any{"userId": in.UserID, "card": c})
 	}
-	return loadCard(e, e.DB, in.ID)
+	return loadCardOn(e, e.DB, in.ID, boardID)
 }
 
 func labelAdd(e *ops.Env, in LabelIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	boardID, err := labelBoard(e, in.ID, in.BoardID)
 	if err != nil {
 		return Card{}, err
 	}
@@ -146,17 +156,42 @@ func labelAdd(e *ops.Env, in LabelIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	c, err := loadCard(e, e.DB, in.ID)
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err == nil {
-		emit(e, "cardLabelCreate", "card.label.added", boardID, in.ID, map[string]any{"labelId": in.LabelID, "card": c})
+		// a label is board (or project) vocabulary: the event reaches only the boards that show it
+		emitScoped(e, "", "cardLabelCreate", "card.label.added", boardID, in.ID, map[string]any{"labelId": in.LabelID, "card": c}, labelBoards(e, in.ID, in.LabelID))
 	}
 	return c, err
 }
 
+// labelBoard is the board of a label write: the card-level edit rule, then the placement (boardId, or the only one
+// the caller can see) on which the caller may edit (labels are board vocabulary, so a label write is that board's).
+func labelBoard(e *ops.Env, cardID, boardHint string) (string, error) {
+	a, err := authz.CardEditAccess(e, cardID, boardHint)
+	if err != nil {
+		return "", err
+	}
+	b, err := placementBoard(a, boardHint, "labels belong to a board")
+	if err != nil {
+		return "", err
+	}
+	if !a.EditableOn(b) {
+		return "", ops.Forbidden()
+	}
+	return b, nil
+}
+
 func labelRemove(e *ops.Env, in LabelRemoveIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	boardID, err := labelBoard(e, in.ID, in.BoardID)
 	if err != nil {
 		return Card{}, err
+	}
+	if placementCount(e.Ctx, e.DB, in.ID) > 1 { // on several boards: only a label of this board (another board's stays)
+		var n int
+		_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM labels l WHERE l.id=?1 AND `+db.LabelOnBoard("l", "?2"), in.LabelID, boardID).Scan(&n)
+		if n == 0 {
+			return Card{}, ops.NotFound("label")
+		}
 	}
 	res, err := e.DB.ExecContext(e.Ctx, `DELETE FROM card_labels WHERE card_id=? AND label_id=?`, in.ID, in.LabelID)
 	if err != nil {
@@ -164,10 +199,10 @@ func labelRemove(e *ops.Env, in LabelRemoveIn) (Card, error) {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCard(e, e.DB, in.ID)
-		emit(e, "cardLabelDelete", "card.label.removed", boardID, in.ID, map[string]any{"labelId": in.LabelID, "card": c})
+		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
+		emitScoped(e, "", "cardLabelDelete", "card.label.removed", boardID, in.ID, map[string]any{"labelId": in.LabelID, "card": c}, labelBoards(e, in.ID, in.LabelID))
 	}
-	return loadCard(e, e.DB, in.ID)
+	return loadCardOn(e, e.DB, in.ID, boardID)
 }
 
 // ---- options for the card modal (lists, members, labels the caller may pick from)
@@ -194,6 +229,7 @@ type LabelOpt struct {
 }
 type Options struct {
 	CanEdit     bool       `json:"canEdit"`
+	CanEditHere bool       `json:"canEditHere" desc:"you may change the card's placement on the context board: move it between that board's columns (lists) and toggle that board's labels (Edit there, or the worker rule); canEdit is the card itself (any board you can edit it on)"`
 	CanComment  bool       `json:"canComment"`
 	BoardName   string     `json:"boardName"`
 	ListName    string     `json:"listName"`
@@ -219,15 +255,22 @@ func init() {
 		UI: "GET /ui/cards/{id}"}, cardOptions)
 }
 
-func cardOptions(e *ops.Env, in IDIn) (Options, error) {
-	boardID, err := viewCard(e, in.ID)
+// OptionsIn is card.options' input: the card and its context board.
+type OptionsIn struct {
+	ID      string `path:"id" desc:"card id"`
+	BoardID string `query:"boardId" desc:"context board when the card is on several boards (its columns, members and labels); default as card.get"`
+}
+
+func cardOptions(e *ops.Env, in OptionsIn) (Options, error) {
+	a, err := authz.CardAccessFor(e, in.ID, in.BoardID)
 	if err != nil {
 		return Options{}, err
 	}
-	lvl := authz.BoardLevel(e, boardID)
-	o := Options{CanEdit: lvl >= authz.Edit, CanComment: lvl >= authz.Comment, Lists: []ListOpt{}, Members: []UserOpt{}, Labels: []LabelOpt{}}
+	boardID := a.BoardID
+	cc := authz.Card(e, in.ID) // the same predicates as the card ops (worker rule included)
+	o := Options{CanEdit: cc.CanEdit, CanEditHere: cc.CanEdit && a.EditableOn(boardID), CanComment: cc.CanComment, Lists: []ListOpt{}, Members: []UserOpt{}, Labels: []LabelOpt{}}
 	var listID string
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.name,b.project_id,COALESCE(p.name,''),COALESCE(l.name,l.type),l.type,l.id FROM boards b JOIN cards c ON c.board_id=b.id JOIN lists l ON l.id=c.list_id LEFT JOIN projects p ON p.id=b.project_id WHERE c.id=?`, in.ID).
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.name,b.project_id,COALESCE(p.name,''),COALESCE(l.name,l.type),l.type,l.id FROM card_placements c JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id LEFT JOIN projects p ON p.id=b.project_id WHERE c.card_id=? AND c.board_id=?`, in.ID, boardID).
 		Scan(&o.BoardName, &o.ProjectID, &o.ProjectName, &o.ListName, &o.ListType, &listID)
 	if e.User != nil {
 		var muted *bool
@@ -255,7 +298,8 @@ func cardOptions(e *ops.Env, in IDIn) (Options, error) {
 		}
 		rows.Close()
 	}
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT l.id,COALESCE(l.name,''),l.color,COALESCE(l.group_id,''),'',0 FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.card_id=? ORDER BY l.position`, in.ID); err == nil {
+	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT l.id,COALESCE(l.name,''),l.color,COALESCE(l.group_id,''),'',0 FROM card_labels cl JOIN labels l ON l.id=cl.label_id
+		WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY l.position`, in.ID, boardID); err == nil {
 		for rows.Next() {
 			var l LabelOpt
 			_ = rows.Scan(&l.ID, &l.Name, &l.Color, &l.GroupID, &l.GroupName, &l.SingleSelect)
@@ -266,7 +310,12 @@ func cardOptions(e *ops.Env, in IDIn) (Options, error) {
 	if !o.CanEdit {
 		return o, nil
 	}
-	// lists on this board plus sibling boards of the project the caller can edit
+	// lists on this board plus sibling boards of the project the caller can edit (a move of the context placement:
+	// only when the caller may change it here). Another board the card is already on is left out: moving this
+	// placement there would be a conflict (the board switcher shows the card on that board instead).
+	if !o.CanEditHere {
+		return optionsPeople(e, o, boardID)
+	}
 	rows, err := e.DB.QueryContext(e.Ctx, `SELECT l.id,b.id,b.name,COALESCE(l.name,l.type),l.type FROM lists l JOIN boards b ON b.id=l.board_id
 		WHERE b.project_id=? AND l.type IN ('active','closed') AND b.is_template=0 ORDER BY (b.id=?) DESC, b.position, l.position`, o.ProjectID, boardID)
 	if err == nil {
@@ -275,7 +324,8 @@ func cardOptions(e *ops.Env, in IDIn) (Options, error) {
 			var l ListOpt
 			_ = rows.Scan(&l.ID, &l.BoardID, &l.BoardName, &l.Name, &l.Type)
 			if _, ok := seen[l.BoardID]; !ok {
-				seen[l.BoardID] = authz.BoardLevel(e, l.BoardID) >= authz.Edit
+				_, placed := a.Boards[l.BoardID]
+				seen[l.BoardID] = (l.BoardID == boardID || !placed) && authz.BoardLevel(e, l.BoardID) >= authz.Edit
 			}
 			if seen[l.BoardID] {
 				o.Lists = append(o.Lists, l)
@@ -283,6 +333,11 @@ func cardOptions(e *ops.Env, in IDIn) (Options, error) {
 		}
 		rows.Close()
 	}
+	return optionsPeople(e, o, boardID)
+}
+
+// optionsPeople adds the board members and the board's labels a card editor picks from (card.options).
+func optionsPeople(e *ops.Env, o Options, boardID string) (Options, error) {
 	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT u.id,u.name,COALESCE(u.username,'') FROM users u WHERE u.deleted_at IS NULL AND u.is_deactivated=0 AND (
 		u.id IN (SELECT user_id FROM board_memberships WHERE board_id=?1 AND user_id IS NOT NULL) OR
 		u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1)) ORDER BY u.name`, boardID); err == nil {

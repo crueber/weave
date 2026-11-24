@@ -10,10 +10,15 @@ the same guidance ships to agents as an Agent Skill / instructions block for eve
 
 1. **Install the CLI** on the machine the agent runs on: `curl -fsSL <release>/install.sh | sh`
    (Windows: `install.ps1`) or download the archive from the release page. It is a single static binary.
-2. **Create the agent's account** (admin): in the browser at `/admin/agents`, or
-   `weave agent create --name triage-bot --description "Labels and routes new cards"`. The API key is shown
-   once. Agent accounts are marked as agents everywhere (comments, moves, claims, the Listeners panel).
-3. **Grant access** to exactly the boards it needs: `weave agent access AGENT_ID --boardId BOARD`.
+2. **Create the agent's account** for your board: anyone who manages a board (its owner or a project manager) does this in
+   **Board settings > Agents** ("Create an agent for this board"), or `weave agent create --name triage-bot --boardIds BOARD`.
+   The API key is shown once. Agent accounts are marked as agents everywhere (comments, moves, claims, the Listeners panel).
+   Admins manage every agent *account* under `/admin/agents` (deactivate, rotate the key, delete); like everyone, they see the
+   agent's board access only on boards they manage themselves (the admin role gives no access to other people's boards).
+3. **Grant access** to exactly the boards it needs: `weave agent access AGENT_ID --boardId BOARD` (you need Manage on that board).
+   An agent account only ever gets editor, commenter or viewer access to boards; it never gets project-wide or admin rights and
+   cannot create agents, manage members or change webhooks. You (its creator) can rename, deactivate, rotate, delete it and
+   remove its access anywhere; a manager of every board it is on can too.
    Without access the board does not exist for the agent (`not_found`).
 4. **Log in on the agent's machine**: `weave login --url https://weave.example.com --token wk_...`
    (or set `WEAVE_URL` / `WEAVE_TOKEN` in the service environment). `weave doctor` verifies it.
@@ -30,7 +35,7 @@ project page, your user settings, or `weave agent prompt` in a terminal). It cop
 *Project*, *Board* (the agent interviews you about which columns to attach to, where finished/blocked cards go, claim policy, filters and authority, echoes a
 `PLAN` block and waits for your "go"), *Column*, and *Runner* (an unattended service). Anyone who can view the board can copy them. Prompts never contain a key:
 they use `$WEAVE_TOKEN`, and tell the agent to stop and ask you to set it rather than ask for it in chat. A personal key acts with your full role; agent accounts
-are created by admins under `/admin/agents`; and claiming a card needs Edit access on the board, so a worker or viewer role cannot claim. A column may also carry a soft **WIP limit** (`wipLimit` on the list): treat it as a hint to finish work before pulling more; nothing enforces it.
+are created by board owners in Board settings > Agents (admins manage the accounts under `/admin/agents`); and claiming a card needs Edit access on the board, so a worker or viewer role cannot claim. A column may also carry a soft **WIP limit** (`wipLimit` on the list): treat it as a hint to finish work before pulling more; nothing enforces it.
 
 **Customising the prompts.** The About Weave, project, board and runner prompts are editable text (the column prompt's text is the column
 description, and the runner's per-card work order is fixed):
@@ -41,7 +46,7 @@ description, and the runner's per-card work order is fixed):
 | Shared blocks (`{connect}`, `{security}`...) | Admin console > Agent prompts > Blocks | admins | every prompt that uses the block |
 | Project, Board defaults | Admin console > Agent prompts | admins | every project / board without its own text |
 | One project's text | Project settings > Agents (`weave project update P --agentPrompt ...`) | project managers | that project |
-| One board's text | Board settings > Agents (`weave board update B --agentPrompt ...`) | board managers | that board (travels with export/import and templates) |
+| One board's text | Board settings > Agents (`weave board update B --agentPrompt ...`) | project managers and board owners | that board (travels with export/import and templates) |
 
 A board does not fall back to its project's text: board -> admin default -> built-in, project -> admin default -> built-in. Each editor starts
 from the text that applies now; saving it unchanged, saving an empty field or pressing **Reset to default** goes back to the default.
@@ -145,6 +150,13 @@ the lease expires and the card becomes claimable again, so work is never stuck b
 Claim is atomic on the server: of two agents racing for a card exactly one gets it, the other gets
 exit code 7 and moves on.
 
+**One card on several boards.** A card can be placed on several boards (`weave card placements CARD`): each board has
+its own column for it, so a review board and a team board can follow the same card. The claim is the card's, so two
+agents listening on columns of two boards that both hold the card never both get it (`card.next` hands it out once).
+`card.placed` arrives on a board the card was just put on (treat it like an arrival in that column); `card.unplaced`
+means it was removed from that board (it stays on its others). `weave card move CARD --to-list L --board B` moves the
+placement on board B; closing, archiving, trashing and deleting act on the card everywhere.
+
 ## 3. Listening
 
 ```sh
@@ -167,6 +179,14 @@ weave listen --board Product --list Ready --list 'Needs info'
   `WEAVE_CARD_ID`, `WEAVE_LIST_ID`, `WEAVE_FROM_LIST_ID`, `WEAVE_BOARD_ID` etc. are set. A failing command is logged and
   the listener continues; `--on-error release,comment` cleans up the card automatically. `--concurrency N` bounds parallelism.
 - **`--agent-label NAME`** is how the listener appears under Listeners in the UI.
+
+- **A card on several boards** (placements): an event about the card itself (a comment, an edit, a claim,
+  `card.archive`/`card.restore`, a delete) is stored once per board it is on, each copy with its own id, that board's `boardId`, that board's
+  view of the card (its column, its labels) and the SAME `origin`. A listener on one board sees one copy; a listener
+  on several boards sees one per board and should dedupe by `origin` (the CLI's id-based de-duplication does not merge
+  them). A move of one placement (between the columns of one board, a column archived, moved or deleted, a column's
+  auto-archive), a card created in a column and `card.placed`/`card.unplaced` (a card added to or removed from a board)
+  are recorded on that board only.
 
 Event types and the envelope are listed in the skill (`weave skill print --file references/events.md`).
 
@@ -298,9 +318,38 @@ Humans hear about agent work through **watching** (agents themselves are better 
   set or changed (column watchers: cards created in it, moved into or out of it, and those events for cards it holds). Edits,
   labels, tasks and attachments do not notify. One change notifies each person once, however many of their watches match; the
   notification says why ("because you watch the column Review"). Nobody hears about their own action.
+- Switching a column's **Close cards that land here** setting (`weave list update --id L --type closed|active`; the optional
+  `--existingCards keep` leaves the cards already there as they are, the default `flip` closes or re-opens them; `weave list typePreview
+  --id L` counts them first) sends **no** notifications for the cards it flips. The changes are not hidden from agents: each flipped card
+  emits `card.updated` with `"changed":["isClosed"]`, `"auto":"listType"` and `"quiet":true` on `weave listen`, the event stream and
+  webhooks. Any event marked `"quiet":true` is recorded and streamed but never notifies. A card moved into a closing column is closed
+  (`isClosed: true` in the move's result); `card.next` only hands out open cards and `board tree` hides closing columns unless `--include-closed`.
+- A column can **auto-archive** (`archiveAfter`, shown on `list get` and in `board tree`): it keeps its newest N cards and archives the
+  ones that have been in it longest whenever more land (`weave list archivePreview --id L --archiveAfter 30` counts first; `weave list
+  update --id L --archiveAfter 30 --confirmArchive` sets it; without `--confirmArchive` a setting that would archive cards right now is
+  refused with 409 and the count; `0` turns it off). So a card you put into such a column, or one your landing pushes out, **can leave the
+  column without anyone moving it**: you see one `card.archived` event per card with `"auto":"archiveAfter"`, `"keep":N` and
+  `"quiet":true` (no notifications), then one `list.updated` with `"autoArchived":K`. The card you just moved, created or published is never
+  the one archived, and **a card you hold a live claim on is never archived** (the column may sit above N until you release it; releasing,
+  or your lease lapsing, applies the rule again, which may archive that card if it is the oldest). `card.restore` brings an archived card
+  back to its column (and archives that column's oldest other card if it is full). **Recurring cards are never auto-archived, for now**
+  (a card with a recurrence rule stays and still counts, so the column may sit above N; `list archivePreview` reports them as
+  `skippedRecurring`); once its next occurrence is created the old card gives up its rule and the next landing may archive it.
+- A board manager can **apply a template to a board that already exists** (Board settings > Templates & export, or `weave board
+  template.apply B --templateId T --dry-run` then `--confirm`). New columns appear on the left and **every card of the board moves** into
+  the template's first open column: you see one `card.moved` per card with `"auto":"applyTemplate"`, `"templateId"` and `"quiet":true`
+  (no notifications; the card keeps its closed state), `list.created` for each new column, `label.created` for added labels and one
+  `board.updated` summary (`"appliedTemplate"`, `"columnsAdded"`, `"columnsRemoved"`, `"cardsMoved"`, `"targetListId"`). By default the
+  **old columns are then removed** (one `list.deleted` each, `"auto":"applyTemplate"`, `"quiet":true`, after the card moves; a manager can
+  keep them with `removeOldColumns=false`). If you listen to an old column you see your cards leave and then the column deleted; your
+  stream stays open but silent, and reconnecting with that list id fails with not_found. Re-read `board tree` and re-attach to the new
+  column your brief names; `--list` ids pasted into an older agent prompt are stale too. A recurrence whose `listId` named an old column
+  spawns into the card's own column instead, and an archived card restores into the board's first open column.
 - `card.unsubscribe` mutes a card: nothing about it reaches you, not even through a watched column or board, until you watch it again.
 - People automatically watch cards they create and comment on (preferences "Watch cards I create" / "Watch when I comment").
   **Agent accounts never auto-watch**, so an agent creating hundreds of cards does not fill its own notification list.
+- Notifications are pushed: a person with Weave open sees the bell light up (count, "(n)" in the tab title) the moment an
+  agent's comment or move notifies them, without reloading.
 
 ## 8. Running a listener as a service
 
@@ -349,6 +398,16 @@ The CLI speaks to these server features; they are part of the op registry (`weav
 `ready`; `: ping` heartbeats), `card.claim` / `card.release` / `card.renew`, `card.next`
 (`POST /lists/{listId}/next` with JSON `{claim, ttlSeconds, moveTo, note}`), `board.tree`, `card.list` filters
 (`listId`, `labelId`, `memberId`, `claimed`, `q`, `limit`, `cursor`), `list.listeners`, `board.listeners`, `whoami`
-and `agent.*`. Lists carry `description` (the column brief) in `list.list`, `board.tree` and the mutated
+and `agent.*`. Placements: `card.place` (`POST /cards/{id}/placements` `{listId, boardId?, position|afterId|beforeId}`),
+`card.unplace` (`DELETE /cards/{id}/placements/{boardId}`), `card.placements` (`GET /cards/{id}/placements`); `card.move`,
+`card.duplicate`, `card.close` and `card.label.add|remove` take `boardId` to name the placement; card reads take `boardId` as the context
+board. Lists carry `description` (the column brief) in `list.list`, `board.tree` and the mutated
 ops, so an agent can read the request from the column rather than a separate message. The CLI reads its schema from
 `GET /api/v1/_ops`. See `docs/CLI.md`.
+
+Every envelope carries `origin`, the id of the logical event (`actions.origin_id`, migration 0801): an event about a
+card that is on several boards is stored once per board (one envelope per board, each with its own `id`, `boardId`,
+`listId` and card snapshot as seen on that board, never another board's columns or labels) and all copies share
+`origin`; consumers of several boards dedupe by it. Envelopes stored before 0801 carry none. Placement events
+(created in a column, one placement moved: within a board, by a column operation or a column's auto-archive;
+`card.placed`, `card.unplaced`) are stored on their board only.

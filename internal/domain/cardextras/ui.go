@@ -158,14 +158,19 @@ func init() {
 	registerUI()
 }
 
+// base resolves the card's context board from the request's hint (?board= or the sheet's inherited board field; a
+// board the caller cannot see is ignored), so a card on several boards shows the members, linkable cards and
+// board-wide field groups of the board the sheet is showing, not always its home.
 func base(c *web.Ctx, cardID string) (*sectionData, error) {
-	board, err := authz.RequireCard(c.Env, cardID, authz.View)
+	a, err := authz.CardAccessFor(c.Env, cardID, c.BoardHint())
 	if err != nil {
 		return nil, err
 	}
-	l := authz.BoardLevel(c.Env, board)
-	return &sectionData{CardID: cardID, BoardID: board, CanEdit: l >= authz.Edit && c.Env.User != nil,
-		CanComment: l >= authz.Comment && c.Env.User != nil, CanManage: l >= authz.Manage}, nil
+	board := a.BoardID
+	cc := authz.Card(c.Env, cardID) // the cardextras ops need board Edit (CanEditExtras), not the worker rule
+	signedIn := c.Env.User != nil
+	return &sectionData{CardID: cardID, BoardID: board, CanEdit: cc.CanEditExtras && signedIn,
+		CanComment: cc.CanComment && signedIn, CanManage: cc.CanManage}, nil
 }
 
 func limitParam(c *web.Ctx, def int) int {
@@ -186,7 +191,7 @@ func members(c *web.Ctx, d *sectionData) []Member {
 
 func linkable(c *web.Ctx, d *sectionData) []CardOpt {
 	cs, _ := query(c.Env.Ctx, c.Env.DB, func(r *sql.Rows) (CardOpt, error) { var m CardOpt; return m, r.Scan(&m.ID, &m.Name) },
-		`SELECT id,name FROM cards WHERE board_id=? AND id<>? AND is_draft=0 AND is_template=0 ORDER BY name LIMIT 300`, d.BoardID, d.CardID)
+		`SELECT c.id,c.name FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.id<>? AND c.is_draft=0 AND c.is_template=0 ORDER BY c.name LIMIT 300`, d.BoardID, d.CardID)
 	return cs
 }
 
@@ -219,7 +224,7 @@ func renderSection(c *web.Ctx, section, cardID string) error {
 			return err
 		}
 	case "fields":
-		if d.Groups, err = ops.Typed[[]GroupItem](c.Env, "customfieldgroup.list", GroupListIn{CardID: cardID}); err != nil {
+		if d.Groups, err = ops.Typed[[]GroupItem](c.Env, "customfieldgroup.list", GroupListIn{CardID: cardID, BoardID: d.BoardID}); err != nil {
 			return err
 		}
 		d.Types = []string{"text", "number", "date", "checkbox", "select", "url"}

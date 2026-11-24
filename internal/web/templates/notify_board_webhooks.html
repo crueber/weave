@@ -1,0 +1,50 @@
+{{/* Board settings > Webhooks (lazy fragment of boards_settings.html, board managers only). The ops decide access:
+   webhook.list boardId= needs Manage on the board. Secrets are write-only; deliveries load on demand. */}}
+{{define "notify_board_webhooks"}}{{$d := .Data}}{{with $d}}<div id="bs-webhooks" class="adm-kit bs-hooks">
+<link rel="stylesheet" href="/static/admin.css">
+  {{template "adm_error" .Err}}
+  {{if .Msg}}<p class="bs-hint bs-hook-msg" role="status">{{.Msg}}</p>{{end}}
+  <ul class="bs-members adm-hooks">
+  {{range .Items}}<li class="bs-member adm-item"><details class="adm-user"{{if eq .ID $d.Open}} open{{end}}>
+    <summary>
+      <span class="bs-member-t"><b>{{.Name}}</b><small class="adm-url">{{.URL}}</small></span>
+      <span class="adm-badges">{{if .Events}}<span class="boards-badge">{{len .Events}} event{{if ne (len .Events) 1}}s{{end}}</span>{{else}}<span class="boards-badge">all events</span>{{end}}{{if .HasSecret}}<span class="boards-badge">signed</span>{{end}}{{if not .UserCreated}}<span class="boards-badge">admin</span>{{end}}</span>
+    </summary>
+    <div class="adm-body">
+      {{if and $d.Ping (eq $d.Ping.WebhookID .ID)}}<div class="bs-row bs-ping" role="status"><span class="bs-text"><b>{{if eq $d.Ping.State "delivered"}}Ping delivered{{else}}Ping failed{{end}}</b><small>{{if $d.Ping.Status}}HTTP {{$d.Ping.Status}} &middot; {{end}}{{$d.Ping.DurationMs}} ms{{if $d.Ping.Error}} &middot; {{$d.Ping.Error}}{{end}}</small></span>
+        <span class="bs-btns"><span class="boards-badge {{if eq $d.Ping.State "delivered"}}is-ok{{else}}is-bad{{end}}">{{$d.Ping.State}}</span></span></div>
+        {{if $d.Ping.ResponseBody}}<pre class="bs-ping-body">{{$d.Ping.ResponseBody}}</pre>{{end}}{{end}}
+      <form class="bs-row" hx-post="/ui/webhooks/{{.ID}}/test" hx-target="#bs-webhooks" hx-swap="outerHTML" method="post" action="/ui/webhooks/{{.ID}}/test"><input type="hidden" name="_board" value="{{$d.BoardID}}">
+        <span class="bs-text"><b>Send a test ping</b><small>Delivers a ping event now and shows the result.</small></span><span class="bs-btns"><button type="submit">Send ping</button></span></form>
+      <div class="bs-row"><span class="bs-text"><b>Deliveries</b><small>Recent attempts with status, timing and the start of the response.</small></span>
+        <span class="bs-btns"><button type="button" hx-get="/ui/webhooks/{{.ID}}/deliveries" hx-target="#wh-dl-{{.ID}}" hx-swap="innerHTML">Show deliveries</button></span></div>
+      <div id="wh-dl-{{.ID}}" class="bs-hook-dl"></div>
+      <form hx-post="/ui/webhooks/{{.ID}}" hx-target="#bs-webhooks" hx-swap="outerHTML" method="post" action="/ui/webhooks/{{.ID}}" class="adm-edit"><input type="hidden" name="_board" value="{{$d.BoardID}}">
+        {{template "notify_whform" dict "W" . "Events" $d.Events "P" (print "bwh-" .ID) "Board" $d.BoardID "AllowPrivate" $d.AllowPrivate}}
+        <div class="adm-submit"><button class="primary" type="submit">Save webhook</button></div>
+      </form>
+      <form class="bs-row" hx-post="/ui/webhooks/{{.ID}}/delete" hx-target="#bs-webhooks" hx-swap="outerHTML" hx-confirm="Delete this webhook and its delivery log?" method="post" action="/ui/webhooks/{{.ID}}/delete"><input type="hidden" name="_board" value="{{$d.BoardID}}">
+        <span class="bs-text"><b>Delete webhook</b><small>Removes the endpoint and its delivery log.</small></span><span class="bs-btns"><button type="submit" class="danger">Delete</button></span></form>
+    </div>
+  </details></li>
+  {{else}}<li class="bs-empty-row">No webhooks yet. Add one below to send this board's activity to another service.</li>{{end}}
+  </ul>
+  <div class="adm-block">
+    <h3 class="bs-sub">New webhook</h3>
+    <form data-cap="board-webhook-create" hx-post="/ui/boards/{{.BoardID}}/webhooks" hx-target="#bs-webhooks" hx-swap="outerHTML" method="post" action="/ui/boards/{{.BoardID}}/webhooks">
+      {{template "notify_whform" dict "W" .Blank "Events" .Events "P" "bwh-new" "Board" .BoardID "AllowPrivate" .AllowPrivate}}
+      <div class="adm-submit"><button class="primary" type="submit">Create webhook</button></div></form>
+  </div>
+</div>{{end}}{{end}}
+
+{{/* The delivery log of one webhook, loaded into #wh-dl-<id>. */}}
+{{define "notify_wh_deliveries"}}{{with .Data}}{{if not .Items}}<p class="bs-empty-row">No deliveries yet.</p>{{else}}
+<div class="adm-table-wrap"><table class="adm-table"><caption class="sr-only">Deliveries of {{.W.Name}}</caption><thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">State</th><th scope="col">HTTP</th><th scope="col" class="num">Tries</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>
+  {{range .Items}}<tr>
+    <td>{{notifyTime .CreatedAt}}</td><td>{{.Event}}</td>
+    <td><span class="boards-badge {{if eq .State "delivered"}}is-ok{{else if eq .State "failed"}}is-bad{{else}}is-warn{{end}}">{{.State}}</span>{{if .NextAttemptAt}}<small class="adm-sub-line">next {{notifyTime .NextAttemptAt}}</small>{{end}}</td>
+    <td>{{if .Status}}{{.Status}}{{else}}-{{end}}{{if .Error}}<small class="adm-sub-line">{{.Error}}</small>{{end}}</td>
+    <td class="num">{{.Attempts}}</td>
+    <td class="act"><button type="button" hx-post="/ui/webhook-deliveries/{{.ID}}/retry" hx-target="#wh-dl-{{$.Data.W.ID}}" hx-swap="innerHTML">Redeliver</button></td>
+  </tr>{{if .ResponseBody}}<tr class="adm-resp"><td colspan="6"><pre>{{.ResponseBody}}</pre></td></tr>{{end}}{{end}}
+  </tbody></table></div>{{end}}{{end}}{{end}}

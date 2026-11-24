@@ -111,16 +111,23 @@ func boardTree(e *ops.Env, in TreeIn) (TreeOut, error) {
 		idx[l.ID] = len(out.Lists)
 		out.Lists = append(out.Lists, TreeList{List: l, Cards: []events.CardSnap{}})
 	}
-	q := `SELECT id FROM cards WHERE board_id=? AND is_draft=0 AND is_template=0`
+	// the cards placed on this board, each once, in this board's column order (closed is per card)
+	q := `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0`
 	if !in.IncludeClosed {
-		q += ` AND is_closed=0`
+		q += ` AND c.is_closed=0`
 	}
-	q += ` ORDER BY list_id, position, created_at, id`
-	if events.Snapshots == nil {
+	q += ` ORDER BY p.list_id, p.position, c.created_at, c.id`
+	if events.SnapshotsOn == nil {
 		return out, nil
 	}
-	for _, c := range events.Snapshots(e, strs(e, q, in.ID)) {
+	ids := strs(e, q, in.ID)
+	var also map[string]int
+	if len(ids) > 0 {
+		also = authz.AlsoOn(e, in.ID, nil)
+	}
+	for _, c := range events.SnapshotsOn(e, in.ID, ids) {
 		if i, ok := idx[c.ListID]; ok {
+			c.AlsoOnBoards = also[c.ID]
 			out.Lists[i].Cards = append(out.Lists[i].Cards, c)
 		}
 	}

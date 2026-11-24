@@ -361,6 +361,7 @@ func TestPlannerQueryCountIsConstant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
+	defer testutil.CheckPlacements(t, d) // before the Close
 	e := testutil.Env(t, nil)
 	e.DB = d
 	now := db.Now()
@@ -412,5 +413,105 @@ func TestPlannerQueryCountIsConstant(t *testing.T) {
 	}
 	if few != many || many > 10 {
 		t.Fatalf("3 watchers = %d queries, 40 watchers = %d (want equal and small)", few, many)
+	}
+}
+
+// Quiet events (Data["quiet"] == true) never notify, whatever rule would match: card, column and board watches, a
+// mention, being added to a card. The column closing switch (list.update type, existingCards=flip) uses them for its
+// per-card events, so watchers get nothing for the bulk flip while every flip stays in the activity log. An ordinary
+// single move into a closing column still notifies as before.
+func TestQuietEventsNeverNotify(t *testing.T) {
+	w := newWatchWorld(t)
+	card := w.do(t, "alice", "card.create", map[string]any{"listId": "l1", "name": "Ship it"})
+	other := w.do(t, "alice", "card.create", map[string]any{"listId": "l1", "name": "Ship that"})
+	w.do(t, "bob", "card.subscribe", map[string]any{"id": card})
+	w.take(t)
+
+	// the real switch: Todo starts closing cards and closes the two in it; carol, erin, ivy (column), dave, erin,
+	// vic (board) and bob (card) watch, nobody hears anything
+	w.do(t, "alice", "list.update", map[string]any{"id": "l1", "type": "closed"})
+	w.take(t).expect(t, "closing switch", map[string]string{})
+	var closed, logged int
+	_ = w.root.DB.QueryRow(`SELECT COUNT(*) FROM cards WHERE id IN (?,?) AND is_closed=1`, card, other).Scan(&closed)
+	_ = w.root.DB.QueryRow(`SELECT COUNT(*) FROM actions WHERE card_id IN (?,?) AND type='cardUpdate' AND data LIKE '%"quiet":true%' AND data LIKE '%"isClosed"%'`, card, other).Scan(&logged)
+	if closed != 2 || logged != 2 {
+		t.Fatalf("the switch closed %d cards and logged %d quiet card events, want 2 and 2", closed, logged)
+	}
+	w.do(t, "alice", "list.update", map[string]any{"id": "l1", "type": "active"})
+	w.take(t).expect(t, "re-open switch", map[string]string{})
+
+	// every rule is silenced by the flag, including a mention and being added to a card (synthetic events)
+	quiet := []ops.Event{
+		{Type: "commentCreate", BoardID: "b1", CardID: card, Data: map[string]any{"text": "look @[Dave](dave)", "commentId": "c-q", "quiet": true}},
+		{Type: "cardMembershipCreate", BoardID: "b1", CardID: card, Data: map[string]any{"userId": "dave", "quiet": true}},
+		{Type: "cardMove", BoardID: "b1", CardID: card, Data: map[string]any{"fromListId": "l2", "toListId": "l1", "quiet": true}},
+		{Type: "cardUpdate", BoardID: "b1", CardID: card, Data: map[string]any{"changed": []string{"isClosed", "dueDate"}, "quiet": true}},
+	}
+	for _, ev := range quiet {
+		if got := notify.PlanForTest(w.as["alice"], ev, "alice"); len(got) != 0 {
+			t.Errorf("quiet %s planned %v", ev.Type, got)
+		}
+		loud := ev
+		loud.Data = map[string]any{}
+		for k, v := range ev.Data {
+			if k != "quiet" {
+				loud.Data[k] = v
+			}
+		}
+		if got := notify.PlanForTest(w.as["alice"], loud, "alice"); len(got) == 0 {
+			t.Errorf("control: the same %s without quiet notifies someone", ev.Type)
+		}
+		ops.Emit(w.as["alice"], ev)
+	}
+	w.take(t).expect(t, "quiet synthetic", map[string]string{})
+
+	// control: a single move into the closing column is not quiet and notifies as before
+	w.do(t, "alice", "list.update", map[string]any{"id": "l2", "type": "closed"})
+	w.take(t)
+	w.do(t, "alice", "card.move", map[string]any{"id": card, "listId": "l2"})
+	w.take(t).expect(t, "single move into a closing column", map[string]string{
+		"bob": "closeCard/card", "carol": "closeCard/list:Todo", "dave": "closeCard/board", "erin": "closeCard/list:Todo",
+		"hank": "closeCard/list:Review", "ivy": "closeCard/list:Review", "vic": "closeCard/board",
+	})
+}
+
+// Auto-archive (a column's archiveAfter) is quiet: neither the retroactive pass nor a landing that archives the
+// column's oldest card notifies anyone about the archived cards (card, column or board watchers), while every archived
+// card still gets its card.archived activity row. The card that lands notifies exactly as it would without the rule.
+func TestAutoArchiveIsQuiet(t *testing.T) {
+	w := newWatchWorld(t)
+	a := w.do(t, "alice", "card.create", map[string]any{"listId": "l1", "name": "First"})
+	b := w.do(t, "alice", "card.create", map[string]any{"listId": "l1", "name": "Second"})
+	x(t, w.root, `UPDATE card_placements SET list_changed_at='2024-01-01T00:00:00Z' WHERE card_id=? AND is_home=1`, a)
+	x(t, w.root, `UPDATE card_placements SET list_changed_at='2024-01-02T00:00:00Z' WHERE card_id=? AND is_home=1`, b)
+	w.do(t, "bob", "card.subscribe", map[string]any{"id": a})
+	w.do(t, "bob", "card.subscribe", map[string]any{"id": b})
+	w.take(t)
+
+	// the retroactive pass archives "First": nobody hears anything (bob watches it, carol/erin/ivy the column,
+	// dave/erin/vic the board)
+	w.do(t, "alice", "list.update", map[string]any{"id": "l1", "archiveAfter": 1, "confirmArchive": true})
+	w.take(t).expect(t, "retroactive auto-archive", map[string]string{})
+	// a new card lands: the column and board watchers hear about the new card only, bob (who watches the archived
+	// "Second") hears nothing
+	w.do(t, "alice", "card.create", map[string]any{"listId": "l1", "name": "Third"})
+	g := w.take(t)
+	if len(g.types["bob"]) != 0 {
+		t.Errorf("bob was notified about the auto-archived card: %v", g.types["bob"])
+	}
+	for u, types := range g.types {
+		for _, typ := range types {
+			if typ != "createCard" {
+				t.Errorf("%s got %s (only the new card may notify)", u, typ)
+			}
+		}
+	}
+	if len(g.types["carol"]) != 1 || len(g.types["dave"]) != 1 {
+		t.Errorf("column/board watchers must still hear about the new card: %v", g.types)
+	}
+	var logged int
+	_ = w.root.DB.QueryRow(`SELECT COUNT(*) FROM actions WHERE card_id IN (?,?) AND etype='card.archived' AND data LIKE '%"quiet":true%'`, a, b).Scan(&logged)
+	if logged != 2 {
+		t.Fatalf("activity rows for the auto-archived cards: %d, want 2", logged)
 	}
 }

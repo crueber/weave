@@ -42,6 +42,9 @@ weave next --board Product --list Ready --claim --move-to 'In progress'   # cron
 ```
 `board tree` JSON is one `item`: board fields plus `lists[].cards[]`, each card with `members`, `tasksTotal`,
 `tasksCompleted` (`--jq '.item.lists[].cards[].name'`); the checklists themselves are in `card show CARD --full` (`.item.tasks`).
+A card can be on several boards (`card placements CARD`; `card place CARD_ID --board B --listId L` adds one, `card unplace
+CARD B` removes one): column, position and labels are per board, everything else (closed, comments, claims) is the
+card's, and archive/trash/delete act on every board.
 `weave inbox` = cards assigned to or claimed by me across boards, not a board's Inbox (`card inbox.list`, `card draft.*`).
 Long text (PR/issue bodies, specs): write a file and pass `@file` (`--desc @f`, comment `@f`); never put it in a
 double-quoted shell string (backticks and `$(...)` run).

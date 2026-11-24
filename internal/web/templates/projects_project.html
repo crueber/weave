@@ -5,8 +5,8 @@
     <div class="projects-hero-band" style="{{projects_hero .Data.P}}" aria-hidden="true"></div>
     <div class="projects-hero-tools">
       {{template "projects-star" dict "P" .Data.P "Ctx" "page"}}
-      <button type="button" class="projects-hero-btn" hx-get="/ui/agent-prompt?scope=project&amp;id={{.Data.P.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button>
-      {{if .Data.P.CanManage}}<a class="projects-hero-btn" href="/projects/{{.Data.P.ID}}/settings">Project settings</a>{{end}}
+      {{if .Data.Caps.CanConnectAgent}}<button type="button" class="projects-hero-btn" data-cap="project-connect-agent" hx-get="/ui/agent-prompt?scope=project&amp;id={{.Data.P.ID}}" hx-target="#modal" hx-swap="innerHTML">Connect an agent</button>{{end}}
+      {{if .Data.Caps.CanManage}}<a class="projects-hero-btn" data-cap="project-settings" href="/projects/{{.Data.P.ID}}/settings">Project settings</a>{{end}}
     </div>
     <div class="projects-hero-inner">
       <a class="projects-back" href="/">&larr; Projects</a>
@@ -18,11 +18,11 @@
     <h2>Boards</h2>
     <div class="projects-grid">
       {{range .Data.Boards}}{{template "projects-board-tile" .}}{{end}}
-      {{if .Data.CanCreateBoard}}<button class="projects-board projects-board-new" hx-get="/ui/projects/{{.Data.P.ID}}/boards/new" hx-target="#modal">+ Create board</button>{{end}}
+      {{if .Data.CanCreateBoard}}<button class="projects-board projects-board-new" data-cap="project-create-board" hx-get="/ui/projects/{{.Data.P.ID}}/boards/new" hx-target="#modal">+ Create board</button>{{end}}
     </div>
     {{if and (not .Data.Boards) .Data.CanCreateBoard}}<div class="empty-state"><span class="empty-art" aria-hidden="true">&#129529;</span><h3>No boards here yet</h3><p>Create a blank board above, or pick a ready-made one for sprints, bugs, hiring, meal planning and more.</p>
       <div class="projects-empty-actions"><button type="button" class="primary" hx-get="/ui/projects/{{.Data.P.ID}}/boards/new" hx-target="#modal">Start from a template</button></div></div>{{end}}
-    {{if and (not .Data.Boards) (not .Data.CanCreateBoard)}}<div class="empty-state"><span class="empty-art" aria-hidden="true">&#129529;</span><h3>No boards here yet</h3><p>No boards you can access in this project yet.</p></div>{{end}}
+    {{if and (not .Data.Boards) (not .Data.CanCreateBoard)}}<div class="empty-state"><span class="empty-art" aria-hidden="true">&#129529;</span><h3>No boards for you here yet</h3><p>{{if eq .Data.P.BoardCreation "members"}}Boards you are added to show up here.{{else}}Project managers create the boards of this project; the ones you are added to show up here.{{end}}</p></div>{{end}}
   </div>
 </section>{{end}}
 

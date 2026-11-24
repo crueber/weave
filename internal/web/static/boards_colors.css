@@ -124,3 +124,6 @@
   .bcp-sw{width:1.9rem;height:1.9rem}
 }
 @media(prefers-reduced-motion:reduce){.bcp-sw i,.boards-sub>summary::after{transition:none}}
+/* the "also on" marker on a filled tile: the neutral surface of the other meta chips (checked in check-contrast.py) */
+.boards-tile[data-card-fill] .boards-also{background:var(--surface);color:var(--fg-2);border-color:var(--border-strong)}
+.boards-tile[data-card-fill] .boards-also:hover,.boards-tile[data-card-fill] .boards-also[aria-expanded="true"]{background:var(--surface-3);color:var(--fg)}

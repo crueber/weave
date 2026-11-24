@@ -133,6 +133,13 @@ await members(bugs.id, ['sam', 'riley']);
 const rel = await A('POST', `/projects/${apollo.id}/boards/from-template`, {templateId: 'builtin:release-checklist', name: 'Release 2.0 checklist', sampleCards: true});
 await members(rel.id, ['jordan']);
 
+// the launch checklist is the same card on the release board too (one card, several boards)
+const relLists = await A('GET', `/boards/${rel.id}/lists`);
+const relFirst = relLists.find(l => l.type === 'active') || relLists[0];
+await A('POST', `/cards/${launch.id}/placements`, {listId: relFirst.id});
+// column rules on the platform board's Done column: it closes cards (the template's) and keeps the newest 20
+await A('PATCH', `/lists/${P.lists['Done']}`, {type: 'closed', archiveAfter: 20, description: 'Shipped. Cards close when they land here; the column keeps the newest 20.'});
+
 // ---------------------------------------------------------------- an agent on the platform board
 const agent = await A('POST', '/agents', {name: 'Triage agent', boardIds: [plat.id]});
 const agentKey = agent.key && (agent.key.key || agent.key.apiKey || agent.key.token);

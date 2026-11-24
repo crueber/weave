@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Turns the raw Playwright recordings from record.mjs into docs/demo.webm and docs/demo.webp.
 
-  DEMO_DIR=... FFMPEG=/path/to/ffmpeg python3 scripts/demo/encode.py docs
+  DEMO_DIR=... FFMPEG=/path/to/ffmpeg POSTER=site/img/demo-poster.webp python3 scripts/demo/encode.py docs
 
 FFMPEG may be any ffmpeg with libvpx (Playwright ships a small one under its browsers cache). Everything else is Pillow,
 so no fps/concat/tile filters or png decoder are needed (frames are piped as MJPEG). Metadata is stripped (no encoder tags, no paths, no usernames).
-Optional env: FPS (default 25), WEBP_W (default 800), WEBP_FPS (default 8), WEBP_Q (default 50), CRF (default 28).
+Optional env: FPS (default 25), WEBP_W (default 800), WEBP_FPS (default 8), WEBP_Q (default 50), CRF (default 28),
+POSTER (also write the first frame as a 1280x720 WebP there: the website's video poster), MAX_SECONDS (default 60: refuse longer).
 """
 import glob, json, os, shutil, subprocess, sys
 from PIL import Image
@@ -44,6 +45,8 @@ def frame_iter():
 
 total = len(main) + len(phone)
 print("total frames", total, "seconds", total / FPS)
+if total / FPS > float(os.environ.get("MAX_SECONDS", 60)):
+    sys.exit(f"demo is {total / FPS:.1f}s, over MAX_SECONDS: shorten the beats in record.mjs")
 
 webm = OUT + "/demo.webm"
 ww = int(os.environ.get("WEBP_W", 800)); wh = ww * 9 // 16
@@ -55,6 +58,9 @@ import io
 frames = []
 for i, im in enumerate(frame_iter()):          # stream: never hold 1500 full frames in memory
     buf = io.BytesIO(); im.save(buf, "JPEG", quality=95, subsampling=0); proc.stdin.write(buf.getvalue())
+    if i == 0 and os.environ.get("POSTER"):
+        im.save(os.environ["POSTER"], "WEBP", quality=80, method=6)
+        print(os.environ["POSTER"], os.path.getsize(os.environ["POSTER"]) // 1024, "KB")
     if i % step == 0:
         frames.append(im.resize((ww, wh), Image.LANCZOS))
 proc.stdin.close(); proc.wait()

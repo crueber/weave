@@ -51,10 +51,44 @@ func scanNotif(r interface{ Scan(...any) error }) (NotificationOut, error) {
 	return n, err
 }
 
+// unreadCount counts the caller's unread notifications that notification.list would show: those without a board,
+// and those about boards the caller can still view.
 func unreadCount(e *ops.Env) int {
-	var c int
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0`, e.User.UserID).Scan(&c)
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(board_id,''),COUNT(*) FROM notifications WHERE user_id=? AND is_read=0 GROUP BY board_id`, e.User.UserID)
+	if err != nil {
+		return 0
+	}
+	per := map[string]int{}
+	var ids []string
+	for rows.Next() {
+		var b string
+		var n int
+		if rows.Scan(&b, &n) == nil {
+			per[b] += n
+			if b != "" {
+				ids = append(ids, b)
+			}
+		}
+	}
+	rows.Close()
+	lv := authz.BoardLevels(e, ids)
+	c := per[""]
+	for _, b := range ids {
+		if lv[b] >= authz.View {
+			c += per[b]
+		}
+	}
 	return c
+}
+
+// notificationVisible: the notification belongs to the caller and, when it is about a board, the caller can still
+// view that board (the same rule as notification.list).
+func notificationVisible(e *ops.Env, id string) bool {
+	var b string
+	if e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(board_id,'') FROM notifications WHERE id=? AND user_id=?`, id, e.User.UserID).Scan(&b) != nil {
+		return false
+	}
+	return b == "" || authz.BoardLevel(e, b) >= authz.View
 }
 
 func pushUpdate(e *ops.Env, action string, data any) {
@@ -104,16 +138,33 @@ func init() {
 			}
 			defer rows.Close()
 			out := ListOut{Items: []NotificationOut{}}
+			var page []NotificationOut
 			for rows.Next() {
 				n, err := scanNotif(rows)
 				if err != nil {
 					return out, err
 				}
-				out.Items = append(out.Items, n)
+				page = append(page, n)
 			}
-			if len(out.Items) > limit {
-				out.Items = out.Items[:limit]
-				out.NextBefore = out.Items[limit-1].ID
+			rows.Close()
+			if len(page) > limit {
+				page = page[:limit]
+				out.NextBefore = page[limit-1].ID
+			}
+			// a notification shows board and card names (joined live): keep only those about boards the caller can still
+			// view, so losing access (leaving a board, or an administrator upgrading to ownership-based permissions)
+			// also ends what old notifications reveal
+			var ids []string
+			for _, n := range page {
+				if n.BoardID != "" {
+					ids = append(ids, n.BoardID)
+				}
+			}
+			lv := authz.BoardLevels(e, ids)
+			for _, n := range page {
+				if n.BoardID == "" || lv[n.BoardID] >= authz.View {
+					out.Items = append(out.Items, n)
+				}
 			}
 			out.UnreadCount = unreadCount(e)
 			return out, nil
@@ -122,6 +173,9 @@ func init() {
 		func(e *ops.Env, _ NoInput) (CountOut, error) { return CountOut{unreadCount(e)}, nil })
 	ops.Register(ops.Op{Name: "notification.read", Summary: "Mark one notification as read", Method: "POST", Path: "/notifications/{id}/read", UI: "POST /ui/notifications/{id}/read"},
 		func(e *ops.Env, in IDIn) (NotificationOut, error) {
+			if !notificationVisible(e, in.ID) {
+				return NotificationOut{}, ops.NotFound("notification")
+			}
 			res, err := e.DB.ExecContext(e.Ctx, `UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?`, in.ID, e.User.UserID)
 			if err != nil {
 				return NotificationOut{}, err
@@ -187,7 +241,6 @@ type ServiceCreateIn struct {
 	URL     string `json:"url" required:"true" desc:"shoutrrr service URL, e.g. discord://token@id or generic://host/path"`
 	Format  string `json:"format" desc:"text (default) | markdown | html"`
 	BoardID string `json:"boardId" desc:"attach to a board instead of myself (needs board manage rights)"`
-	UserID  string `json:"userId" desc:"admin only: attach to another user"`
 }
 type ServiceUpdateIn struct {
 	ID     string  `path:"id"`
@@ -225,8 +278,8 @@ func authService(e *ops.Env, s ServiceOut) error {
 	if s.BoardID != "" {
 		return authz.RequireBoard(e, s.BoardID, authz.Manage)
 	}
-	if s.UserID != e.User.UserID && e.User.Role != "admin" {
-		return ops.NotFound("notification service")
+	if s.UserID != e.User.UserID {
+		return ops.NotFound("notification service") // a person's own services are theirs alone (admins included)
 	}
 	return nil
 }
@@ -282,9 +335,6 @@ func init() {
 				s.BoardID, board = in.BoardID, in.BoardID
 			} else {
 				s.UserID = e.User.UserID
-				if in.UserID != "" && e.User.Role == "admin" {
-					s.UserID = in.UserID
-				}
 				user = s.UserID
 			}
 			if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO notification_services(id,user_id,board_id,url,format,created_at) VALUES(?,?,?,?,?,?)`, s.ID, user, board, s.URL, s.Format, s.CreatedAt); err != nil {

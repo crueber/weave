@@ -21,6 +21,7 @@ import (
 	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/realtime"
 	"github.com/crueber/weave/internal/server"
+	"github.com/crueber/weave/internal/testutil"
 )
 
 type env struct {
@@ -45,6 +46,7 @@ func newEnv(t *testing.T) *env {
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(func() { ts.Close(); notify.Wait(); d.Close() })
+	t.Cleanup(func() { testutil.CheckPlacements(t, d) }) // before the server stops (cleanups are LIFO)
 	k, err := auth.MintKey(context.Background(), d, "root@x.io", "admin")
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +139,9 @@ func (e *env) open(key, query string, hdr map[string]string) *stream {
 	e.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", e.ts.URL+"/events?"+query, nil)
-	req.Header.Set("Authorization", "Bearer "+key)
+	if key != "" { // "" = authenticate through hdr (e.g. a session Cookie)
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}

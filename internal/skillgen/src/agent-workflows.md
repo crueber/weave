@@ -1,8 +1,11 @@
 # Agent workflows with Weave
 
 Patterns for agents that live on a board. All examples use names; add `--profile NAME` when you have
-several servers. Every agent should have **its own agent account** (`weave agent create --name triage-bot`,
-admin) with access only to the boards it needs (`weave agent access ID --boardId B`). Humans then see
+several servers. Every agent should have **its own agent account**. The person who owns a board (a board
+owner or project manager) creates it for that board: `weave agent create --name triage-bot --boardIds B`, or
+Board settings → Agents in the browser; the API key is shown once. An agent account only ever gets editor,
+commenter or viewer access to boards its creator manages (`weave agent access ID --boardId B`), never
+project-wide or admin rights, and it cannot create agents, manage members or change webhooks. Humans then see
 "triage-bot" on comments, moves and claims, and the Listeners panel shows which agents are online.
 
 ## The column is the brief

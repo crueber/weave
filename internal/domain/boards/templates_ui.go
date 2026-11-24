@@ -1,6 +1,9 @@
 package boards
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
@@ -13,6 +16,8 @@ import (
 // GalleryData feeds boards_gallery.html.
 type GalleryData struct {
 	ProjectID    string
+	BoardID      string // "apply to this board" mode (board.template.apply): no blank/import tiles, preview ends in "Preview changes"
+	BoardName    string
 	Query        string
 	Category     string // "" = all
 	Categories   []TemplateCategory
@@ -26,6 +31,8 @@ type GalleryData struct {
 // PreviewData feeds the preview pane.
 type PreviewData struct {
 	ProjectID string
+	BoardID   string // apply mode
+	BoardName string
 	T         TemplatePreview
 	Views     []string
 	Cols      []PreviewCol
@@ -78,10 +85,27 @@ func galleryProject(c *web.Ctx) (string, error) {
 	if pid == "" {
 		pid = c.R.PathValue("projectId")
 	}
-	if err := authz.RequireProject(c.Env, pid, authz.Manage); err != nil {
+	if err := authz.RequireCreateBoard(c.Env, pid); err != nil {
 		return "", err
 	}
 	return pid, nil
+}
+
+// galleryScope resolves the gallery's target: ?boardId= (apply a template to that board: board Manage, as the op) or
+// the project (?projectId= or the path) for "New board".
+func galleryScope(c *web.Ctx) (pid, boardID, boardName string, err error) {
+	if bid := c.R.URL.Query().Get("boardId"); bid != "" {
+		if err := authz.RequireBoard(c.Env, bid, authz.Manage); err != nil {
+			return "", "", "", err
+		}
+		b, err := GetBoard(c.R.Context(), c.Env.DB, bid)
+		if err != nil {
+			return "", "", "", err
+		}
+		return b.ProjectID, b.ID, b.Name, nil
+	}
+	pid, err = galleryProject(c)
+	return pid, "", "", err
 }
 
 func galleryData(c *web.Ctx, pid, q, cat string) (GalleryData, error) {
@@ -94,6 +118,9 @@ func galleryData(c *web.Ctx, pid, q, cat string) (GalleryData, error) {
 		return d, err
 	}
 	for _, t := range all {
+		if t.ID == c.R.URL.Query().Get("boardId") && t.ID != "" {
+			continue // a board is never applied to itself
+		}
 		if t.Source == "builtin" {
 			d.Builtins = append(d.Builtins, t)
 		} else {
@@ -123,9 +150,26 @@ func registerGalleryUI() {
 		}
 		return c.RenderBlock("boards_gallery.html", "boards_gallery", d)
 	})
+	// the same sheet in "apply to this board" mode (Board settings > Templates & export)
+	web.Route("GET /ui/boards/{id}/apply-template", func(c *web.Ctx) error {
+		q := c.R.URL.Query()
+		q.Set("boardId", c.R.PathValue("id"))
+		c.R.URL.RawQuery = q.Encode()
+		pid, bid, bname, err := galleryScope(c)
+		if err != nil {
+			return err
+		}
+		d, err := galleryData(c, pid, "", "")
+		if err != nil {
+			return err
+		}
+		d.BoardID, d.BoardName, d.Blank = bid, bname, false
+		d.Empty = len(d.Builtins)+len(d.Published) == 0
+		return c.RenderBlock("boards_gallery.html", "boards_gallery", d)
+	})
 	// results grid (op board.template.list): search words and category come from the rail/search form
 	web.Route(ops.Get("board.template.list").UI, func(c *web.Ctx) error {
-		pid, err := galleryProject(c)
+		pid, bid, bname, err := galleryScope(c)
 		if err != nil {
 			return err
 		}
@@ -133,11 +177,15 @@ func registerGalleryUI() {
 		if err != nil {
 			return err
 		}
+		if bid != "" {
+			d.BoardID, d.BoardName, d.Blank = bid, bname, false
+			d.Empty = len(d.Builtins)+len(d.Published) == 0
+		}
 		return c.RenderBlock("boards_gallery.html", "boards_tpl_grid", d)
 	})
 	// preview of one template (op board.template.get)
 	web.Route(ops.Get("board.template.get").UI, func(c *web.Ctx) error {
-		pid, err := galleryProject(c)
+		pid, bid, bname, err := galleryScope(c)
 		if err != nil {
 			return err
 		}
@@ -145,7 +193,40 @@ func registerGalleryUI() {
 		if err != nil {
 			return err
 		}
-		return c.RenderBlock("boards_gallery.html", "boards_tpl_preview", previewData(pid, t))
+		pd := previewData(pid, t)
+		pd.BoardID, pd.BoardName = bid, bname
+		return c.RenderBlock("boards_gallery.html", "boards_tpl_preview", pd)
+	})
+	// board.template.apply: the preview (dryRun) renders the list of changes into the sheet; the real apply goes to
+	// the board with a toast
+	web.Route(ops.Get("board.template.apply").UI, func(c *web.Ctx) error {
+		in, err := c.Bind("board.template.apply")
+		if err != nil {
+			return err
+		}
+		ai := in.(*TemplateApplyIn)
+		out, err := ops.Typed[TemplateApplyOut](c.Env, "board.template.apply", ai)
+		if err != nil {
+			return err
+		}
+		if ai.DryRun {
+			b, err := GetBoard(c.R.Context(), c.Env.DB, ai.ID)
+			if err != nil {
+				return err
+			}
+			t, err := ops.Typed[TemplatePreview](c.Env, "board.template.get", TemplateGetIn{TemplateID: ai.TemplateID})
+			if err != nil {
+				return err
+			}
+			return c.RenderBlock("boards_gallery.html", "boards_tpl_apply", ApplyPreviewData{BoardID: ai.ID, BoardName: b.Name, In: *ai, Out: out, T: t})
+		}
+		msg := fmt.Sprintf("Applied %s: added %s, moved %s into %s", out.TemplateName, plural(len(out.ColumnsAdded), "column"), plural(out.CardsMoved, "card"), out.TargetColumn.Name)
+		if n := len(out.ColumnsRemoved); n > 0 {
+			msg += ", removed " + plural(n, "old column")
+		}
+		c.W.Header().Set("HX-Trigger", toastNext(msg))
+		c.Redirect("/boards/" + ai.ID)
+		return nil
 	})
 	web.Route("GET /ui/projects/{projectId}/boards/new/blank", func(c *web.Ctx) error {
 		pid, err := galleryProject(c)
@@ -161,6 +242,21 @@ func registerGalleryUI() {
 		}
 		return c.RenderBlock("boards_gallery.html", "boards_tpl_import", PreviewData{ProjectID: pid})
 	})
+}
+
+// ApplyPreviewData feeds the "apply to this board" preview (boards_tpl_apply).
+type ApplyPreviewData struct {
+	BoardID   string
+	BoardName string
+	In        TemplateApplyIn
+	Out       TemplateApplyOut
+	T         TemplatePreview
+}
+
+// toastNext is an HX-Trigger header value for a toast shown on the next page (weave.js keeps it across the redirect).
+func toastNext(msg string) string {
+	b, _ := json.Marshal(map[string]string{"toastNext": msg})
+	return string(b)
 }
 
 func viewList() []string { return []string{"kanban", "list", "grid", "calendar", "map"} }

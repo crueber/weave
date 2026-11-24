@@ -183,11 +183,12 @@ func hiddenTemplates(e *ops.Env) map[string]bool {
 
 // TemplateColumn is one column of a template; the description is only filled in by board.template.get.
 type TemplateColumn struct {
-	Name        string `json:"name"`
-	Color       string `json:"color,omitempty"`
-	WIPLimit    int    `json:"wipLimit,omitempty"`
-	Closed      bool   `json:"closed,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name         string `json:"name"`
+	Color        string `json:"color,omitempty"`
+	WIPLimit     int    `json:"wipLimit,omitempty"`
+	ArchiveAfter int    `json:"archiveAfter,omitempty" desc:"auto-archive: the column keeps the newest N cards"`
+	Closed       bool   `json:"closed,omitempty"`
+	Description  string `json:"description,omitempty"`
 }
 
 // TemplateInfo is one gallery row (board.template.list).
@@ -267,7 +268,7 @@ func registerTemplateOps() {
 		UI: "GET /ui/board-templates"}, templateList)
 	ops.Register(ops.Op{Name: "board.template.get", Summary: "Preview a board template: columns (with limits and agent briefs), labels, sample cards, custom fields", Method: "GET", Path: "/board-templates/{templateId}",
 		UI: "GET /ui/board-templates/{templateId}"}, templateGet)
-	ops.Register(ops.Op{Name: "board.instantiate", Summary: "Create a board in a project from a built-in or published template (project manager)", Method: "POST", Path: "/projects/{projectId}/boards/from-template",
+	ops.Register(ops.Op{Name: "board.instantiate", Summary: "Create a board in a project from a built-in or published template (whoever may create boards there, see board.create)", Method: "POST", Path: "/projects/{projectId}/boards/from-template",
 		UI: ui("POST", "/projects/{projectId}/boards/from-template")}, instantiate)
 }
 
@@ -343,6 +344,9 @@ func columnsOf(ib impBoard, withDesc bool) []TemplateColumn {
 		if v := importWIP(l.WIP); v != nil {
 			c.WIPLimit = v.(int)
 		}
+		if v := importWIP(l.ArchiveAfter); v != nil {
+			c.ArchiveAfter = v.(int)
+		}
 		if withDesc {
 			c.Description = l.Desc
 		}
@@ -389,7 +393,7 @@ func publishedTpl(e *ops.Env, id string, withDesc bool) (tpl, error) {
 		if skip[c.ListKey] {
 			continue
 		}
-		c.MemberEmails, c.Comments, c.DueDone = nil, nil, false
+		c.MemberEmails, c.Comments, c.DueDone, c.Closed = nil, nil, false, false // closed columns still close their cards
 		// Relative due dates: days between the card's due date and the moment the template was published.
 		if t, err := time.Parse(time.RFC3339, c.Due); err == nil && !anchor.IsZero() {
 			d := int(math.Round(t.Sub(anchor).Hours() / 24))
@@ -423,20 +427,21 @@ func publishedInfo(e *ops.Env, id string) (TemplateInfo, error) {
 		LEFT JOIN users u ON u.id=b.template_publisher_id LEFT JOIN user_groups g ON g.id=b.template_group_id WHERE b.id=?`, id).Scan(&project, &publisher, &group)
 	info := TemplateInfo{ID: id, Name: src.Name, Source: "published", DefaultView: src.DefaultView, Project: project.String, ProjectID: src.ProjectID,
 		Publisher: publisher.String, Visibility: src.TemplateVisibility, Group: group.String, Columns: []TemplateColumn{}}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(name,''),COALESCE(color,''),COALESCE(wip_limit,0),type FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position`, id)
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(name,''),COALESCE(color,''),COALESCE(wip_limit,0),COALESCE(archive_after,0),type FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position`, id)
 	if err != nil {
 		return info, err
 	}
 	for rows.Next() {
 		var c TemplateColumn
 		var typ string
-		_ = rows.Scan(&c.Name, &c.Color, &c.WIPLimit, &typ)
+		_ = rows.Scan(&c.Name, &c.Color, &c.WIPLimit, &c.ArchiveAfter, &typ)
 		c.Closed = typ == "closed"
 		info.Columns = append(info.Columns, c)
 	}
 	rows.Close()
 	var n int
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM cards WHERE board_id=? AND is_draft=0 AND is_template=0 AND list_id IN (SELECT id FROM lists WHERE board_id=? AND type IN ('active','closed'))`, id, id).Scan(&n)
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed')`, id).Scan(&n)
 	info.IncludesSampleCards, info.SampleCardsDefault = n > 0, n > 0
 	return info, nil
 }
@@ -568,7 +573,7 @@ func templateGet(e *ops.Env, in TemplateGetIn) (TemplatePreview, error) {
 }
 
 func instantiate(e *ops.Env, in InstantiateIn) (Board, error) {
-	if err := authz.RequireProject(e, in.ProjectID, authz.Manage); err != nil {
+	if err := authz.RequireCreateBoard(e, in.ProjectID); err != nil {
 		return Board{}, err
 	}
 	if in.Name == "" {

@@ -3,6 +3,8 @@ package cardextras
 import (
 	"database/sql"
 	"encoding/json"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/crueber/weave/internal/authz"
@@ -27,9 +29,10 @@ type ActionsIn struct {
 	Limit   int    `query:"limit" desc:"Page size (default 50, max 200)"`
 }
 type CardActionsIn struct {
-	CardID string `path:"cardId"`
-	Before string `query:"before" desc:"Action id cursor: return actions older than this one"`
-	Limit  int    `query:"limit" desc:"Page size (default 50, max 200)"`
+	CardID  string `path:"cardId"`
+	BoardID string `query:"boardId" desc:"Context board when the card is on several boards: an event recorded on several boards is listed once, preferably as recorded on this board"`
+	Before  string `query:"before" desc:"Action id cursor: return actions older than this one"`
+	Limit   int    `query:"limit" desc:"Page size (default 50, max 200)"`
 }
 
 const actionSelect = `SELECT a.id,a.board_id,a.card_id,c.name,a.user_id,u.name,a.type,a.data,a.created_at FROM actions a
@@ -48,11 +51,11 @@ func scanAction(r *sql.Rows) (ActionItem, error) {
 	return a, err
 }
 
-func listActions(e *ops.Env, where string, id, before string, limit int) ([]ActionItem, error) {
+func listActions(e *ops.Env, where string, args []any, before string, limit int) ([]ActionItem, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q, args := actionSelect+` WHERE `+where, []any{id}
+	q := actionSelect + ` WHERE ` + where
 	if before != "" {
 		q += ` AND (a.created_at,a.id) < (SELECT created_at,id FROM actions WHERE id=?)`
 		args = append(args, before)
@@ -83,6 +86,25 @@ func ActionText(a ActionItem) string {
 	if !ok {
 		s = humanize(a.Type)
 	}
+	if auto, _ := d["auto"].(string); auto == "archiveAfter" && a.Type == "cardMove" {
+		s = "auto-archived the card"
+		if k, _ := d["keep"].(float64); k > 0 {
+			s += ": its column keeps the newest " + strconv.Itoa(int(k)) + " cards"
+		}
+		return s
+	}
+	if auto, _ := d["auto"].(string); auto == "applyTemplate" && a.Type == "cardMove" {
+		return "moved the card into the first column of an applied board template"
+	}
+	if tn, _ := d["appliedTemplate"].(string); tn != "" && a.Type == "boardUpdate" {
+		cols, _ := d["columnsAdded"].(float64)
+		moved, _ := d["cardsMoved"].(float64)
+		s := "applied the template “" + clip(tn, 80) + "”: added " + countOf(int(cols), "column") + ", moved " + countOf(int(moved), "card")
+		if rm, _ := d["columnsRemoved"].(float64); rm > 0 {
+			s += ", removed " + countOf(int(rm), "old column")
+		}
+		return s
+	}
 	if name != "" {
 		s += " “" + clip(name, 80) + "”"
 	}
@@ -95,18 +117,64 @@ func ActionText(a ActionItem) string {
 }
 
 func init() {
-	ops.Register(ops.Op{Name: "activity.board", Summary: "Board activity feed (actions), newest first", Method: "GET", Path: "/boards/{boardId}/actions",
+	ops.Register(ops.Op{Name: "activity.board", Summary: "Board activity feed (actions), newest first. Quiet per-card rows of bulk changes (auto-archive, applying a template) are left out; their summary row is kept and activity.card still lists them", Method: "GET", Path: "/boards/{boardId}/actions",
 		Auth: ops.AuthPublic, UI: "GET /ui/boards/{id}/activity"}, func(e *ops.Env, in ActionsIn) ([]ActionItem, error) {
 		if err := authz.RequireBoard(e, in.BoardID, authz.View); err != nil {
 			return nil, err
 		}
-		return listActions(e, `a.board_id=?`, in.BoardID, in.Before, in.Limit)
+		// quiet per-card events (bulk side effects: auto-archive, applying a template) are left out of the board feed;
+		// each bulk change records its own summary row. The card's own feed keeps them.
+		return listActions(e, `a.board_id=? AND (a.card_id IS NULL OR json_extract(a.data,'$.quiet') IS NOT 1)`, []any{in.BoardID}, in.Before, in.Limit)
 	})
-	ops.Register(ops.Op{Name: "activity.card", Summary: "Card activity feed (actions), newest first", Method: "GET", Path: "/cards/{cardId}/actions",
+	ops.Register(ops.Op{Name: "activity.card", Summary: "Card activity feed (actions), newest first. Only what was recorded on boards you can view; an event recorded on several boards (the card is on several) is listed once", Method: "GET", Path: "/cards/{cardId}/actions",
 		Auth: ops.AuthPublic, UI: "GET /ui/cards/{id}/activity"}, func(e *ops.Env, in CardActionsIn) ([]ActionItem, error) {
-		if _, err := authz.RequireCard(e, in.CardID, authz.View); err != nil {
+		a, err := authz.CardAccessFor(e, in.CardID, in.BoardID)
+		if err != nil {
 			return nil, err
 		}
-		return listActions(e, `a.card_id=?`, in.CardID, in.Before, in.Limit)
+		// rows recorded on boards the caller can view (a move on a board they cannot see names its columns; a board the
+		// card has left keeps its rows for that board's viewers), and one row per logical event (COALESCE(origin_id,id)):
+		// the context board's copy, else the oldest viewable copy. The filter runs before the dedupe, so a hidden
+		// origin row never hides the event or names its board. Two queries plus one BoardLevels, whatever the history.
+		var boards []string
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT DISTINCT board_id FROM actions WHERE card_id=?`, in.CardID); err == nil {
+			var all []string
+			for rows.Next() {
+				var b string
+				if rows.Scan(&b) == nil {
+					all = append(all, b)
+				}
+			}
+			rows.Close()
+			for b, l := range authz.BoardLevels(e, all) {
+				if l >= authz.View {
+					boards = append(boards, b)
+				}
+			}
+		}
+		if len(boards) == 0 {
+			return []ActionItem{}, nil
+		}
+		sort.Strings(boards)
+		ph := "?" + strings.Repeat(",?", len(boards)-1)
+		args := []any{in.CardID}
+		for _, b := range boards {
+			args = append(args, b)
+		}
+		args = append(args, in.CardID)
+		for _, b := range boards {
+			args = append(args, b)
+		}
+		args = append(args, a.BoardID, a.BoardID, a.BoardID, a.BoardID)
+		return listActions(e, `a.card_id=? AND a.board_id IN (`+ph+`) AND NOT EXISTS (SELECT 1 FROM actions x WHERE x.card_id=? AND x.id<>a.id
+			AND COALESCE(x.origin_id,x.id)=COALESCE(a.origin_id,a.id) AND x.board_id IN (`+ph+`)
+			AND ((x.board_id=?) > (a.board_id=?) OR ((x.board_id=?) = (a.board_id=?) AND x.id < a.id)))`, args, in.Before, in.Limit)
 	})
+}
+
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
 }

@@ -15,8 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo (56 seconds): the board header, adding cards, drag and drop, the card sheet, column WIP limits, filters, list, calendar and map views, the board template gallery, Connect an agent, board settings, user settings and the admin console, then the dark theme and a phone view" width="860"></a><br>
-  <a href="docs/demo.webm"><b>&#9654; Watch the 56-second demo</b></a> &middot; light theme to dark, with captions, no sound
+  <a href="docs/demo.webm"><img src="docs/demo.webp" alt="Weave demo (57 seconds): a board with its Inbox, WIP limit and closing column, dragging an idea onto the board, adding cards, the card sheet with a checklist and a comment, keyboard shortcuts, putting a card on a second board, column rules, the notification bell lighting up live, Pulse cards on the project page, applying a template to an existing board, Connect an agent, agents and webhooks in board settings, then the dark theme and a phone view" width="860"></a><br>
+  <a href="docs/demo.webm"><b>&#9654; Watch the 57-second demo</b></a> &middot; light theme to dark, with captions, no sound
 </p>
 
 ## Why Weave
@@ -52,12 +52,12 @@ user groups; notifications (in-app, email, and chat services such as Slack, Disc
 **Built for AI agents.** A **Connect an agent** dialog hands any coding agent a ready-to-paste prompt for Weave, a project, a board, a column or an unattended runner. Admins edit the default texts and the shared blocks in the console, and project and board managers can override their own prompt. See [docs/AGENTS.md](docs/AGENTS.md).
 
 **Yours to run.** A single container or binary with SQLite, no external services. Sign-in is OpenID Connect only, and your identity
-provider's groups decide who is an admin, a project owner, a member, a worker or a guest. Secure defaults out of the box:
+provider's groups decide who is an admin, a member, a worker or a guest. Members create their own projects and boards and run them. Secure defaults out of the box:
 strict Content-Security-Policy, CSRF protection, rate limits, signed releases and a hardened read-only container.
 
 <p align="center">
-  <img src="docs/screenshots/colors-list-menu-dark.png" alt="List menu with color picker" width="49%">
-  <img src="docs/screenshots/board-settings-dark.png" alt="Board settings" width="49%">
+  <img src="docs/screenshots/card-multiboard-light.png" alt="One card on several boards: the card sheet's Boards row lists Platform Sprint (home) and Launch Plan, with the Add to board picker open" width="49%">
+  <img src="docs/screenshots/column-autoclose-archive-light.png" alt="The column sheet of Done: Auto-close is on and Auto-archive keeps the newest 20 cards" width="49%">
 </p>
 
 <p align="center">
@@ -69,12 +69,25 @@ strict Content-Security-Policy, CSRF protection, rate limits, signed releases an
 <summary>More screenshots</summary>
 
 <p align="center">
+  <img src="docs/screenshots/apply-template-preview-light.png" alt="Applying the Bug tracker template to an existing board: the preview lists the columns added, the cards moved and the old columns removed, before anything changes" width="49%">
+  <img src="docs/screenshots/inbox-light.png" alt="The board Inbox, a pinned first column of ideas, with a draft's Move to column menu open" width="49%">
+  <img src="docs/screenshots/shortcuts-help-light.png" alt="The keyboard shortcuts overlay: navigation, board keys and card actions such as L, d, p, s, x, b, A and Delete" width="49%">
+  <img src="docs/screenshots/notifications-bell-dark.png" alt="Notifications in the dark theme: the bell shows two unread comments that arrived live" width="49%">
+  <img src="docs/screenshots/project-dark.png" alt="A project page with a Pulse card per board: open cards per column, due this week, members and recent activity" width="49%">
+  <img src="docs/screenshots/board-settings-agents-light.png" alt="Board settings, Agents: an agent account created by the board's owner, and the form to create another" width="49%">
+  <img src="docs/screenshots/column-sheet-light.png" alt="Column settings sheet: description, WIP limit 4/4, auto-close, auto-archive, sorting and activity" width="49%">
   <img src="docs/screenshots/gallery-preview-dark.png" alt="Template preview with the columns, labels and the name your board form" width="49%">
-  <img src="docs/screenshots/column-sheet-light.png" alt="Column settings sheet: description, type, WIP limit, sorting and activity" width="49%">
   <img src="docs/screenshots/calendar-light.png" alt="Calendar view with due dates and an unscheduled column" width="49%">
-  <img src="docs/screenshots/project-settings-light.png" alt="Project settings page" width="49%">
-  <img src="docs/screenshots/user-settings-light.png" alt="User settings page" width="49%">
+  <img src="docs/screenshots/project-settings-light.png" alt="Project settings: name, description, project-wide labels and who can create boards" width="49%">
+  <img src="docs/screenshots/user-settings-light.png" alt="User settings, Watching: the boards, columns and cards you watch" width="49%">
   <img src="docs/screenshots/admin-dark.png" alt="Admin console overview with storage, backup and statistics" width="49%">
+  <img src="docs/screenshots/admin-audit-dark.png" alt="Admin console audit log: people added to a group, with who did it and when" width="49%">
+  <img src="docs/screenshots/admin-orphans-dark.png" alt="Admin console, Orphaned projects: a project whose only manager was deactivated, with a Reassign picker" width="49%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/colors-list-menu-dark.png" alt="The column menu with watch, close cards, auto-archive and the colour picker" width="49%">
+  <img src="docs/screenshots/board-settings-dark.png" alt="Board settings: name, board colour, project and your access" width="49%">
 </p>
 
 </details>
@@ -155,7 +168,7 @@ registration token from Forgejo (Actions -> Runners -> Create new runner), put i
 Job containers receive the host Docker socket, so treat the runner host as trusted.
 
 ## Look and feel
-Light and dark themes (follows your system, with a sun/auto/moon toggle saved to your account),
+Light and dark themes (follows your system, with a light/auto/dark switch in the account menu, saved to your account),
 built on the design tokens in `internal/web/static/weave.css` (see `docs/DESIGN-SYSTEM.md`).
 
 | Light | Dark |
@@ -168,8 +181,11 @@ built on the design tokens in `internal/web/static/weave.css` (see `docs/DESIGN-
 - **Card details open only on click** (or Enter on a focused card) as a sheet at `/cards/<id>`;
   Esc closes it, `j`/`k` or the arrows step through the list's cards. Titles and descriptions
   edit in place and autosave.
-- **Forgiving:** archiving a card shows an Undo toast. Live updates never overwrite what you are typing.
+- **Forgiving:** archiving, closing or trashing a card shows an Undo toast. Live updates never overwrite what you are typing.
 - **Drag and drop** works with mouse, touch (long press) and keyboard (Space to grab, arrows to move).
+- **One card, several boards:** put the same card on another team's board (Boards row > "Add to board...", or `b`);
+  each board keeps its own column, labels and column rules, closing, archiving and deleting act on the card everywhere,
+  and "Remove from this board" takes it off one board only.
 
 | Key | Action |
 |---|---|
@@ -179,18 +195,26 @@ built on the design tokens in `internal/web/static/weave.css` (see `docs/DESIGN-
 | `e` | quick-edit the focused card |
 | `j` `k` / `h` `l` | next/previous card / list |
 | `Enter` | open the focused card |
+| `L` / `d` / `p` | labels / due date / location picker for the focused (or hovered) card |
+| `s` / `S` | start / stop time tracking (the card shows "Tracking" while it runs) |
+| `x` / `A` | close or re-open / archive (both with Undo; archive covers every board the card is on) |
+| `b` | add the focused card (or the open card) to another board |
+| `Delete` | move to trash after a confirmation (Undo); an Inbox draft is deleted permanently |
 | `?` | show all shortcuts |
+
+The card keys (`L d p s S x A b Delete`) also work inside an open card, need edit access, and never fire while you type.
 
 ## Status and known gaps
 Feature status lives in `docs/FEATURES.md`. Not yet complete or verified in a real browser:
 - Drag-and-drop, the card sheet and settings were checked in headless Chromium by script, not on touch devices or other browsers.
 - PDF export returns print-ready HTML unless `WEAVE_PDF_CMD` points at a PDF tool.
 - The map view is a coordinate plot with OpenStreetMap links, not tiled maps.
-- worker/guest roles are stored but behave like other non-admin roles.
+- worker/guest roles behave like other non-admin roles beyond directory visibility and creation rights (neither creates projects or boards; guests cannot manage projects or own boards).
 - Duplicating a card does not yet copy tasks, attachments or custom fields.
 - OIDC is tested end to end against a fake identity provider only, and SMTP against a fake server; neither has been exercised against a real one.
 - Planka's private/shared project type is not implemented.
 - Changing a board's colour does not update the header in other already-open tabs until reload (column colours do update live).
+- A card on several boards: "Remove from this board" is offered only while another board of the card is visible to you (the API also lets you remove it when its other boards are hidden from you).
 
 ## Identity provider setup (OIDC is the only way to sign in)
 
@@ -209,9 +233,8 @@ Weave has no local accounts, passwords or two-factor of its own: your identity p
 
 | Group | Weave role |
 |---|---|
-| `weave-admins` | `admin` (everything, admin console) |
-| `weave-project-owners` | `projectOwner` (may create projects) |
-| `weave-users` | `boardUser` (default member) |
+| `weave-admins` | `admin` (system administration: the admin console; no access to other people's projects and boards) |
+| `weave-users` | `boardUser` (default member: creates and manages their own projects and boards) |
 | `weave-workers` | `worker` |
 | `weave-guests` | `guest` |
 | `weave-team-<name>` | not a role: becomes a Weave **user group** `<name>` (usable in board memberships); membership is synced on every sign-in and removed when the IdP group is |
@@ -231,17 +254,20 @@ Then assign the `weave-*` groups above to users as groups on that Passage applic
 applies them on every sign-in.
 
 How it behaves:
-- The **highest** role wins when someone is in several role groups (admin > projectOwner > boardUser > worker > guest).
+- The **highest** role wins when someone is in several role groups (admin > boardUser > worker > guest).
 - Roles are applied on **every sign-in**, promotions and demotions alike, so changes in the IdP take effect at the user's next login (existing sessions keep the old role until then; shorten `WEAVE_SESSION_HOURS` if that matters). The **last admin is never demoted**.
 - Someone in no role group signs in as `boardUser`, unless `oidc.requireGroup` is on, which denies sign-in without a role group.
+- There is no separate project-creator role any more (the old `weave-project-owners` group / `WEAVE_OIDC_OWNER_GROUP` setting is ignored, and existing `projectOwner` accounts became `boardUser`). If you turned on `oidc.requireGroup`, put people who were only in that old group into `weave-users`.
+- Who may do what: admins and board users create projects and become their managers; project managers can add anyone but guests as fellow managers and manage every board of the project; each project decides who creates boards (Project settings > General: project managers only, the default, or any project member); a member who creates a board becomes its **board owner** and manages that board only. Workers and guests never create projects or boards.
+- **Admins run the instance, not other people's work**: the admin role gives the admin console (users, groups, SSO, settings, backup, webhooks, agent accounts, orphaned-project recovery) and **no access to anyone's projects or boards**. Projects and boards belong to their owners; an admin sees exactly the ones they own or were invited to, and someone else's board is "not found". A break-glass key from `weave admin mint-key --role admin` is the same: system powers, no content. Upgrading from a version where admins saw everything is one-way for that: run `weave admin preflight` first (`docs/MAINTENANCE.md`).
 - Accounts are created on first sign-in (`oidc.autoProvision`, default on). Name and email follow the IdP; Weave only keeps profile extras (phone, organization, preferences).
 - Deactivating or deleting a user in Weave (`/admin/users`) blocks them even if the IdP still lets them in.
-- Group names can be changed in `/admin/sso` or with `WEAVE_OIDC_ADMIN_GROUP`, `..._OWNER_GROUP`, `..._USER_GROUP`, `..._WORKER_GROUP`, `..._GUEST_GROUP`, `..._GROUPS_CLAIM`, `..._TEAM_PREFIX`, `..._REQUIRE_GROUP`.
+- Group names can be changed in `/admin/sso` or with `WEAVE_OIDC_ADMIN_GROUP`, `..._USER_GROUP`, `..._WORKER_GROUP`, `..._GUEST_GROUP`, `..._GROUPS_CLAIM`, `..._TEAM_PREFIX`, `..._REQUIRE_GROUP`.
 
 ### The CLI and agents use API keys
 Sessions are browser-only. Each user creates a personal API key under **Settings -> API key**
-and uses it as `WEAVE_TOKEN` (or `weave login`); the key acts with that user's current role. Agents get their own accounts
-(`/admin/agents`, `weave agent create`). See `docs/CLI.md` and `docs/AGENTS.md`.
+and uses it as `WEAVE_TOKEN` (or `weave login`); the key acts with that user's current role. Agents get their own accounts, which
+board owners create for their boards (Board settings > Agents, `weave agent create --boardIds B`; admins manage every agent *account* under `/admin/agents`, without seeing which of other people's boards it works on). See `docs/CLI.md` and `docs/AGENTS.md`.
 
 ### Getting the very first API key (break-glass)
 If nobody has an API key yet (for example in CI, or before anyone has signed in), mint one
@@ -267,6 +293,13 @@ docker compose exec weave weave admin relink --email person@example.com
 ```
 (direct database access like `mint-key`; same audit trail in the server log). **Sign out everywhere**
 (`user.sessions.revokeAll`, button on `/admin/users`) revokes every session of a user.
+
+### Orphaned projects and the upgrade preflight
+A project whose managers are all deactivated or deleted is *orphaned*. **Admin console > Orphaned projects** (`/admin/orphans`,
+ops `project.orphans`, `project.reassign`, `project.recovery.list`) lists them without their content and lets an admin give one a
+new manager; it refuses projects that still have an active manager, and every recovery goes to an audit trail. Upgrading to
+ownership-based permissions needs no extra step; to see in advance what an admin will stop seeing, optionally run `weave admin preflight` on the host (read-only); `weave admin adopt --project ID --email E` is the
+host break-glass. The Users page warns before you deactivate or delete someone who is the only active manager of projects. See `docs/MAINTENANCE.md`.
 
 ### API key expiry
 Keys never expire unless you ask: `apikey.generate` / `agent.create` / `agent.rotateKey` accept `expiresInDays` (1-3650;
@@ -304,7 +337,10 @@ Environment variables (secrets in env override values stored in the admin UI):
 | `WEAVE_MAX_STREAMS_PER_USER` | `20` | concurrent live-update (`/events`) streams per user, `0` = unlimited; extra ones get `429` |
 | `WEAVE_USER_STORAGE_MB` | `5120` | upload quota per user (sum of the files they attached; links are free), `0` = unlimited. Admins are not exempt; raise it here |
 | `WEAVE_NOTIFY_BLOCK_PRIVATE` | `false` | also refuse notification-service destinations on private networks (RFC 1918, ULA, CGNAT). Loopback, link-local/cloud-metadata and unspecified addresses are always refused |
-| `WEAVE_NOTIFY_ALLOW_HOSTS` | - | comma-separated host names, IPs or CIDRs (`*.corp.example`, `10.9.0.0/16`) that notification services may always use, overriding every block |
+| `WEAVE_NOTIFY_ALLOW_HOSTS` | - | comma-separated host names, IPs or CIDRs (`*.corp.example`, `10.9.0.0/16`) that notification services and board owners' webhooks may always use, overriding every block |
+| `WEAVE_WEBHOOK_USER_ALLOW_PRIVATE` | `false` | let webhooks created by board owners (non-admins) reach private networks (RFC 1918, ULA, CGNAT) for LAN receivers; also settable as `webhook.userAllowPrivate` in Admin console > Settings > Webhooks (the env var pins it). Loopback, link-local/cloud metadata, multicast and unspecified addresses stay refused; admin-created webhooks are not restricted |
+| `WEAVE_WEBHOOKS_PER_BOARD` | `20` | webhooks one board may have, `0` = unlimited |
+| `WEAVE_AGENTS_PER_USER` | `50` | agent accounts one person (not an admin) may create, `0` = unlimited |
 | `WEAVE_MCP_UPLOAD_ROOTS` | cwd + OS temp dir | **client side (`weave mcp`)**: OS path list of the directories MCP uploads may read and `saveTo` may write; replaces the defaults. The cwd is never a default root when it is `$HOME` or `/`. Credential/config paths (`.ssh`, `.git`, `.env*`, `*.pem`, Weave's config dir, ...) are refused even inside |
 | `WEAVE_MCP_MAX_UPLOAD_MB` | `256` | client side: largest file `weave mcp` uploads, also bounded by the op's own cap; `0` = the op's cap |
 | `WEAVE_MCP_MAX_BASE64_MB` | `2` | client side: largest `contentBase64` upload |
@@ -366,7 +402,7 @@ Webhook receivers: see `docs/WEBHOOKS.md` (`X-Weave-Signature-V2` with replay pr
 weave login --url https://weave.example.com --token wk_...      # verifies with whoami, saves a profile
 weave doctor                                                     # connectivity, auth, version, clock, event stream
 ```
-**3. Create an agent account** in the browser at `/admin/agents`, or `weave agent create --name triage-bot` (admin; the key is shown once).
+**3. Create an agent account** for your board in Board settings > Agents, or `weave agent create --name triage-bot --boardIds "Launch plan"` (you need to manage the board; the key is shown once).
 **4. Grant board access**: `weave agent access AGENT_ID --boardId "Launch plan"`.
 **5. Teach the agent**: `weave skill install` (it detects Claude Code, Codex, OpenCode, pi, Gemini CLI, Cursor, ... and installs for each; details under "Supported agent tools" below).
 **6. Wire it to columns** and let it work:

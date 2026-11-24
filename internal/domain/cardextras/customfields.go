@@ -58,7 +58,8 @@ type ValueItem struct {
 }
 
 type GroupListIn struct {
-	CardID string `path:"cardId"`
+	CardID  string `path:"cardId"`
+	BoardID string `query:"boardId" desc:"context board when the card is on several boards: its board-wide groups are shown (card-level groups always are); default as card.get"`
 }
 type GroupCreateIn struct {
 	BoardID     string `json:"boardId" desc:"Create a board-wide group (applies to every card of the board)"`
@@ -125,13 +126,6 @@ type groupRow struct {
 	Position               float64
 }
 
-func (g groupRow) boardID(e *ops.Env) (string, error) {
-	if g.Board.Valid {
-		return g.Board.String, nil
-	}
-	return authz.BoardOfCard(e, g.Card.String)
-}
-
 func loadGroup(e *ops.Env, q querier, id string) (groupRow, error) {
 	var g groupRow
 	var rep int
@@ -182,13 +176,13 @@ func groupItem(g groupRow, fields []FieldItem) GroupItem {
 	return it
 }
 
+// appliesTo reports whether a group may hold values of the card, for the value and row writers (the caller already
+// passed authz.RequireCard Edit): a card-level group applies to its own card; a board-wide group applies when the
+// card is placed on that board AND the caller may edit the card there (a board's fields are that board's business:
+// authz.RequireCardOn). With a single placement this is exactly "the group is the card's board's".
 func appliesTo(e *ops.Env, g groupRow, cardID string) bool {
-	var board string
-	if e.DB.QueryRowContext(e.Ctx, `SELECT board_id FROM cards WHERE id=?`, cardID).Scan(&board) != nil {
-		return false
-	}
 	if g.Board.Valid {
-		return g.Board.String == board
+		return authz.RequireCardOn(e, cardID, g.Board.String, authz.Edit) == nil
 	}
 	return g.Card.String == cardID
 }
@@ -251,12 +245,10 @@ func cleanOptions(in []string) []string {
 	return out
 }
 
-// CardFields assembles every group applying to a card with fields, rows and values.
-func cardFields(e *ops.Env, cardID string) ([]GroupItem, error) {
-	var board string
-	if e.DB.QueryRowContext(e.Ctx, `SELECT board_id FROM cards WHERE id=?`, cardID).Scan(&board) != nil {
-		return nil, ops.NotFound("card")
-	}
+// cardFields assembles every group applying to a card as seen on board (the context board: the caller can view the
+// card there) with fields, rows and values: that board's board-wide groups plus the card's own groups. Another
+// board's board-wide groups are not shown (their values stay stored).
+func cardFields(e *ops.Env, cardID, board string) ([]GroupItem, error) {
 	groups, err := query(e.Ctx, e.DB, func(r *sql.Rows) (string, error) { var s string; return s, r.Scan(&s) },
 		`SELECT id FROM custom_field_groups WHERE board_id=? OR card_id=? ORDER BY (board_id IS NULL), position, id`, board, cardID)
 	if err != nil {
@@ -316,10 +308,11 @@ func init() {
 	ops.Register(ops.Op{Name: "customfieldgroup.list", Summary: "Custom-field groups applying to a card (board-wide + card-level) with fields, rows and values",
 		Method: "GET", Path: "/cards/{cardId}/custom-field-groups", Auth: ops.AuthPublic, UI: "GET /ui/cards/{id}/fields"},
 		func(e *ops.Env, in GroupListIn) ([]GroupItem, error) {
-			if _, err := authz.RequireCard(e, in.CardID, authz.View); err != nil {
+			a, err := authz.CardAccessFor(e, in.CardID, in.BoardID)
+			if err != nil {
 				return nil, err
 			}
-			return cardFields(e, in.CardID)
+			return cardFields(e, in.CardID, a.BoardID)
 		})
 
 	ops.Register(ops.Op{Name: "customfieldgroup.create", Summary: "Create a custom-field group for a board (all cards) or a single card", Method: "POST", Path: "/custom-field-groups",
@@ -373,11 +366,11 @@ func init() {
 		if err != nil {
 			return g, "", err
 		}
-		board, err := g.boardID(e)
-		if err != nil {
-			return g, "", err
+		if !g.Board.Valid { // a card-level group: the card's access (any placement), the context board
+			board, err := authz.RequireCard(e, g.Card.String, min)
+			return g, board, err
 		}
-		return g, board, authz.RequireBoard(e, board, min)
+		return g, g.Board.String, authz.RequireBoard(e, g.Board.String, min)
 	}
 
 	ops.Register(ops.Op{Name: "customfieldgroup.update", Summary: "Rename, reposition or toggle repeatable on a custom-field group", Method: "PATCH", Path: "/custom-field-groups/{id}",
@@ -653,16 +646,17 @@ func init() {
 
 	ops.Register(ops.Op{Name: "customfieldvalue.set", Summary: "Set a card's value for a custom field (validated by field type); empty clears", Method: "PUT", Path: "/cards/{cardId}/custom-field-values",
 		UI: "POST /ui/cards/{cardId}/custom-field-values"}, func(e *ops.Env, in ValueSetIn) (ValueItem, error) {
-		f, _, board, err := valueTarget(e, in.CardID, in.GroupID, in.FieldID, in.RowID)
+		f, g, board, err := valueTarget(e, in.CardID, in.GroupID, in.FieldID, in.RowID)
 		if err != nil {
 			return ValueItem{}, err
 		}
+		board, scope := groupScope(g, board)
 		out := ValueItem{CardID: in.CardID, GroupID: in.GroupID, FieldID: in.FieldID, RowID: in.RowID}
 		if in.Content == "" && f.Type != "checkbox" {
 			if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM custom_field_values WHERE card_id=? AND group_id=? AND field_id=? AND row_id=?`, in.CardID, in.GroupID, in.FieldID, in.RowID); err != nil {
 				return out, err
 			}
-			emit(e, "customFieldValueDelete", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name})
+			emitScoped(e, "customFieldValueDelete", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name}, scope)
 			return out, nil
 		}
 		content, err := normalizeValue(f.Type, f.Options, in.Content)
@@ -675,20 +669,21 @@ func init() {
 			return out, err
 		}
 		out.Content = content
-		emit(e, "customFieldValueUpdate", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name, "content": clip(content, 200)})
+		emitScoped(e, "customFieldValueUpdate", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name, "content": clip(content, 200)}, scope)
 		return out, nil
 	})
 
 	ops.Register(ops.Op{Name: "customfieldvalue.clear", Summary: "Remove a card's value for a custom field", Method: "POST", Path: "/cards/{cardId}/custom-field-values/clear",
 		UI: "POST /ui/cards/{cardId}/custom-field-values/clear"}, func(e *ops.Env, in ValueClearIn) (ValueItem, error) {
-		f, _, board, err := valueTarget(e, in.CardID, in.GroupID, in.FieldID, in.RowID)
+		f, g, board, err := valueTarget(e, in.CardID, in.GroupID, in.FieldID, in.RowID)
 		if err != nil {
 			return ValueItem{}, err
 		}
+		board, scope := groupScope(g, board)
 		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM custom_field_values WHERE card_id=? AND group_id=? AND field_id=? AND row_id=?`, in.CardID, in.GroupID, in.FieldID, in.RowID); err != nil {
 			return ValueItem{}, err
 		}
-		emit(e, "customFieldValueDelete", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name})
+		emitScoped(e, "customFieldValueDelete", board, in.CardID, "customfieldvalue.updated", map[string]any{"fieldId": in.FieldID, "name": f.Name}, scope)
 		return ValueItem{CardID: in.CardID, GroupID: in.GroupID, FieldID: in.FieldID, RowID: in.RowID}, nil
 	})
 
@@ -715,15 +710,17 @@ func init() {
 		if err != nil {
 			return RowItem{}, err
 		}
-		emit(e, "customFieldRowCreate", board, in.CardID, "customfieldvalue.updated", map[string]any{"groupId": in.GroupID, "name": g.Name})
+		board, scope := groupScope(g, board)
+		emitScoped(e, "customFieldRowCreate", board, in.CardID, "customfieldvalue.updated", map[string]any{"groupId": in.GroupID, "name": g.Name}, scope)
 		return RowItem{ID: id, CardID: in.CardID, GroupID: in.GroupID, Position: pos, Values: map[string]string{}}, nil
 	})
 
 	rowAuth := func(e *ops.Env, id string) (cardID, groupID, board string, err error) {
-		if e.DB.QueryRowContext(e.Ctx, `SELECT r.card_id,r.group_id,c.board_id FROM custom_field_rows r JOIN cards c ON c.id=r.card_id WHERE r.id=?`, id).Scan(&cardID, &groupID, &board) != nil {
+		if e.DB.QueryRowContext(e.Ctx, `SELECT card_id,group_id FROM custom_field_rows WHERE id=?`, id).Scan(&cardID, &groupID) != nil {
 			return "", "", "", ops.NotFound("row")
 		}
-		return cardID, groupID, board, authz.RequireBoard(e, board, authz.Edit)
+		board, err = authz.RequireCard(e, cardID, authz.Edit)
+		return cardID, groupID, board, err
 	}
 
 	ops.Register(ops.Op{Name: "customfieldrow.update", Summary: "Reorder a row of a repeatable group", Method: "PATCH", Path: "/custom-field-rows/{id}",
@@ -748,7 +745,9 @@ func init() {
 		if err != nil {
 			return RowItem{}, err
 		}
-		emit(e, "customFieldRowUpdate", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID})
+		g, _ := loadGroup(e, e.DB, groupID)
+		board, scope := groupScope(g, board)
+		emitScoped(e, "customFieldRowUpdate", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID}, scope)
 		return RowItem{ID: in.ID, CardID: cardID, GroupID: groupID, Position: pos, Values: map[string]string{}}, nil
 	})
 
@@ -768,7 +767,19 @@ func init() {
 		if err != nil {
 			return DeletedOut{}, err
 		}
-		emit(e, "customFieldRowDelete", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID})
+		g, _ := loadGroup(e, e.DB, groupID)
+		board, scope := groupScope(g, board)
+		emitScoped(e, "customFieldRowDelete", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID}, scope)
 		return DeletedOut{in.ID, cardID}, nil
 	})
+}
+
+// groupScope is the board scope of an event about a card's values in group g: a board-wide group is that board's
+// vocabulary (shown on that board only), so the event stays on that board; a card-level group's events reach every
+// board the card is on (nil scope) from the caller's context board.
+func groupScope(g groupRow, ctxBoard string) (string, []string) {
+	if g.Board.Valid && g.Board.String != "" {
+		return g.Board.String, []string{g.Board.String}
+	}
+	return ctxBoard, nil
 }

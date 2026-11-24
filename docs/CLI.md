@@ -40,6 +40,12 @@ weave schema card.create    # one op with field types and descriptions
 
 Weave signs people in with OIDC only, so the CLI authenticates with an **API key** (Settings -> API key, or
 `weave agent create` for agents). The key is sent as `Authorization: Bearer` and acts with that account's role.
+Anyone who manages a board creates agents for it: `weave agent create --name triage-bot --boardIds BOARD [--boardRole editor|commenter|viewer]`
+(non-admins must name boards they manage; the key is printed once), `weave agent list [--boardId B]` shows the agents you created or that
+hold access to boards you manage, `weave agent access ID --boardId B [--role viewer] [--revoke]` grants or removes access (Manage on B, or
+being the agent's creator to revoke), and `weave agent update|rotateKey|delete ID` work for the creator, a manager of all its boards, or an
+admin. Board webhooks work the same way: `weave webhook create --name ci --url https://ci.example/hook --boardId B --events cardMove`
+(`weave webhook events --scope board` lists what a board webhook may subscribe to); global and project webhooks are admin-only.
 
 ```sh
 weave login --url https://weave.example.com --token wk_...        # verifies via whoami, saves profile "default"
@@ -134,7 +140,10 @@ weave board stats --project P [--boardId B]        # per board: open, done, over
 weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label bug --assign me --due 2026-12-01T00:00:00Z
 printf '%s\n' '{"name":"A","labels":["bug"]}' 'plain title' | weave card create --board B --list Backlog --from-stdin   # bulk, NDJSON out
 weave card show CARD [--full]                     # --full adds comments, checklists, attachments
-weave card move CARD --to-list Review [--position N]
+weave card move CARD --to-list Review [--position N] [--board B] [--boardId FROM]   # several boards: --board B moves B's placement, --boardId FROM relocates FROM's
+weave card place CARD_ID --board B2 --listId Ready   # put the same card on board B2 too (any project; Edit on the card and on B2)
+weave card unplace CARD B2                        # "Remove from board": off B2 only (never its last board)
+weave card placements CARD                        # the boards it is on (only those you can see), home first
 weave card comment CARD "text"                    # or --stdin / text "-" / "@file"
 weave card attach CARD ./file [./file2]
 weave card claim CARD [--ttl 15m] [--note T]      # exit 7 if someone else holds it
@@ -151,7 +160,19 @@ weave board subscribe B | weave board unsubscribe B     # watch a whole board (n
 weave list subscribe L  | weave list unsubscribe L      # watch a column
 weave card subscribe C  | weave card unsubscribe C      # watch a card / stop and MUTE it (also silences column/board watches)
 weave subscription list [--limit 100]                   # what I watch: boards, columns, cards, muted
+
+weave board template.apply B --templateId builtin:sprint --dry-run            # preview: columns added and removed, target column, cards moved, labels, warnings
+weave board template.apply B --templateId builtin:sprint --confirm [--applySettings] [--includeSampleCards] [--removeOldColumns=false]   # apply it (no automatic undo: weave board export B first)
 ```
+`board template.apply` is the one op whose `--dry-run` is its own input (`dryRun`): the command name wins over the global flag, so
+the request does reach the server and prints the preview instead of only printing the request. By default the board's old columns
+are removed once their cards have moved (`columnsRemoved` in the preview; their own settings and column watches go with them);
+`--removeOldColumns=false` keeps them, emptied, on the right (`columnsKept`).
+**One card on several boards.** A card may be placed on several boards (the same card, not a copy). Column, position and
+labels are per board (`card label.add CARD --labelId L --boardId B` when it is on several boards); everything else is the
+card's, including closed (a closing column on any board closes it everywhere). `card archive` / `card archive --trash` /
+`card restore` / `card delete` act on every board the card is on; a column's auto-archive archives that board's
+placement only. `card close CARD --boardId B` closes it into board B's closing column (closed itself is per card). `card show CARD --boardId B` shows it on board B (`placements[]`, `homeBoardId`).
 `weave next` prints `{"item": card}` and exits 0, or exits **10** with no output when every list is empty, so
 `while card=$(weave next ... --claim); do ...; done` is a complete worker loop. All shortcuts call ops through the generic
 client, so `--dry-run`, `--profile`, `--output`, ... apply to them too.
@@ -212,7 +233,7 @@ PLAN before it listens; the runner prompt contains the complete wrapper script a
 The JSON output (`--json`) has `source`: `builtin`, `admin`, `project` or `board`, i.e. where a customised text came from, and `customBlocks`:
 the shared blocks the prompt used whose text an admin replaced. The texts are edited
 with the existing update commands (plain text with `{tokens}`, see docs/AGENTS.md; an empty value goes back to the default):
-`weave board update BOARD --agentPrompt "$(cat board-prompt.txt)"` (board managers) and `weave project update PROJECT --agentPrompt ...`
+`weave board update BOARD --agentPrompt "$(cat board-prompt.txt)"` (project managers and board owners) and `weave project update PROJECT --agentPrompt ...`
 (project managers). The admin defaults (`agentprompt.general|project|board|runner`) and the shared blocks (`agentblock.<name>`, e.g.
 `agentblock.security`) are edited in Admin console > Agent prompts (tabs Prompts and Blocks) or with
 `PATCH /api/v1/config/settings` (`weave config` is the local profile command, so the `config.*` ops have no CLI verb).
@@ -328,7 +349,10 @@ for a fork). The signing key and maintainer steps are in `docs/MAINTENANCE.md`.
 ## Server subcommands (full binary only)
 
 `weave serve`, `weave healthcheck` (Docker `HEALTHCHECK`), `weave admin mint-key --email E [--role admin]`, `weave admin relink --email E`,
-`weave admin backup -o weave.db` (an op: works with the slim client too), `weave system version | health | storage`, `weave admin stats`.
+`weave admin preflight [--email E] [--json] [--db PATH]` (read-only report before upgrading to ownership-based permissions:
+projects with no active manager, projects an admin will no longer see, boards only admins manage (informational); exit 0 =
+nothing to fix, 1 = action needed), `weave admin adopt --project ID --email E` (host break-glass: make E a manager of a project, audited),
+see `docs/MAINTENANCE.md`. `weave admin backup -o weave.db` (an op: works with the slim client too), `weave system version | health | storage`, `weave admin stats`.
 
 ## End-to-end test
 

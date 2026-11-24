@@ -49,13 +49,13 @@ func TestWebhookValidationAndUIForms(t *testing.T) {
 	if r.StatusCode != 200 || r.Header.Get("HX-Redirect") == "" {
 		t.Fatalf("create via UI: %d %v", r.StatusCode, r.Header)
 	}
-	l, _ := ops.Typed[notify.WebhookListOut](w.admin, "webhook.list", notify.NoInput{})
+	l, _ := ops.Typed[notify.WebhookListOut](w.admin, "webhook.list", notify.WebhookListIn{})
 	if len(l.Items) != 1 || len(l.Items[0].Events) != 2 || l.Items[0].ExcludedEvents[0] != "cardDelete" {
 		t.Fatalf("webhooks = %+v", l.Items)
 	}
 	// clearing all checkboxes clears the filter
 	post("/ui/admin/webhooks/"+l.Items[0].ID, url.Values{})
-	l, _ = ops.Typed[notify.WebhookListOut](w.admin, "webhook.list", notify.NoInput{})
+	l, _ = ops.Typed[notify.WebhookListOut](w.admin, "webhook.list", notify.WebhookListIn{})
 	if len(l.Items[0].Events) != 0 {
 		t.Fatalf("filter not cleared: %+v", l.Items[0])
 	}
@@ -106,5 +106,48 @@ func TestWebhookValidationAndUIForms(t *testing.T) {
 	mux2.ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `id="notify-list"`) || !strings.Contains(rec.Body.String(), "hx-swap-oob") || strings.Contains(rec.Body.String(), "Mark read") {
 		t.Fatalf("read via UI: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The live bell's "New notifications" button reloads the list through GET /ui/notifications/list:
+// the list plus the badge and the heading count out of band, honouring ?unread=1, only the caller's rows.
+func TestNotificationListFragment(t *testing.T) {
+	w := seed(t)
+	ops.Emit(w.alice, ops.Event{Type: "cardMembershipCreate", BoardID: "b1", CardID: "c1", Data: map[string]any{"userId": "carol"}})
+	notify.Wait()
+	mux := http.NewServeMux()
+	web.Mount(mux, func(r *http.Request) *ops.Env { c := *w.carol; c.Ctx = r.Context(); c.Req = r; return &c })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	get := func(path string) string {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		req.Header.Set("HX-Request", "true")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, b)
+		}
+		return string(b)
+	}
+	body := get("/ui/notifications/list?unread=1")
+	for _, want := range []string{`id="notify-list"`, `class="notify-item unread"`, `hx-swap-oob="innerHTML:#notif-badge"`,
+		`id="notify-head-count" class="notify-head-count" hx-swap-oob="true"><span class="notify-count">1</span>`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("fragment lacks %q:\n%s", want, body)
+		}
+	}
+	if _, err := ops.Typed[notify.CountOut](w.carol, "notification.read_all", notify.NoInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if body = get("/ui/notifications/list?unread=1"); !strings.Contains(body, "No unread notifications.") || strings.Contains(body, `class="notify-count"`) {
+		t.Fatalf("after read_all:\n%s", body)
+	}
+	page := get("/notifications")
+	if !strings.Contains(page, `id="notify-fresh"`) || !strings.Contains(page, `hidden hx-get="/ui/notifications/list"`) {
+		t.Fatal("notifications page lacks the hidden refresh button")
 	}
 }

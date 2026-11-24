@@ -268,7 +268,7 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 		if err := validCardFile(in.CardFile); err != nil {
 			return AgentPromptOut{}, err
 		}
-		got, err := ops.CallMap(e, "card.get", map[string]any{"id": in.CardID})
+		got, err := ops.CallMap(e, "card.get", map[string]any{"id": in.CardID, "boardId": pc.BoardID}) // seen on this board when it is placed here
 		if err != nil {
 			return AgentPromptOut{}, err
 		}

@@ -69,13 +69,19 @@ func uid(e *ops.Env) string {
 // emit records an activity row (through the notify hook when installed, else directly)
 // and publishes the realtime event.
 func emit(e *ops.Env, typ, boardID, cardID, name string, data map[string]any) {
+	emitScoped(e, typ, boardID, cardID, name, data, nil)
+}
+
+// emitScoped is emit with an explicit board scope (ops.Event.Boards). A card event otherwise reaches every board the
+// card is on; a value of a board-wide custom-field group is that board's vocabulary and must stay there.
+func emitScoped(e *ops.Env, typ, boardID, cardID, name string, data map[string]any, boards []string) {
 	if data == nil {
 		data = map[string]any{}
 	}
 	if cardID != "" {
 		data["cardId"] = cardID
 	}
-	ev := ops.Event{Type: typ, BoardID: boardID, CardID: cardID, Name: name, Data: data}
+	ev := ops.Event{Type: typ, BoardID: boardID, CardID: cardID, Name: name, Data: data, Boards: boards}
 	if ops.EmitHook != nil {
 		ops.Emit(e, ev)
 		return

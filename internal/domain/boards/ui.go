@@ -9,6 +9,7 @@ import (
 
 	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
+	"github.com/crueber/weave/internal/domain/auth"
 	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
@@ -28,6 +29,7 @@ var colorHex = map[string]string{
 
 func init() {
 	web.AddFuncs(template.FuncMap{
+		"add1": func(n int) int { return n + 1 },
 		"boardsColor": func(c any) string {
 			var s string
 			switch v := c.(type) {
@@ -236,7 +238,7 @@ func registerUI() {
 		if err != nil {
 			return err
 		}
-		return c.RenderBlock("boards_list.html", "page", map[string]any{"ProjectID": pid, "Boards": bs, "CanCreate": authz.ProjectLevel(c.Env, pid) >= authz.Manage})
+		return c.RenderBlock("boards_list.html", "page", map[string]any{"ProjectID": pid, "Boards": bs, "CanCreate": authz.Project(c.Env, pid).CanCreateBoard})
 	})
 	registerGalleryUI()
 	gotoBoard := func(c *web.Ctx, out any) error { c.Redirect("/boards/" + out.(Board).ID); return nil }
@@ -304,7 +306,19 @@ func registerUI() {
 	toMembers := func(c *web.Ctx, out any) error { return renderSection(c, out.(Member).BoardID, "boards_set_members") }
 	mutPre("board.member.add", normalizeRole, toMembers)
 	mutPre("board.member.update", normalizeRole, toMembers)
-	mut("board.member.remove", toMembers)
+	mut("board.member.remove", func(c *web.Ctx, out any) error {
+		m := out.(Member)
+		if !authz.IsBoardMember(c.Env, m.BoardID) { // the caller left the board: there is no settings page to show any more
+			to := "/"
+			var pid string
+			if c.Env.DB.QueryRowContext(c.Env.Ctx, `SELECT project_id FROM boards WHERE id=?`, m.BoardID).Scan(&pid) == nil && authz.ProjectLevel(c.Env, pid) >= authz.View {
+				to = "/projects/" + pid
+			}
+			c.Redirect(to)
+			return nil
+		}
+		return toMembers(c, out)
+	})
 	toLabels := func(c *web.Ctx, _ any) error { return renderSection(c, boardParam(c), "boards_set_labels") }
 	for _, op := range []string{"label.create", "label.update", "label.move", "label.delete", "labelgroup.create", "labelgroup.update", "labelgroup.delete"} {
 		mut(op, toLabels)
@@ -355,6 +369,9 @@ func registerUI() {
 		if r.Form.Has("wipLimit") && strings.TrimSpace(r.Form.Get("wipLimit")) == "" {
 			r.Form.Set("wipLimit", "0")
 		}
+		if r.Form.Has("archiveAfter") && strings.TrimSpace(r.Form.Get("archiveAfter")) == "" {
+			r.Form.Set("archiveAfter", "0") // "Turn off"
+		}
 	}, func(c *web.Ctx, _ any) error { return refresh(c) })
 	registerListSheetUI()
 }
@@ -374,7 +391,7 @@ func renderProjectLabels(c *web.Ctx, projectID string) error {
 		}
 		rows.Close()
 	}
-	return c.RenderBlock("boards_list.html", "boards_projlabels", map[string]any{"ProjectID": projectID, "Labels": ls, "Groups": gs, "CanEdit": authz.ProjectLevel(c.Env, projectID) >= authz.Manage})
+	return c.RenderBlock("boards_list.html", "boards_projlabels", map[string]any{"ProjectID": projectID, "Labels": ls, "Groups": gs, "CanEdit": authz.Project(c.Env, projectID).CanManage})
 }
 
 // SavedData feeds the saved-filter dropdown fragment.
@@ -400,8 +417,9 @@ type UserOpt struct{ ID, Name, Email string }
 type SettingsData struct {
 	Board            Board
 	Level            string
-	CanEdit          bool
-	CanManage        bool
+	Caps             authz.BoardCaps // every section and control asks this (authz.Board), never the level
+	CanEdit          bool            // Caps.CanEdit
+	CanManage        bool            // Caps.CanManage
 	Members          []Member
 	Users            []UserOpt
 	Groups           []UserOpt
@@ -418,7 +436,10 @@ type SettingsData struct {
 	Sections         []SettingsSection
 	AgentCols        []AgentCol // "Agents" section: one row per column with its live listeners
 	Prompt           PromptEdit // "Agents" section: the board prompt text editor (managers)
-	IsAdmin          bool
+	// Leave board: the caller's own direct membership (board.member.remove allows any member to remove their own),
+	// and whether the last-owner rule refuses it right now (LeaveBlocked, the same check the op runs).
+	MyMemberID   string
+	LeaveBlocked bool
 }
 
 // PromptEdit feeds the bs_prompt editor of an editable agent prompt.
@@ -463,11 +484,11 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 	if err != nil {
 		return nil, err
 	}
-	lvl := authz.BoardLevel(c.Env, boardID)
-	if lvl > authz.None && !authz.IsBoardMember(c.Env, boardID) {
+	caps := authz.Board(c.Env, boardID)
+	if !caps.CanOpenSettings {
 		return nil, ops.NotFound("board") // public viewers do not get the settings fragments either
 	}
-	sd := &SettingsData{Board: d.Board, Level: d.Level, CanEdit: lvl >= authz.Edit, CanManage: lvl >= authz.Manage, Members: d.Members, Labels: d.Labels, LabelGroups: d.LabelGroups,
+	sd := &SettingsData{Board: d.Board, Level: d.Level, Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, Members: d.Members, Labels: d.Labels, LabelGroups: d.LabelGroups,
 		Views: []string{"kanban", "grid", "list", "calendar", "map"}}
 	for i, l := range sd.Labels {
 		r := LabelRow{Label: l}
@@ -479,13 +500,8 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 		}
 		sd.LabelRows = append(sd.LabelRows, r)
 	}
-	sd.Sections = []SettingsSection{{"general", "General"}, {"members", "Members & access"}, {"labels", "Labels"}, {"views", "Views & cards"}, {"filters", "Filters"},
-		{"sharing", "Sharing & public link"}, {"templates", "Templates & export"}, {"agents", "Agents"}}
-	if sd.CanManage {
-		sd.Sections = append(sd.Sections, SettingsSection{"notifications", "Notifications"}, SettingsSection{"danger", "Danger zone"})
-	}
-	sd.IsAdmin = c.Env.User != nil && c.Env.User.Role == "admin"
-	if sd.CanManage {
+	sd.Sections = settingsSections(caps)
+	if caps.CanEditPrompt {
 		sd.Prompt = newPromptEdit(c.Env, agentprompt.ScopeBoard, d.Board.AgentPrompt)
 	}
 	if ls, err := listsOf(c.Env, boardID, true); err == nil {
@@ -509,10 +525,17 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 	}
 	_, sd.UseProjectLabels = projectOfBoard(c.Env, boardID)
 	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT name FROM projects WHERE id=?`, d.Board.ProjectID).Scan(&sd.ProjectName)
+	if caps.CanRemoveSelfMember {
+		for _, m := range d.Members {
+			if m.UserID != nil && *m.UserID == c.Env.User.UserID {
+				sd.MyMemberID, sd.LeaveBlocked = m.ID, checkOwnerLeaves(c.Env, m) != nil
+			}
+		}
+	}
 	if sd.Saved, err = filtersOf(c.Env, boardID); err != nil {
 		return nil, err
 	}
-	if sd.CanManage {
+	if caps.CanManageMembers || caps.CanPublishTemplate {
 		in := map[string]bool{}
 		for _, m := range d.Members {
 			if m.UserID != nil {
@@ -522,29 +545,60 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 				in[*m.GroupID] = true
 			}
 		}
-		if rows, err := c.Env.DB.QueryContext(c.R.Context(), `SELECT id,name,email FROM users WHERE deleted_at IS NULL AND is_deactivated=0 ORDER BY name`); err == nil {
-			for rows.Next() {
-				var u UserOpt
-				_ = rows.Scan(&u.ID, &u.Name, &u.Email)
-				if !in[u.ID] {
-					sd.Users = append(sd.Users, u)
+		// People and groups come from the caller's own directory (user.list / group.list), so a board owner with a
+		// restricted directory (worker) only finds the accounts they already share a board with, and only admins
+		// see e-mail addresses.
+		if ul, err := ops.Typed[auth.UserList](c.Env, "user.list", auth.ListIn{}); err == nil {
+			for _, u := range ul.Items {
+				if u == nil || in[u.ID] || u.IsDeactivated {
+					continue
 				}
+				o := UserOpt{ID: u.ID, Name: u.Name, Email: u.Email}
+				if o.Email == "" && u.Username != nil && *u.Username != "" {
+					o.Email = "@" + *u.Username
+				}
+				sd.Users = append(sd.Users, o)
 			}
-			rows.Close()
 		}
-		if rows, err := c.Env.DB.QueryContext(c.R.Context(), `SELECT id,name FROM user_groups ORDER BY name`); err == nil {
-			for rows.Next() {
-				var g UserOpt
-				_ = rows.Scan(&g.ID, &g.Name)
-				sd.AllGroups = append(sd.AllGroups, g)
+		if gl, err := ops.Typed[auth.GroupList](c.Env, "group.list", auth.NoInput{}); err == nil {
+			for _, g := range gl.Items {
+				if g == nil {
+					continue
+				}
+				o := UserOpt{ID: g.ID, Name: g.Name}
+				sd.AllGroups = append(sd.AllGroups, o)
 				if !in[g.ID] {
-					sd.Groups = append(sd.Groups, g)
+					sd.Groups = append(sd.Groups, o)
 				}
 			}
-			rows.Close()
 		}
 	}
 	return sd, nil
+}
+
+// settingsSections is the board settings navigation: a section is listed iff the caller can use it (the panels are
+// rendered under the same conditions in boards_settings.html), so nobody lands on an empty "only owners can..." page.
+func settingsSections(caps authz.BoardCaps) []SettingsSection {
+	out := []SettingsSection{{"general", "General"}, {"members", "Members & access"}, {"labels", "Labels"}, {"views", "Views & cards"}, {"filters", "Filters"}}
+	if caps.CanShare {
+		out = append(out, SettingsSection{"sharing", "Sharing & public link"})
+	}
+	if caps.CanPublishTemplate {
+		out = append(out, SettingsSection{"templates", "Templates & export"})
+	} else {
+		out = append(out, SettingsSection{"templates", "Export"})
+	}
+	out = append(out, SettingsSection{"agents", "Agents"})
+	if caps.CanManageNotify {
+		out = append(out, SettingsSection{"notifications", "Notifications"})
+	}
+	if caps.CanManageWebhooks {
+		out = append(out, SettingsSection{"webhooks", "Webhooks"})
+	}
+	if caps.CanDelete {
+		out = append(out, SettingsSection{"danger", "Danger zone"})
+	}
+	return out
 }
 
 func renderSectionSaved(c *web.Ctx, boardID, block string) error {
@@ -581,7 +635,7 @@ func dropCard(c *web.Ctx) error {
 	after, before := c.R.FormValue("afterId"), c.R.FormValue("beforeId")
 	var n int
 	var draft bool
-	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT COUNT(*),COALESCE(MAX(is_draft),0) FROM cards WHERE id=? AND board_id=?`, cardID, boardID).Scan(&n, &draft)
+	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT COUNT(*),COALESCE(MAX(c.is_draft),0) FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.card_id=? AND p.board_id=?`, cardID, boardID).Scan(&n, &draft)
 	if n == 0 {
 		return ops.NotFound("card")
 	}
@@ -589,14 +643,18 @@ func dropCard(c *web.Ctx) error {
 	if err != nil || l.BoardID != boardID {
 		return ops.NotFound("list")
 	}
-	pos := PlaceBetween(c.R.Context(), c.Env.DB, "cards", "list_id=? AND id<>?", []any{listID, cardID}, after, before)
+	pos, err := PlaceCardBetween(c.R.Context(), c.Env.DB, listID, cardID, after, before)
+	if err != nil {
+		return err
+	}
 	if draft { // dragged out of the Inbox onto a column: publish it there
 		if err := draftDrop(c, cardID, listID, pos); err != nil {
 			return err
 		}
 		return refresh(c)
 	}
-	form := url.Values{"id": {cardID}, "cardId": {cardID}, "listId": {listID}, "position": {fmt.Sprint(pos)},
+	// boardId: the card may be on several boards; a drop on this board moves THIS board's placement
+	form := url.Values{"id": {cardID}, "cardId": {cardID}, "listId": {listID}, "boardId": {boardID}, "position": {fmt.Sprint(pos)},
 		"afterId": {after}, "beforeId": {before}, "index": {c.R.FormValue("index")}}
 	if _, err := CallByForm(c.Env, "card.move", form); err != nil {
 		return err
@@ -611,7 +669,8 @@ func CallByForm(e *ops.Env, name string, form url.Values) (any, error) {
 	if o == nil {
 		return nil, ops.Invalid("operation " + name + " is not available")
 	}
-	r, err := http.NewRequestWithContext(e.Ctx, "POST", "/", strings.NewReader(form.Encode()))
+	// the form is the query string too: an op input tagged query:"x" (card.label.remove's boardId) binds from the URL
+	r, err := http.NewRequestWithContext(e.Ctx, "POST", "/?"+form.Encode(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}

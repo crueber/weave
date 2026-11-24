@@ -88,6 +88,12 @@ button.tg-cat{width:100%;padding:0;border:0;background:none;box-shadow:none;text
 .tg-hint{margin:var(--space-2) 0 0;color:var(--muted);font-size:var(--text-sm)}
 .tg-fields{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0}
 .tg-fields+.tg-fields{margin-top:var(--space-2)}
+/* a template column that closes cards that land in it: the closed mark (success, 3:1 non-text) before its name */
+.tg-closes{display:inline-flex;vertical-align:-.12em;margin-right:.3em;color:var(--success)}
+.tg-closes .closed-mark-ico{width:.85rem;height:.85rem}
+.tg-closing{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:0}
+.tg-chip-closes{gap:.3em}
+.tg-chip-closes .closed-mark-ico{width:.8rem;height:.8rem;color:var(--success)}
 .tg-how{margin:0}
 .tg-how>div{display:flex;gap:var(--space-4);padding:var(--space-2) 0;border-top:1px solid var(--border)}
 .tg-how>div:first-child{border-top:0;padding-top:0}
@@ -133,4 +139,25 @@ button.tg-cat{width:100%;padding:0;border:0;background:none;box-shadow:none;text
   .tg-pv>.tg-stubwrap{order:3}.tg-pv>.tg-notes{order:4}
   .tg-f-name{flex:none}
   .tg-go{align-self:stretch}
+}
+.tg-keep{display:inline-flex;align-items:center;flex:none;margin-right:.3em;color:var(--fg-2)}
+.tg-keep .archive-after-ico{width:.85rem;height:.85rem}
+
+/* apply a template to an existing board: the preview of the changes (board.template.apply dryRun) */
+.tg-hsub{font:600 var(--text-md)/1.3 var(--font-sans);color:var(--muted);letter-spacing:0;margin-left:.35rem}
+.tg-diff{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.tg-diff>li{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:var(--space-3);padding:var(--space-3);border-top:1px solid var(--border)}
+.tg-diff>li:first-child{border-top:0}
+.tg-dk{font-weight:700;font-size:var(--text-sm);color:var(--fg-2)}
+.tg-dv{display:flex;flex-direction:column;gap:.2rem;min-width:0;overflow-wrap:anywhere;font-size:var(--text-sm);line-height:1.45}
+.tg-dv small{color:var(--muted);font-size:var(--text-sm)}
+.tg-dv small.tg-removed b{color:var(--fg);font-weight:600}
+.tg-warns{padding:var(--space-3) var(--space-4);border:1px solid var(--warning);border-left-width:4px;border-radius:var(--radius);background:var(--warning-soft)}
+.tg-warns h4{margin:0 0 var(--space-1);font-size:var(--text-sm);font-weight:700}
+.tg-warns ul{margin:0;padding-left:1.1rem;font-size:var(--text-sm);line-height:1.5;color:var(--fg)}
+.tg-undo{flex:1 1 100%;margin:0;font-size:var(--text-sm);line-height:1.45;color:var(--fg)}
+.tg-apopts{display:flex;flex-wrap:wrap;gap:0 var(--space-4);flex:1 1 auto}
+@media (max-width:760px){
+  .tg-diff>li{grid-template-columns:minmax(0,1fr);gap:.2rem}
+  .tg-h .tg-hsub{display:block;margin-left:0;font-size:var(--text-sm)}
 }

@@ -185,21 +185,25 @@ func registerBoardOps() {
 		d.IsSubscribed = boardWatched(e, in.ID)
 		return d, err
 	})
-	ops.Register(ops.Op{Name: "board.create", Summary: "Create a board in a project (project manager)", Method: "POST", Path: "/projects/{projectId}/boards",
+	ops.Register(ops.Op{Name: "board.create", Summary: "Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)", Method: "POST", Path: "/projects/{projectId}/boards",
 		UI: ui("POST", "/projects/{projectId}/boards")}, boardCreate)
 	ops.Register(ops.Op{Name: "board.update", Summary: "Update board name and settings", Method: "PATCH", Path: "/boards/{id}",
 		UI: ui("PATCH", "/boards/{id}")}, boardUpdate)
 	ops.Register(ops.Op{Name: "board.move", Summary: "Reorder a board within its project (project manager)", Method: "POST", Path: "/boards/{id}/move",
 		UI: ui("POST", "/boards/{id}/move")}, boardMove)
-	ops.Register(ops.Op{Name: "board.delete", Summary: "Delete a board and everything on it (project manager)", Method: "DELETE", Path: "/boards/{id}",
+	ops.Register(ops.Op{Name: "board.delete", Summary: "Delete a board and everything on it (project manager or board owner)", Method: "DELETE", Path: "/boards/{id}",
 		UI: ui("DELETE", "/boards/{id}")}, func(e *ops.Env, in BoardGetIn) (Deleted, error) {
 		if err := authz.RequireBoard(e, in.ID, authz.Manage); err != nil {
 			return Deleted{}, err
 		}
-		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM boards WHERE id=?`, in.ID); err != nil {
+		// cards that also live on other boards are taken off this one (a home here moves to their oldest other
+		// placement) instead of being cascade-deleted with it
+		after, err := DeleteBoards(e, []string{in.ID}, nil)
+		if err != nil {
 			return Deleted{}, err
 		}
 		emit(e, "boardDelete", "board.deleted", in.ID, map[string]any{"id": in.ID})
+		after()
 		return Deleted{in.ID}, nil
 	})
 	ops.Register(ops.Op{Name: "board.setPublic", Summary: "Enable/disable anonymous read-only access (and rotate the public token)", Method: "POST", Path: "/boards/{id}/public",
@@ -222,6 +226,7 @@ func registerBoardOps() {
 		return d, err
 	})
 	registerTemplateOps()
+	registerTemplateApplyOp()
 }
 
 func publicBoard(e *ops.Env, token string) (Board, error) {
@@ -270,7 +275,7 @@ func boardList(e *ops.Env, in BoardListIn) ([]Board, error) {
 }
 
 func boardCreate(e *ops.Env, in BoardCreateIn) (Board, error) {
-	if err := authz.RequireProject(e, in.ProjectID, authz.Manage); err != nil {
+	if err := authz.RequireCreateBoard(e, in.ProjectID); err != nil {
 		return Board{}, err
 	}
 	if in.Name == "" {
@@ -314,8 +319,14 @@ func insertBoard(e *ops.Env, tx *sql.Tx, id, projectID, name, view string, pos *
 		return err
 	}
 	if e.User != nil {
+		// The creator joins the board: an editor when they already manage it through the project, otherwise its
+		// owner (Manage on this board only), so a project member who creates a board can run it.
+		role := authz.RoleOwner
+		if authz.ProjectLevel(e, projectID) >= authz.Manage {
+			role = authz.RoleEditor
+		}
 		if _, err := tx.ExecContext(e.Ctx, `INSERT INTO board_memberships(id,board_id,user_id,role,created_at) VALUES(?,?,?,?,?)`,
-			db.NewID(), id, e.User.UserID, "editor", now); err != nil {
+			db.NewID(), id, e.User.UserID, role, now); err != nil {
 			return err
 		}
 	}
@@ -338,7 +349,7 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 		add("name", *in.Name)
 	}
 	if in.Position != nil {
-		if authz.BoardLevel(e, in.ID) < authz.Manage {
+		if !canOrderBoards(e, in.ID) {
 			return Board{}, ops.Forbidden()
 		}
 		add("position", *in.Position)
@@ -410,9 +421,20 @@ func join(s []string) string {
 	return out
 }
 
+// canOrderBoards: the order of a project's boards belongs to the project, so only project managers (and admins)
+// change it; a board owner manages their board, not the project's layout.
+func canOrderBoards(e *ops.Env, boardID string) bool {
+	var pid string
+	_ = e.DB.QueryRowContext(e.Ctx, `SELECT project_id FROM boards WHERE id=?`, boardID).Scan(&pid)
+	return pid != "" && authz.ProjectLevel(e, pid) >= authz.Manage
+}
+
 func boardMove(e *ops.Env, in BoardMoveIn) (Board, error) {
 	if err := authz.RequireBoard(e, in.ID, authz.Manage); err != nil {
 		return Board{}, err
+	}
+	if !canOrderBoards(e, in.ID) {
+		return Board{}, ops.Forbidden()
 	}
 	b, err := GetBoard(e.Ctx, e.DB, in.ID)
 	if err != nil {

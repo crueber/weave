@@ -79,6 +79,9 @@ type QuickData struct {
 	P      *PageData
 	T      Tile
 	Labels []QuickLabel
+	// CanRemove: "Remove from this board" (authz.CardCaps.CanRemoveFromBoard on this board: card.unplace's rule, and
+	// the card stays on another board the caller can see). The archive wording uses T.AlsoOn (the other boards).
+	CanRemove bool
 }
 
 // shell builds the page data a fragment needs (permissions, board, labels) without loading any cards.
@@ -87,8 +90,8 @@ func shell(c *web.Ctx, boardID string) (*PageData, error) {
 	if err != nil {
 		return nil, err
 	}
-	lvl := authz.BoardLevel(c.Env, boardID)
-	pd := &PageData{Board: d.Board, Level: levelName(lvl), CanEdit: lvl >= authz.Edit, CanManage: lvl >= authz.Manage, PageURL: "/boards/" + boardID, View: "kanban"}
+	caps := authz.Board(c.Env, boardID)
+	pd := &PageData{Board: d.Board, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, PageURL: "/boards/" + boardID, View: "kanban"}
 	if pd.Labels, err = labelsOf(c.Env, boardID); err != nil {
 		return nil, err
 	}
@@ -129,15 +132,12 @@ func trigger(c *web.Ctx, name string, detail any) {
 	c.W.Header().Set("HX-Trigger", string(b))
 }
 
+// boardOfCard is the board a quick edit renders the card's tile for: the request's context board (?board= or the
+// form field board) when the card is placed there and the caller can view it, else the default context (the home
+// when viewable). A card on several boards must re-render on the board the user is looking at.
 func boardOfCard(c *web.Ctx, cardID string) (string, error) {
-	var b string
-	if err := c.Env.DB.QueryRowContext(c.R.Context(), `SELECT board_id FROM cards WHERE id=?`, cardID).Scan(&b); err != nil {
-		return "", ops.NotFound("card")
-	}
-	if err := authz.RequireBoard(c.Env, b, authz.View); err != nil {
-		return "", err
-	}
-	return b, nil
+	a, err := authz.CardAccessFor(c.Env, cardID, c.BoardHint())
+	return a.BoardID, err
 }
 
 // tilesFor loads the tiles of the given cards (in board order).
@@ -185,14 +185,18 @@ func registerQuick() {
 		top := c.R.Form.Get("top") == "1"
 		first, prev := "", ""
 		if top {
-			_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT id FROM cards WHERE list_id=? AND is_draft=0 AND is_template=0 ORDER BY position, id LIMIT 1`, listID).Scan(&first)
+			_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.list_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, c.id LIMIT 1`, listID).Scan(&first)
 		}
 		var ids []string
 		var failure error
 		for _, n := range names {
 			form := url.Values{"listId": {listID}, "name": {n}}
 			if top && first != "" {
-				pos := PlaceBetween(c.R.Context(), c.Env.DB, "cards", "list_id=?", []any{listID}, prev, first)
+				pos, err := PlaceCardBetween(c.R.Context(), c.Env.DB, listID, "", prev, first)
+				if err != nil {
+					failure = err
+					break
+				}
 				form.Set("position", fmt.Sprint(pos))
 			}
 			out, err := CallByForm(c.Env, "card.create", form)
@@ -320,23 +324,43 @@ func registerQuick() {
 		if c.R.Form.Get("on") == "0" {
 			op = "card.label.remove"
 		}
-		if _, err := CallByForm(c.Env, op, url.Values{"id": {id}, "cardId": {id}, "labelId": {c.R.Form.Get("labelId")}}); err != nil {
+		board, err := boardOfCard(c, id) // labels belong to the tile's board (the card may be on several)
+		if err != nil {
 			return err
+		}
+		if _, err := CallByForm(c.Env, op, url.Values{"id": {id}, "cardId": {id}, "labelId": {c.R.Form.Get("labelId")}, "boardId": {board}}); err != nil {
+			return err
+		}
+		if c.R.Form.Get("_part") == "labels" { // the keyboard label picker (shortcut L) re-renders itself
+			return renderPicker(c, id, "labels")
 		}
 		return renderQuick(c, id, true)
 	})
+	// trash=1 moves the card to the trash list instead (the board's Delete shortcut); both offer Undo.
 	web.Route("POST /ui/cards/{id}/quick/archive", func(c *web.Ctx) error {
 		id := c.R.PathValue("id")
 		if _, err := boardOfCard(c, id); err != nil {
 			return err
 		}
-		if _, err := CallByForm(c.Env, "card.archive", url.Values{"id": {id}}); err != nil {
+		_ = c.R.ParseForm()
+		trash := c.R.Form.Get("trash") == "1" || c.R.Form.Get("trash") == "true"
+		if _, err := CallByForm(c.Env, "card.archive", url.Values{"id": {id}, "trash": {fmt.Sprint(trash)}}); err != nil {
 			return err
 		}
-		trigger(c, "boards:undo", map[string]any{"msg": "Card archived", "url": "/ui/cards/" + id + "/quick/restore", "id": id})
+		msg := "Card archived"
+		if trash {
+			msg = "Card moved to trash"
+		}
+		trigger(c, "boards:undo", map[string]any{"msg": msg, "url": "/ui/cards/" + id + "/quick/restore", "id": id})
 		c.W.WriteHeader(http.StatusNoContent)
 		return nil
 	})
+	// Keyboard pickers for the card shortcuts (boards_cardkeys.js): L labels, d due date, p location. Each is a
+	// fragment for #boards-pop; the pickers post to the existing routes (quick/label, due, location).
+	for _, kind := range []string{"labels", "due", "place"} {
+		kind := kind
+		web.Route("GET /ui/cards/{id}/quick/"+kind, func(c *web.Ctx) error { return renderPicker(c, c.R.PathValue("id"), kind) })
+	}
 	web.Route("POST /ui/cards/{id}/quick/restore", func(c *web.Ctx) error {
 		id := c.R.PathValue("id")
 		if _, err := CallByForm(c.Env, "card.restore", url.Values{"id": {id}}); err != nil {
@@ -367,32 +391,73 @@ func renderTile(c *web.Ctx, id, block string) error {
 	return c.RenderBlock("boards_board.html", block, TilesData{P: pd, Tiles: tiles})
 }
 
-func renderQuick(c *web.Ctx, id string, oob bool) error {
+// PickerData feeds the keyboard pickers (labels / due date / location) of the card shortcuts.
+type PickerData struct {
+	QuickData
+	Kind     string
+	DueValue string // the due date as a datetime-local value (UTC wall time, like the card sheet), "" when none
+	Lat, Lng string // the location, "" when none
+	Place    string // the location's name
+}
+
+func quickData(c *web.Ctx, id string) (QuickData, error) {
 	boardID, err := boardOfCard(c, id)
 	if err != nil {
-		return err
+		return QuickData{}, err
 	}
 	pd, err := shell(c, boardID)
 	if err != nil {
-		return err
+		return QuickData{}, err
 	}
-	if !pd.CanEdit {
-		return ops.Forbidden()
+	cc := authz.Card(c.Env, id)
+	if !pd.CanEdit && !cc.CanEdit { // a worker edits the cards they are a member of
+		return QuickData{}, ops.Forbidden()
 	}
 	tiles, err := tilesFor(c, pd, []string{id})
 	if err != nil {
-		return err
+		return QuickData{}, err
 	}
 	if len(tiles) == 0 {
-		return ops.NotFound("card")
+		return QuickData{}, ops.NotFound("card")
 	}
-	qd := QuickData{P: pd, T: tiles[0]}
+	qd := QuickData{P: pd, T: tiles[0], CanRemove: cc.CanRemoveFromBoard(boardID)}
 	for _, l := range pd.Labels {
 		on := false
 		for _, tl := range tiles[0].Labels {
 			on = on || tl.ID == l.ID
 		}
 		qd.Labels = append(qd.Labels, QuickLabel{Label: l, On: on})
+	}
+	return qd, nil
+}
+
+func renderPicker(c *web.Ctx, id, kind string) error {
+	qd, err := quickData(c, id)
+	if err != nil {
+		return err
+	}
+	d := PickerData{QuickData: qd, Kind: kind}
+	if t, ok := parseTime(qd.T.DueRaw); ok {
+		d.DueValue = t.UTC().Format("2006-01-02T15:04")
+	}
+	if kind == "place" { // read-only over the cards table, like the tile loader
+		var lat, lng *float64
+		var name *string
+		_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT lat,lng,location_name FROM cards WHERE id=?`, id).Scan(&lat, &lng, &name)
+		if lat != nil && lng != nil {
+			d.Lat, d.Lng = fmt.Sprint(*lat), fmt.Sprint(*lng)
+		}
+		if name != nil {
+			d.Place = *name
+		}
+	}
+	return c.RenderBlock("boards_board.html", "boards_kpick", d)
+}
+
+func renderQuick(c *web.Ctx, id string, oob bool) error {
+	qd, err := quickData(c, id)
+	if err != nil {
+		return err
 	}
 	block := "boards_quick"
 	if oob {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/ops"
 )
 
@@ -90,7 +91,19 @@ func loginURL(r *http.Request) string {
 	return "/login"
 }
 
-// Fail renders an error: htmx requests get a toast fragment with the right status.
+// pageNavigation: a path a person opens as a page (not a fragment, file, image or download), so an error there gets
+// the layout with a styled message instead of a bare toast.
+func pageNavigation(p string) bool {
+	for _, pre := range []string{"/ui/", "/attachments/", "/avatars/", "/static/", "/export/", "/media/"} {
+		if strings.HasPrefix(p, pre) {
+			return false
+		}
+	}
+	return !strings.HasSuffix(p, "/media") && !strings.HasSuffix(p, "/thumbnail")
+}
+
+// Fail renders an error: htmx requests get a toast fragment with the right status; a page someone navigated to gets
+// the layout with a "not found" / "not allowed" message.
 func (c *Ctx) Fail(err error) {
 	status, msg := 500, "internal error"
 	if e, ok := err.(*ops.Error); ok {
@@ -108,6 +121,24 @@ func (c *Ctx) Fail(err error) {
 		}
 		return
 	}
+	// a full page someone navigated to (a link, a bookmark) gets a real page in the layout, not a bare toast
+	if (status == 403 || status == 404) && !c.IsHTMX() && c.R.Method == "GET" && c.Env != nil && c.Env.User != nil && pageNavigation(c.R.URL.Path) {
+		title := "Not found"
+		if status == 403 {
+			title = "Not allowed"
+		}
+		c.W.Header().Set("Content-Type", "text/html; charset=utf-8")
+		c.W.WriteHeader(status)
+		if msg == "" {
+			msg = title
+		}
+		msg = strings.ToUpper(msg[:1]) + msg[1:]
+		if err := c.RenderBlock("web_error.html", "page", map[string]any{"Title": title, "Msg": msg, "NotFound": status == 404}); err == nil {
+			return
+		}
+		fmt.Fprintf(c.W, `<p>%s</p>`, template.HTMLEscapeString(msg))
+		return
+	}
 	c.W.Header().Set("HX-Retarget", "#toasts")
 	c.W.Header().Set("HX-Reswap", "beforeend")
 	c.W.WriteHeader(status)
@@ -116,6 +147,28 @@ func (c *Ctx) Fail(err error) {
 
 // Bind builds an op input from the request using the op's own struct tags.
 func (c *Ctx) Bind(op string) (any, error) { return ops.Get(op).Bind(c.R) }
+
+// BoardHint is the context board a card fragment was asked for (docs/DESIGN.md "Placements"): the query parameter
+// board, else a form field board (the card sheet carries it on every request through an inherited hx-vals). It is
+// only a HINT: pass it to authz.CardAccessFor (or an op's boardId) and render the board that resolves, never this raw
+// value, so a board the caller cannot see is ignored. The field is named board, not boardId, so it never binds into
+// an op input that has a boardId of its own (customfieldgroup.create would make a board-wide group). A multipart body
+// is not parsed here (its op binding parses it with the op's own limits); it is read only when already parsed.
+func (c *Ctx) BoardHint() string {
+	if v := c.R.URL.Query().Get("board"); v != "" {
+		return v
+	}
+	if c.R.Method != http.MethodPost {
+		return ""
+	}
+	if c.R.Form == nil && !strings.HasPrefix(c.R.Header.Get("Content-Type"), "multipart/") {
+		_ = c.R.ParseForm()
+	}
+	if c.R.Form == nil {
+		return ""
+	}
+	return c.R.Form.Get("board")
+}
 
 // Do binds the request to op's input and calls it (the standard UI mutation path).
 func (c *Ctx) Do(op string) (any, error) {
@@ -211,7 +264,7 @@ func (c *Ctx) RenderBlock(page, block string, data any) error {
 	if block == "page" && !c.IsHTMX() {
 		name = "layout"
 	}
-	if err := t.ExecuteTemplate(&buf, name, pageData{Data: data, User: c.Env.User, Page: page}); err != nil {
+	if err := t.ExecuteTemplate(&buf, name, pageData{Data: data, User: c.Env.User, Page: page, env: c.Env}); err != nil {
 		return err
 	}
 	c.W.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -223,4 +276,13 @@ type pageData struct {
 	Data any
 	User *ops.Principal
 	Page string
+	env  *ops.Env
+}
+
+// Home is what the layout (top bar, account menu) may offer the caller: authz.Home, never a role check.
+func (p pageData) Home() authz.HomeCaps {
+	if p.env == nil {
+		return authz.HomeCaps{}
+	}
+	return authz.Home(p.env)
 }

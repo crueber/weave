@@ -7,7 +7,7 @@ description: Drive the Weave kanban server from the command line with the `weave
 
 Weave is a self-hosted kanban board. Humans use the browser (OIDC login); **agents and scripts use the
 `weave` CLI with an API key**. Everything the browser can do is an *op*; the CLI is generated from the
-server's op schema (239 ops in this skill's snapshot), so `weave ops` always shows what your
+server's op schema (249 ops in this skill's snapshot), so `weave ops` always shows what your
 server supports. This file is the short version; read `references/commands.md` for every command,
 `references/agent-workflows.md` for end-to-end agent patterns and `references/events.md` for the
 event stream.
@@ -159,6 +159,13 @@ the error tail, release, optional `--fail-list`). The lease is renewed automatic
 - Finish with `weave card done CARD --note "result" --to-list Review` (comment, move, release) or `weave card release CARD` when giving up.
 - Never work on a card claimed by someone else, and never claim more cards than you can handle at once.
 - Handlers must be **idempotent**: events are delivered at least once. Re-check state (`weave card show`) before acting.
+
+### One card on several boards
+
+A card may be on several boards (the same card: `weave card placements CARD`). Moves, column and labels are per
+board (`card move` moves the placement on the target list's board; pass `--boardId` when ambiguous); everything else
+is the card's, including **closed**, and **archive/trash/delete act on every board**. `card unplace CARD BOARD`
+("Remove from board") takes it off one board only. Details: `references/commands.md` "One card on several boards".
 
 ## 7. Safe defaults
 

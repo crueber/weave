@@ -27,12 +27,12 @@ func ids(l []*User) map[string]bool {
 func TestGuestsAndWorkersOnlySeeSharedBoardAccounts(t *testing.T) {
 	e := newEnv(t)
 	admin := mkUser(t, e, "admin@x.io", "admin")
-	owner := mkUser(t, e, "owner@x.io", "projectOwner")
+	owner := mkUser(t, e, "owner@x.io", "boardUser")
 	guest := mkUser(t, e, "guest@x.io", "guest")
 	worker := mkUser(t, e, "worker@x.io", "worker")
-	mate := mkUser(t, e, "mate@x.io", "boardUser")      // shares board b1 with the guest
-	viaGroup := mkUser(t, e, "grp@x.io", "boardUser")   // member of group g1 which is on b1
-	manager := mkUser(t, e, "mgr@x.io", "projectOwner") // manages the project of b1
+	mate := mkUser(t, e, "mate@x.io", "boardUser")    // shares board b1 with the guest
+	viaGroup := mkUser(t, e, "grp@x.io", "boardUser") // member of group g1 which is on b1
+	manager := mkUser(t, e, "mgr@x.io", "boardUser")  // manages the project of b1
 	stranger := mkUser(t, e, "stranger@x.io", "boardUser")
 	loner := mkUser(t, e, "loner@x.io", "boardUser") // only on b2 (a board nobody restricted can see)
 
@@ -92,7 +92,7 @@ func TestGuestsAndWorkersOnlySeeSharedBoardAccounts(t *testing.T) {
 	call[*Group](t, gc, "group.get", GroupIDIn{ID: "g1"})
 
 	// everyone else keeps the full directory
-	for name, who := range map[string]*ops.Principal{"admin": admin, "projectOwner": owner, "boardUser": stranger} {
+	for name, who := range map[string]*ops.Principal{"admin": admin, "boardUser (owner)": owner, "boardUser": stranger} {
 		c := asUser(e, who)
 		if n := len(call[UserList](t, c, "user.list", ListIn{}).Items); n != 9 {
 			t.Errorf("%s sees %d users, want 9", name, n)

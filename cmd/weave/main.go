@@ -45,6 +45,12 @@ func main() {
 	if len(os.Args) > 2 && os.Args[1] == "admin" && os.Args[2] == "relink" {
 		os.Exit(relink(os.Args[3:]))
 	}
+	if len(os.Args) > 2 && os.Args[1] == "admin" && os.Args[2] == "preflight" {
+		os.Exit(preflight(os.Args[3:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 2 && os.Args[1] == "admin" && os.Args[2] == "adopt" {
+		os.Exit(adopt(os.Args[3:], os.Stdout, os.Stderr))
+	}
 	os.Exit(cli.Main(os.Args[1:]))
 }
 
@@ -125,12 +131,12 @@ func mintKey(args []string) int {
 				role = args[i]
 			}
 		default:
-			fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|projectOwner|boardUser|worker|guest]")
+			fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|boardUser|worker|guest]")
 			return 2
 		}
 	}
 	if email == "" {
-		fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|projectOwner|boardUser|worker|guest]")
+		fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|boardUser|worker|guest]")
 		return 2
 	}
 	cfg := config.Load()

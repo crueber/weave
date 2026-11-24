@@ -58,7 +58,7 @@
           <source src="demo.webm" type="video/webm">
           <a href="demo.webm">Download the demo video (WebM)</a>
         </video>
-        <figcaption id="video-cap">A one-minute tour: adding cards, drag and drop, the card sheet, WIP limits, filters, the list, calendar and map views, the template gallery, Connect an agent, settings, then the dark theme and a phone. No sound.</figcaption>
+        <figcaption id="video-cap">A one-minute tour: the board and its Inbox, drag and drop, the card sheet, keyboard shortcuts, one card on two boards, column rules, the live notification bell, Pulse cards, applying a template to a board, Connect an agent, agents and webhooks in board settings, then the dark theme and a phone. No sound.</figcaption>
       </figure>
     </div>
   </section>
@@ -138,6 +138,7 @@
           <ul class="ticks">
             <li>Drag with a mouse or move cards from the keyboard; <kbd>?</kbd> shows every shortcut.</li>
             <li>Card details open only when you ask: description, checklists, comments with mentions, attachments, custom fields and time tracking.</li>
+            <li>One card, several boards: put a card on another team's board too (<kbd>b</kbd>). Each board keeps its own column and labels, and the card shows where else it lives.</li>
             <li>The project page gives each board a Pulse card (see <a href="#screens">Screens</a>): open cards per column, what is overdue or due this week, what is claimed and which agents are listening.</li>
           </ul>
           <p class="start">Start from <strong>Sprint (Scrum)</strong>: Backlog, Sprint, In progress and Review with WIP limits, Done, and Bug, Feature, Chore and Spike labels. Pair it with <strong>Bug tracker</strong> and <strong>Software release checklist</strong>.</p>
@@ -251,7 +252,10 @@ weave skill install --target cursor --mcp</code></pre>
       </header>
       <ul class="feat-grid">
         <li class="feat"><h3>Views</h3><p>Kanban, list, grid, calendar (drag to reschedule) and a map of cards with a location. Number keys switch between them.</p></li>
-        <li class="feat"><h3>Templates</h3><p>A gallery of starter boards with previews and sample cards, and your own boards published as templates.</p></li>
+        <li class="feat"><h3>Templates</h3><p>A gallery of starter boards with previews and sample cards, and your own boards published as templates. Apply one to a board you already have, after a preview of exactly what changes.</p></li>
+        <li class="feat"><h3>One card, several boards</h3><p>The same card, not a copy, on the boards of every team that follows it. Each board keeps its own column, labels and column rules.</p></li>
+        <li class="feat"><h3>Column rules</h3><p>A soft WIP limit, close cards that land in a column, and keep only the newest cards: older ones go to the archive, ready to restore.</p></li>
+        <li class="feat"><h3>Owners run their own</h3><p>People own the projects and boards they create, with their own agents and webhooks. The admin console runs the instance; admins see only the projects and boards they belong to.</p></li>
         <li class="feat"><h3>Custom fields</h3><p>Text, number, date, checkbox, select and link fields, on the card face if you like, including repeating groups.</p></li>
         <li class="feat"><h3>Recurring cards</h3><p>Daily, weekly on chosen days, monthly or yearly, counted from the due date or from completion.</p></li>
         <li class="feat"><h3>Notifications and webhooks</h3><p>In-app, email and chat services such as Slack, Discord, Telegram, Matrix and ntfy. Signed webhooks with retries and a delivery log.</p></li>
@@ -325,6 +329,8 @@ curl -fsSL https://github.com/crueber/weave/releases/latest/download/install.sh 
           <figure><img src="img/platform-light-1280.webp" srcset="img/platform-light-640.webp 640w, img/platform-light-1280.webp 1280w" sizes="(min-width: 800px) 530px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board in the light theme."><figcaption>A sprint board with WIP limits and an agent's claim</figcaption></figure>
           <figure><img src="img/calendar-light-1280.webp" srcset="img/calendar-light-640.webp 640w, img/calendar-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="The calendar view of a project timeline."><figcaption>Calendar view</figcaption></figure>
           <figure><img src="img/claim-light-1280.webp" srcset="img/claim-light-640.webp 640w, img/claim-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="A card sheet with description, checklists, attachments, comments, custom fields and time tracking."><figcaption>The card sheet</figcaption></figure>
+          <figure><img src="img/multiboard-light-1280.webp" srcset="img/multiboard-light-640.webp 640w, img/multiboard-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The card sheet of Apollo 2.0 launch checklist: its Boards row lists Apollo Platform (home) and Release 2.0 checklist, and the Add to board picker offers the other boards."><figcaption>One card on two boards</figcaption></figure>
+          <figure><img src="img/rules-light-1280.webp" srcset="img/rules-light-640.webp 640w, img/rules-light-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The column sheet of Done: Auto-close is on and Auto-archive keeps the newest 20 cards."><figcaption>Column rules: auto-close and keep the newest N</figcaption></figure>
           <figure class="gal-phone"><img src="img/phone-light.webp" width="390" height="800" loading="lazy" decoding="async" alt="The board on a phone: one column at a time, showing In progress at its limit of 4."><figcaption>On a phone</figcaption></figure>
         </div>
       </div>
@@ -335,6 +341,8 @@ curl -fsSL https://github.com/crueber/weave/releases/latest/download/install.sh 
           <figure><img src="img/platform-dark-1280.webp" srcset="img/platform-dark-640.webp 640w, img/platform-dark-1280.webp 1280w" sizes="(min-width: 800px) 530px, calc(100vw - 32px)" width="1280" height="588" loading="lazy" decoding="async" alt="The Apollo Platform board in the dark theme."><figcaption>A sprint board with WIP limits and an agent's claim</figcaption></figure>
           <figure><img src="img/calendar-dark-1280.webp" srcset="img/calendar-dark-640.webp 640w, img/calendar-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="720" loading="lazy" decoding="async" alt="The calendar view in the dark theme."><figcaption>Calendar view</figcaption></figure>
           <figure><img src="img/claim-dark-1280.webp" srcset="img/claim-dark-640.webp 640w, img/claim-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The card sheet in the dark theme."><figcaption>The card sheet</figcaption></figure>
+          <figure><img src="img/multiboard-dark-1280.webp" srcset="img/multiboard-dark-640.webp 640w, img/multiboard-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The card sheet of Apollo 2.0 launch checklist in the dark theme: its Boards row lists Apollo Platform (home) and Release 2.0 checklist, and the Add to board picker offers the other boards."><figcaption>One card on two boards</figcaption></figure>
+          <figure><img src="img/rules-dark-1280.webp" srcset="img/rules-dark-640.webp 640w, img/rules-dark-1280.webp 1280w" sizes="(min-width: 800px) 500px, calc(100vw - 32px)" width="1280" height="800" loading="lazy" decoding="async" alt="The column sheet of Done in the dark theme: Auto-close is on and Auto-archive keeps the newest 20 cards."><figcaption>Column rules: auto-close and keep the newest N</figcaption></figure>
           <figure class="gal-phone"><img src="img/phone-dark.webp" width="390" height="800" loading="lazy" decoding="async" alt="The board on a phone in the dark theme."><figcaption>On a phone</figcaption></figure>
         </div>
       </div>

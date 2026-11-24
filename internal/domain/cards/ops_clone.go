@@ -24,13 +24,18 @@ type cloneOpts struct {
 	IsDraft    bool
 	TemplateOf *string // template_project_id
 	SkipExtras bool
+	// Also are further placements of the copy (a recurrence spawn copies every board the card is on): one Landing per
+	// other board's column. The copy's labels and members are then those any of its boards allows.
+	Also []boards.Landing
 }
 
-// cloneCard copies a card into a list inside tx and returns the new id.
-func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, error) {
-	boardID, ltype, err := listRef(e.Ctx, tx, o.ListID)
+// cloneCard copies a card into a list inside tx and returns the new id, plus what the column's archive-after rule
+// archived to make room (emit it with boards.EmitAutoArchived after the commit).
+func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, boards.LandResult, error) {
+	var landed boards.LandResult
+	boardID, _, err := listRef(e.Ctx, tx, o.ListID)
 	if err != nil {
-		return "", err
+		return "", landed, err
 	}
 	id, now := db.NewID(), db.Now()
 	var creator any
@@ -39,19 +44,51 @@ func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, error) {
 	} else if src.CreatorUserID != nil {
 		creator = *src.CreatorUserID
 	}
-	_, err = tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_closed,is_draft,is_template,
-		lat,lng,location_name,recurrence,list_changed_at,created_at,template_project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, boardID, o.ListID, creator, o.Position, o.Name, src.Description, o.DueDate, ltype == "closed", o.IsDraft, o.IsTemplate,
+	_, err = tx.ExecContext(e.Ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_draft,is_template,
+		lat,lng,location_name,recurrence,list_changed_at,created_at,template_project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, boardID, o.ListID, creator, o.Position, o.Name, src.Description, o.DueDate, o.IsDraft, o.IsTemplate,
 		src.Lat, src.Lng, src.LocationName, o.Recurrence, now, now, o.TemplateOf)
 	if err != nil {
-		return "", err
+		return "", landed, err
 	}
-	for _, l := range src.LabelIDs {
-		if labelAllowed(e.Ctx, tx, boardID, l) {
-			_, _ = tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?,?)`, id, l)
+	lands := []boards.Landing{{CardID: id, ListID: o.ListID}}
+	onBoards := []string{boardID}
+	labelIDs := src.LabelIDs
+	for _, x := range o.Also {
+		b, _, err := listRef(e.Ctx, tx, x.ListID)
+		if err != nil {
+			return "", landed, err
+		}
+		pos := endPos(e.Ctx, tx, x.ListID)
+		if _, err := tx.ExecContext(e.Ctx, `INSERT INTO card_placements(card_id,board_id,list_id,position,list_changed_at,is_home,placed_by,placed_at) VALUES(?,?,?,?,?,0,?,?)`,
+			id, b, x.ListID, pos, now, creator, now); err != nil {
+			return "", landed, err
+		}
+		lands = append(lands, boards.Landing{CardID: id, ListID: x.ListID})
+		onBoards = append(onBoards, b)
+	}
+	if len(o.Also) > 0 { // the source's labels of every board (src.LabelIDs is one board's)
+		labelIDs = strs(e, tx, `SELECT label_id FROM card_labels WHERE card_id=? ORDER BY label_id`, src.ID)
+	}
+	// duplicate, from-template and recurrence land a card in a column (drafts and templates are skipped by Landed);
+	// with several placements the closing columns land last (one closes the card)
+	if landed, err = boards.Landed(e.Ctx, tx, orderLandings(e.Ctx, tx, lands)...); err != nil {
+		return "", landed, err
+	}
+	for _, l := range labelIDs {
+		for _, b := range onBoards {
+			if labelAllowed(e.Ctx, tx, b, l) {
+				_, _ = tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?,?)`, id, l)
+				break
+			}
 		}
 	}
-	members := boardMemberIDs(e.Ctx, tx, boardID)
+	members := map[string]bool{}
+	for _, b := range onBoards {
+		for u := range boardMemberIDs(e.Ctx, tx, b) {
+			members[u] = true
+		}
+	}
 	for _, u := range src.MemberIDs {
 		if members[u] {
 			_, _ = tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_memberships(card_id,user_id) VALUES(?,?)`, id, u)
@@ -63,19 +100,31 @@ func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, error) {
 	if !o.SkipExtras {
 		for _, h := range DuplicateHooks {
 			if err := h(e, tx, src.ID, id); err != nil {
-				return "", err
+				return "", landed, err
 			}
 		}
 	}
-	return id, nil
+	return id, landed, nil
 }
 
+// cardDuplicate copies a card next to itself on ONE board, the context board (boardId, else the home when visible):
+// the copy is placed on that board only, with that board's labels and members.
 func cardDuplicate(e *ops.Env, in DuplicateIn) (Card, error) {
-	boardID, err := editCard(e, in.ID)
+	a, err := authz.CardEditAccess(e, in.ID, in.BoardID)
 	if err != nil {
 		return Card{}, err
 	}
-	src, err := loadCard(e, e.DB, in.ID)
+	boardID := a.BoardID
+	if in.BoardID != "" && boardID != in.BoardID {
+		return Card{}, ops.NotFound("card")
+	}
+	if in.BoardID == "" {
+		boardID = editContext(a)
+	}
+	if !a.EditableOn(boardID) { // the copy is a new card on that board
+		return Card{}, ops.Forbidden()
+	}
+	src, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err != nil {
 		return src, err
 	}
@@ -87,14 +136,17 @@ func cardDuplicate(e *ops.Env, in DuplicateIn) (Card, error) {
 		name = src.Name + " (copy)"
 	}
 	var newID string
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		after := ""
 		if !src.IsDraft {
 			after = src.ID
 		}
-		pos := positionFor(e.Ctx, tx, src.ListID, "", after, "", nil)
-		var err error
-		newID, err = cloneCard(e, tx, src, cloneOpts{Name: name, ListID: src.ListID, Position: pos, DueDate: src.DueDate, Recurrence: src.Recurrence, IsDraft: src.IsDraft})
+		pos, err := positionFor(e.Ctx, tx, src.ListID, "", after, "", nil)
+		if err != nil {
+			return err
+		}
+		newID, landed, err = cloneCard(e, tx, src, cloneOpts{Name: name, ListID: src.ListID, Position: pos, DueDate: src.DueDate, Recurrence: src.Recurrence, IsDraft: src.IsDraft})
 		return err
 	})
 	if err != nil {
@@ -104,6 +156,7 @@ func cardDuplicate(e *ops.Env, in DuplicateIn) (Card, error) {
 	if err == nil {
 		emit(e, "cardCreate", "card.created", boardID, newID, map[string]any{"card": c, "listId": c.ListID, "duplicatedFrom": in.ID})
 	}
+	boards.EmitAutoArchived(e, landed)
 	return c, err
 }
 
@@ -143,7 +196,7 @@ func templateSave(e *ops.Env, in TemplateSaveIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	src, err := loadCard(e, e.DB, in.ID)
+	src, err := loadCardOn(e, e.DB, in.ID, boardID) // the template belongs to the context board's project
 	if err != nil {
 		return src, err
 	}
@@ -158,7 +211,7 @@ func templateSave(e *ops.Env, in TemplateSaveIn) (Card, error) {
 	var newID string
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		var err error
-		newID, err = cloneCard(e, tx, src, cloneOpts{Name: name, ListID: src.ListID, Position: 0, IsTemplate: true, TemplateOf: &proj})
+		newID, _, err = cloneCard(e, tx, src, cloneOpts{Name: name, ListID: src.ListID, Position: 0, IsTemplate: true, TemplateOf: &proj}) // a template never lands
 		return err
 	})
 	if err != nil {
@@ -207,10 +260,13 @@ func fromTemplate(e *ops.Env, in FromTemplateIn) (Card, error) {
 		name = tpl.Name
 	}
 	var newID string
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		pos := positionFor(e.Ctx, tx, in.ListID, "", "", "", in.Position)
-		var err error
-		newID, err = cloneCard(e, tx, tpl, cloneOpts{Name: name, ListID: in.ListID, Position: pos})
+		pos, err := positionFor(e.Ctx, tx, in.ListID, "", "", "", in.Position)
+		if err != nil {
+			return err
+		}
+		newID, landed, err = cloneCard(e, tx, tpl, cloneOpts{Name: name, ListID: in.ListID, Position: pos})
 		return err
 	})
 	if err != nil {
@@ -220,6 +276,7 @@ func fromTemplate(e *ops.Env, in FromTemplateIn) (Card, error) {
 	if err == nil {
 		emit(e, "cardCreate", "card.created", boardID, newID, map[string]any{"card": c, "listId": in.ListID, "templateId": in.ID})
 	}
+	boards.EmitAutoArchived(e, landed)
 	return c, err
 }
 
@@ -374,11 +431,23 @@ func draftPublish(e *ops.Env, in PublishIn) (Card, error) {
 	if lt != "active" && lt != "closed" {
 		return c, ops.Invalid("drafts can only be published into active or closed lists")
 	}
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		pos := positionFor(e.Ctx, tx, in.ListID, in.ID, "", "", in.Position)
+		pos, err := positionFor(e.Ctx, tx, in.ListID, in.ID, "", "", in.Position)
+		if err != nil {
+			return err
+		}
 		now := db.Now()
-		_, err := tx.ExecContext(e.Ctx, `UPDATE cards SET is_draft=0,list_id=?,board_id=?,position=?,is_closed=?,list_changed_at=?,updated_at=? WHERE id=?`,
-			in.ListID, lb, pos, lt == "closed", now, now, in.ID)
+		// the placement first (its board may change: the mirror re-homes the card), then the card's own fields;
+		// is_draft=0 reindexes the card for search under its new board
+		if err := onePlacement(tx.ExecContext(e.Ctx, `UPDATE card_placements SET board_id=?,list_id=?,position=?,list_changed_at=? WHERE card_id=? AND is_home=1`,
+			lb, in.ListID, pos, now, in.ID)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET is_draft=0,updated_at=? WHERE id=?`, now, in.ID); err != nil {
+			return err
+		}
+		landed, err = boards.Landed(e.Ctx, tx, boards.Landing{CardID: in.ID, ListID: in.ListID}) // after is_draft=0
 		return err
 	})
 	if err != nil {
@@ -387,10 +456,11 @@ func draftPublish(e *ops.Env, in PublishIn) (Card, error) {
 	c, err = loadCard(e, e.DB, in.ID)
 	if err == nil {
 		if lb != boardID {
-			emit(e, "cardDelete", "card.deleted", boardID, in.ID, nil)
+			emitScoped(e, "", "cardDelete", "card.deleted", boardID, in.ID, nil, []string{boardID}) // left the draft's board only
 		}
 		emit(e, "cardCreate", "card.created", lb, in.ID, map[string]any{"card": c, "listId": in.ListID, "published": true})
 	}
+	boards.EmitAutoArchived(e, landed)
 	return c, err
 }
 
@@ -417,6 +487,7 @@ type SharedCard struct {
 	ListName       string        `json:"listName"`
 	DueDate        *string       `json:"dueDate"`
 	IsDueCompleted bool          `json:"isDueCompleted"`
+	IsClosed       bool          `json:"isClosed" desc:"the card is closed (done)"`
 	Labels         []SharedLabel `json:"labels"`
 	Members        []string      `json:"members"`
 	LocationName   string        `json:"locationName,omitempty"`
@@ -459,9 +530,9 @@ func shareView(e *ops.Env, in ShareViewIn) (SharedCard, error) {
 	var desc *string
 	var done *bool
 	var err error
-	err = e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.name,c.description,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.lat,c.lng,COALESCE(c.location_name,'')
+	err = e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.name,c.description,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.is_closed,c.lat,c.lng,COALESCE(c.location_name,'')
 		FROM cards c JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id WHERE c.share_token=? AND c.is_template=0`, in.Token).
-		Scan(&id, &out.Name, &desc, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.Lat, &out.Lng, &out.LocationName)
+		Scan(&id, &out.Name, &desc, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.IsClosed, &out.Lat, &out.Lng, &out.LocationName)
 	if err == sql.ErrNoRows || in.Token == "" {
 		return out, ops.NotFound("shared card")
 	}

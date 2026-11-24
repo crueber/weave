@@ -5,13 +5,13 @@
 Every op is callable as `weave <tag> <verb>` (op `a.b.c` is `weave a b.c`). Path fields can be given positionally.
 The server is the source of truth: `weave ops` / `weave schema OP` show what *your* server supports.
 
-Tags: activity, admin, agent, apikey, attachment, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, subscription, system, task, tasklist, time, user, webhook, whoami
+Tags: activity, admin, agent, apikey, attachment, audit, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, subscription, system, task, tasklist, time, user, webhook, whoami
 
 ## activity
 
 ### `weave activity board`
 
-Board activity feed (actions), newest first  
+Board activity feed (actions), newest first. Quiet per-card rows of bulk changes (auto-archive, applying a template) are left out; their summary row is kept and activity.card still lists them  
 `GET /boards/{boardId}/actions` (auth: public)
 
 | flag | in | type | required | description |
@@ -22,12 +22,13 @@ Board activity feed (actions), newest first
 
 ### `weave activity card`
 
-Card activity feed (actions), newest first  
+Card activity feed (actions), newest first. Only what was recorded on boards you can view; an event recorded on several boards (the card is on several) is listed once  
 `GET /cards/{cardId}/actions` (auth: public)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--cardId` | path | string | yes |  |
+| `--boardId` | query | string |  | Context board when the card is on several boards: an event recorded on several boards is listed once, preferably as recorded on this board |
 | `--before` | query | string |  | Action id cursor: return actions older than this one |
 | `--limit` | query | number |  | Page size (default 50, max 200) |
 
@@ -47,33 +48,33 @@ Row counts per entity, storage and version (admin)
 
 ### `weave agent access`
 
-Grant (editor|viewer|commenter) or revoke an agent's access to a board  
-`POST /agents/{id}/access` (auth: admin)
+Grant (editor|viewer|commenter) or revoke an agent's access to a board you manage  
+`POST /agents/{id}/access` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | agent user id |
-| `--boardId` | body | string | yes |  |
+| `--boardId` | body | string | yes | the board; granting needs Manage on it, revoking needs Manage on it or being the agent's creator |
 | `--role` | body | string |  | editor (default) \| viewer \| commenter |
 | `--revoke` | body | bool |  | true removes the agent from the board |
 
 ### `weave agent create`
 
-Create an AI agent account (no login) and return its API key once  
-`POST /agents` (auth: admin)
+Create an AI agent account (no login) for boards you manage and return its API key once  
+`POST /agents` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--name` | body | string | yes | display name shown on cards and in activity |
-| `--boardIds` | body | array<string> |  | boards to grant access to |
-| `--role` | body | string |  | user role: worker (default) \| boardUser \| guest |
+| `--boardIds` | body | array<string> |  | boards to grant access to; you need Manage on each (board owner or project manager). Required unless you are an admin |
+| `--role` | body | string |  | admins only: user role worker \| boardUser (default) \| guest; agents created by board owners are always boardUser |
 | `--boardRole` | body | string |  | access on boardIds: editor (default) \| viewer \| commenter |
 | `--expiresInDays` | body | number |  | optional: the API key stops working after this many days (1-3650); 0 or omitted = never |
 
 ### `weave agent delete`
 
 Delete an agent account; its claims are released  
-`DELETE /agents/{id}` (auth: admin)
+`DELETE /agents/{id}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -81,8 +82,12 @@ Delete an agent account; its claims are released
 
 ### `weave agent list`
 
-List AI agent accounts with their board access  
-`GET /agents` (auth: admin)
+List AI agents you created or that have access to boards you manage (admins: every agent account), with their access on boards you manage  
+`GET /agents` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--boardId` | query | string |  | optional: only agents with access to this board (needs Manage on it) |
 
 ### `weave agent prompt`
 
@@ -113,7 +118,7 @@ Admin: render an editable agent prompt or a shared block with sample data (the s
 ### `weave agent rotateKey`
 
 Issue a new API key for an agent (the old key stops working); returned once  
-`POST /agents/{id}/key` (auth: admin)
+`POST /agents/{id}/key` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -122,14 +127,14 @@ Issue a new API key for an agent (the old key stops working); returned once
 
 ### `weave agent update`
 
-Rename an agent, change its role or deactivate it  
-`PATCH /agents/{id}` (auth: admin)
+Rename an agent or deactivate it (its creator, a manager of all its boards, or an admin; only admins change the role)  
+`PATCH /agents/{id}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--name` | body | string |  |  |
-| `--role` | body | string |  | worker \| boardUser \| guest |
+| `--role` | body | string |  | admins only: worker \| boardUser \| guest |
 | `--isDeactivated` | body | bool |  | true disables the key without deleting the account |
 
 ## apikey
@@ -234,6 +239,19 @@ Rename an attachment
 | `--id` | path | string | yes |  |
 | `--name` | body | string | yes |  |
 
+## audit
+
+### `weave audit list`
+
+Admin audit log, newest first: agent key rotations, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only  
+`GET /audit` (auth: admin)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--action` | query | string |  | only this action: agent.rotateKey \| group.member.add \| user.relink |
+| `--before` | query | string |  | cursor: the nextCursor of the previous page |
+| `--limit` | query | number |  | entries per page (default 50, max 200) |
+
 ## auth
 
 ### `weave auth logout`
@@ -288,7 +306,6 @@ Update the SSO configuration stored in the database (admin; env vars still overr
 | `--usernameClaim` | body | string |  |  |
 | `--groupsClaim` | body | string |  |  |
 | `--adminGroup` | body | string |  |  |
-| `--ownerGroup` | body | string |  |  |
 | `--userGroup` | body | string |  |  |
 | `--workerGroup` | body | string |  |  |
 | `--guestGroup` | body | string |  |  |
@@ -329,7 +346,7 @@ The caller (user, role, isAgent) and every board they can access with their role
 
 ### `weave board create`
 
-Create a board in a project (project manager)  
+Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)  
 `POST /projects/{projectId}/boards` (auth: user)
 
 | flag | in | type | required | description |
@@ -341,7 +358,7 @@ Create a board in a project (project manager)
 
 ### `weave board delete`
 
-Delete a board and everything on it (project manager)  
+Delete a board and everything on it (project manager or board owner)  
 `DELETE /boards/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -369,7 +386,7 @@ Get a board with lists, labels, label groups and members
 
 ### `weave board import`
 
-Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (project manager)  
+Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (whoever may create boards in the project, see board.create)  
 `POST /projects/{projectId}/boards/import` (auth: user)
 
 | flag | in | type | required | description |
@@ -382,7 +399,7 @@ Create a board from a Planka/Weave JSON export, a Trello JSON export or a CSV (p
 
 ### `weave board instantiate`
 
-Create a board in a project from a built-in or published template (project manager)  
+Create a board in a project from a built-in or published template (whoever may create boards there, see board.create)  
 `POST /projects/{projectId}/boards/from-template` (auth: user)
 
 | flag | in | type | required | description |
@@ -413,7 +430,7 @@ Who is listening to any list of this board right now
 
 ### `weave board member.add`
 
-Add a user or user group to a board (project manager)  
+Add a user or user group to a board (project manager or board owner)  
 `POST /boards/{boardId}/members` (auth: user)
 
 | flag | in | type | required | description |
@@ -421,7 +438,7 @@ Add a user or user group to a board (project manager)
 | `--boardId` | path | string | yes |  |
 | `--userId` | body | string |  | user to add (exclusive with groupId) |
 | `--groupId` | body | string |  | user group to add (exclusive with userId) |
-| `--role` | body | string |  | editor (default) \| viewer |
+| `--role` | body | string |  | editor (default) \| viewer \| owner (people only, not groups, guests or agents: manages this board, not the project) |
 | `--canComment` | body | bool |  | viewers only: may comment |
 
 ### `weave board member.list`
@@ -435,7 +452,7 @@ List board memberships (users and groups)
 
 ### `weave board member.remove`
 
-Remove a membership (project manager, or the member themself)  
+Remove a membership (project manager, board owner, or the member themself; the last owner can leave only when a project manager removes them)  
 `DELETE /board-members/{memberId}` (auth: user)
 
 | flag | in | type | required | description |
@@ -444,13 +461,13 @@ Remove a membership (project manager, or the member themself)
 
 ### `weave board member.update`
 
-Change a membership's role / comment permission (project manager)  
+Change a membership's role / comment permission (project manager or board owner; the last owner cannot be downgraded except by a project manager)  
 `PATCH /board-members/{memberId}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--memberId` | path | string | yes |  |
-| `--role` | body | string |  | editor \| viewer |
+| `--role` | body | string |  | editor \| viewer \| owner (people only, not groups, guests or agents: manages this board, not the project) |
 | `--canComment` | body | bool |  | viewers only: may comment |
 
 ### `weave board move`
@@ -503,6 +520,21 @@ Watch a board: get notified about every card on it (created, moved, closed or re
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | board id |
+
+### `weave board template.apply`
+
+Apply a built-in or published template to an existing board (board manager): adds the template's columns on the left, moves every card into its first open column (closed cards stay closed), removes the old, now empty columns (removeOldColumns=false keeps them), adds missing labels, label groups and custom-field groups (never replaces), optionally the board settings and sample cards. dryRun previews; confirm=true applies. No automatic undo  
+`POST /boards/{id}/template/apply` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+| `--templateId` | body | string | yes | builtin:<slug> or the id of a published template board (see board.template.list) |
+| `--dryRun` | body | bool |  | preview only: return exactly what would change and write nothing |
+| `--confirm` | body | bool |  | must be true to apply (not needed for dryRun). Every card moves; there is no automatic undo, so export the board first (board.export) |
+| `--applySettings` | body | bool |  | also apply the template's board settings: colour, card colouring, card counter, card ages, task lists, card creator, inbox, default view (default false; the agent prompt is never applied) |
+| `--includeSampleCards` | body | bool |  | also add the template's sample cards to its columns (default false) |
+| `--removeOldColumns` | body | bool |  | remove the board's old columns once their cards have moved (default true: they are empty by then; their WIP/auto-close/auto-archive settings and column watches go with them). false keeps them, emptied, to the right |
 
 ### `weave board template.get`
 
@@ -580,7 +612,7 @@ Update board name and settings
 
 ### `weave card archive`
 
-Move a card to the board's archive (or trash) list  
+Archive (or trash) a card: it moves to the archive (trash) list of every board it is on  
 `POST /cards/{id}/archive` (auth: user)
 
 | flag | in | type | required | description |
@@ -606,19 +638,20 @@ Claim a card with a lease (409 when someone else holds an unexpired claim); opti
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
-| `--listId` | body | string |  | also move the card to this list when the claim succeeds (e.g. 'In progress') |
+| `--listId` | body | string |  | also move the card to this list when the claim succeeds (e.g. 'In progress'); on a card that is on several boards, a list of a board it is on (that board's placement moves) |
 | `--ttlSeconds` | body | number |  | lease length in seconds (default 900, 10..86400); renew before it ends |
 | `--note` | body | string |  | short free text shown next to the claim |
 
 ### `weave card close`
 
-Close (or re-open) a card; moves to the closed list when the board has one  
+Close (or re-open) a card (closed is per card, on every board); moves it to the closing list of its board when that board has one  
 `POST /cards/{id}/close` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--closed` | body | bool |  | default true; false re-opens |
+| `--boardId` | body | string |  | when the card is on several boards: the board whose placement moves into its closing column (or out of it when re-opening); closed is per card either way. Default: its home board when you can edit there; a board you may not edit there falls back to that default |
 
 ### `weave card cover.set`
 
@@ -645,7 +678,7 @@ Create a card at the end (or given position) of a list
 
 ### `weave card delete`
 
-Delete a card (must be in the trash list, or a draft/template)  
+Delete a card permanently, from every board (it must be in the trash on every board it is on, or be a draft/template)  
 `DELETE /cards/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -703,6 +736,7 @@ Duplicate a card (labels, members, extras via hooks)
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--name` | body | string |  | name of the copy (default '<name> (copy)') |
+| `--boardId` | body | string |  | the board to copy the card on when it is on several boards (the copy is on that board only, next to the card); default: its home board when you can see it |
 
 ### `weave card edit.list`
 
@@ -754,6 +788,7 @@ Get a card with labels, members and claim; full=true adds tasks, comments, attac
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
+| `--boardId` | query | string |  | context board when the card is on several boards: boardId, listId and position (and the labels and board fields shown) describe the card on that board; default: the home board when you can see it, else the board where you have the most access |
 | `--full` | query | bool |  | true adds tasks, comments (last 50), attachments, custom fields and activity (last 50) |
 
 ### `weave card inbox.list`
@@ -784,6 +819,7 @@ Add a label to a card (single-select groups replace the group's other label)
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--labelId` | body | string | yes |  |
+| `--boardId` | body | string |  | the board whose label it is (labels belong to a board); required when the card is on several boards you can see |
 
 ### `weave card label.remove`
 
@@ -794,6 +830,7 @@ Remove a label from a card
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--labelId` | path | string | yes |  |
+| `--boardId` | query | string |  | the board whose label it is; required when the card is on several boards you can see |
 
 ### `weave card list`
 
@@ -855,13 +892,14 @@ Remove a member from a card
 
 ### `weave card move`
 
-Move/reorder a card between lists or boards (applies list-type rules)  
+Move/reorder a card between lists or boards (applies list-type rules); on a card that is on several boards it moves one board's placement (boardId)  
 `POST /cards/{id}/move` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--listId` | body | string | yes | target list (may be on another board of the caller) |
+| `--boardId` | body | string |  | which placement moves when the card is on several boards (the board it moves on or away from); default: its placement on listId's board, else the only board you can see it on |
 | `--position` | body | number |  | explicit position |
 | `--afterId` | body | string |  | place after this sibling card |
 | `--beforeId` | body | string |  | place before this sibling card |
@@ -876,7 +914,7 @@ Next unclaimed open card of a list in position order, optionally claiming it ato
 | `--listId` | path | string | yes |  |
 | `--claim` | body | bool |  | true = claim the card atomically (requires edit access) |
 | `--ttlSeconds` | body | number |  | lease length when claiming (default 900) |
-| `--moveTo` | body | string |  | with claim=true: move the claimed card to this list |
+| `--moveTo` | body | string |  | with claim=true: move the claimed card to this list (a list of the listId's board moves the card's placement there) |
 | `--note` | body | string |  | claim note |
 
 ### `weave card notifications.read`
@@ -892,6 +930,30 @@ Mark all of the caller's notifications for this card as read
 
 Lists, board members and labels available to a card, and the caller's watch state (drives the card modal pickers)  
 `GET /cards/{id}/options` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | card id |
+| `--boardId` | query | string |  | context board when the card is on several boards (its columns, members and labels); default as card.get |
+
+### `weave card place`
+
+Place a card on another board too (the same card, not a copy): it appears in a column of that board and keeps its place on its other boards. Needs edit access to the card and to that board  
+`POST /cards/{id}/placements` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | card id |
+| `--listId` | body | string | yes | column of the board to place the card on (an active or closing column); the new placement's board is this column's board |
+| `--boardId` | body | string |  | the board to place the card on (optional: it is listId's board; must match when given) |
+| `--position` | body | number |  | explicit position in the column; default the end |
+| `--afterId` | body | string |  | place after this card of the column |
+| `--beforeId` | body | string |  | place before this card of the column |
+
+### `weave card placements`
+
+List the boards a card is on (only boards you can see), with each board's column  
+`GET /cards/{id}/placements` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -924,7 +986,7 @@ Release your claim on a card (managers may release anyone's); optionally move it
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
-| `--listId` | body | string |  | also move the card to this list (e.g. back to 'Ready' or on to 'Review') |
+| `--listId` | body | string |  | also move the card to this list (e.g. back to 'Ready' or on to 'Review'); on a card that is on several boards, a list of a board it is on (that board's placement moves) |
 
 ### `weave card renew`
 
@@ -938,7 +1000,7 @@ Extend your claim lease
 
 ### `weave card restore`
 
-Restore an archived/trashed card to its previous list  
+Restore an archived/trashed card: on every board it is on, it returns to its previous list (or that board's first open list)  
 `POST /cards/{id}/restore` (auth: user)
 
 | flag | in | type | required | description |
@@ -999,6 +1061,16 @@ Save a card as a project-wide card template
 |---|---|---|---|---|
 | `--id` | path | string | yes | card to snapshot |
 | `--name` | body | string |  | template name (default: card name) |
+
+### `weave card unplace`
+
+Remove a card from one board ("Remove from board"): it stays on its other boards; the last board cannot be removed (archive or delete the card instead)  
+`DELETE /cards/{id}/placements/{boardId}` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | card id |
+| `--boardId` | path | string | yes | the board to remove the card from |
 
 ### `weave card unsubscribe`
 
@@ -1122,7 +1194,6 @@ Update admin configuration (branding, SMTP, OIDC, registration, terms, board tem
 | `--oidc.emailClaim` | body | string |  | Claim used as e-mail (default email) |
 | `--oidc.groupsClaim` | body | string |  | Claim containing the user's groups (default groups) |
 | `--oidc.adminGroup` | body | string |  | Group granting admin (default weave-admins) |
-| `--oidc.ownerGroup` | body | string |  | Group granting projectOwner (default weave-project-owners) |
 | `--oidc.userGroup` | body | string |  | Group granting boardUser (default weave-users) |
 | `--oidc.workerGroup` | body | string |  | Group granting worker (default weave-workers) |
 | `--oidc.guestGroup` | body | string |  | Group granting guest (default weave-guests) |
@@ -1135,6 +1206,7 @@ Update admin configuration (branding, SMTP, OIDC, registration, terms, board tem
 | `--terms.version` | body | string |  | Bump to force re-acceptance |
 | `--session.hours` | body | string |  | Session lifetime in hours (default 24); when it ends the user is sent back through the identity provider |
 | `--session.maxIdleMinutes` | body | string |  | Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit |
+| `--webhook.userAllowPrivate` | body | string |  | true lets board webhooks created by non-admins reach private-network addresses (RFC 1918, ULA, CGNAT; for homelab receivers). Loopback, link-local and cloud metadata stay refused. Default false |
 | `--templates.hidden` | body | string |  | Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all |
 | `--agentprompt.general` | body | string |  | Default text of the About Weave agent prompt: plain text with {tokens} (see docs/AGENTS.md or the admin Agent prompts page); empty = the built-in text |
 | `--agentprompt.project` | body | string |  | Default text of the project agent prompt (a project can override it); plain text with {tokens}; empty = the built-in text |
@@ -1225,6 +1297,7 @@ Custom-field groups applying to a card (board-wide + card-level) with fields, ro
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--cardId` | path | string | yes |  |
+| `--boardId` | query | string |  | context board when the card is on several boards: its board-wide groups are shown (card-level groups always are); default as card.get |
 
 ### `weave customfieldgroup update`
 
@@ -1601,9 +1674,19 @@ Archive a list: its cards move to the archive list and the list is removed
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 
+### `weave list archivePreview`
+
+Count the cards that setting the column's auto-archive (list.update archiveAfter=N) would archive right now; read-only  
+`GET /lists/{id}/archive-preview` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+| `--archiveAfter` | query | number |  | the setting to preview (1-10000); omit or 0 for the column's current setting |
+
 ### `weave list clear`
 
-Permanently delete all cards of the trash list  
+Empty the trash list: permanently delete its cards (a card that is also on another board is only removed from this board)  
 `POST /lists/{id}/clear` (auth: user)
 
 | flag | in | type | required | description |
@@ -1619,10 +1702,11 @@ Create a list (column) on a board
 |---|---|---|---|---|
 | `--boardId` | path | string | yes |  |
 | `--name` | body | string | yes |  |
-| `--type` | body | string |  | active (default) \| closed |
+| `--type` | body | string |  | active (default) \| closed = the column closes cards that land here: cards created in or moved to it are marked closed, moving them to an active column re-opens them |
 | `--color` | body | string |  | column colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); omit for none |
 | `--description` | body | string |  | brief for this column: what a card that lands here asks for; agents read it |
 | `--wipLimit` | body | number |  | soft WIP limit (1-10000): advisory only, nothing is blocked; omit or 0 for none |
+| `--archiveAfter` | body | number |  | auto-archive (1-10000): keep at most this many cards; when more land here, the ones that have been in the column longest go to the board's archive; omit or 0 for off |
 | `--position` | body | number |  |  |
 
 ### `weave list delete`
@@ -1703,6 +1787,16 @@ Watch a column: get notified about cards created in it or moved in or out, and c
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 
+### `weave list typePreview`
+
+Count the cards a switch of the column's closing setting (list.update type) would close or re-open; read-only  
+`GET /lists/{id}/type-preview` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes |  |
+| `--type` | query | string |  | the type to switch to: closed \| active; omit for the opposite of the current type |
+
 ### `weave list unsubscribe`
 
 Stop watching a column  
@@ -1714,7 +1808,7 @@ Stop watching a column
 
 ### `weave list update`
 
-Rename / recolour a list, set its description (brief for agents) or soft WIP limit, change its type or position  
+Rename / recolour a list, set its description (brief for agents), soft WIP limit or auto-archive (archiveAfter: keep the newest N cards), switch whether it closes cards that land here (type closed|active), or change its position  
 `PATCH /lists/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -1722,10 +1816,13 @@ Rename / recolour a list, set its description (brief for agents) or soft WIP lim
 | `--id` | path | string | yes |  |
 | `--name` | body | string |  |  |
 | `--color` | body | string |  | column colour: #rrggbb or a preset name; empty string clears the colour |
-| `--type` | body | string |  | switch between active and closed |
+| `--type` | body | string |  | closed = close cards that land here (created in or moved to the column; moving them to an active column re-opens them), active = do not; see existingCards for the cards already in the column (list.typePreview counts them) |
 | `--description` | body | string |  | brief for this column: what a card that lands here asks for; empty string clears it |
 | `--wipLimit` | body | number |  | soft WIP limit (1-10000): the column header shows n/limit and flags it when over; advisory only, nothing is blocked; 0 removes the limit |
 | `--position` | body | number |  |  |
+| `--archiveAfter` | body | number |  | auto-archive (1-10000): the column keeps at most this many cards; whenever more land here, the ones that have been in it longest (oldest list change first) go to the board's archive, where card.restore brings them back; cards with a live claim and, for now, cards with a recurrence rule are skipped (they still count); 0 turns it off. Setting or lowering it applies at once to the cards already here: when that would archive cards, confirmArchive=true is required (409 conflict with the count otherwise; list.archivePreview counts them) |
+| `--confirmArchive` | body | bool |  | with archiveAfter: confirm that the cards over the new limit are archived right now |
+| `--existingCards` | body | string |  | when type changes: flip (default) = also close the open cards already in the column (switching to closed) or re-open its closed cards (switching to active); keep = leave them as they are, the setting applies only to cards that land from now on |
 
 ## notification
 
@@ -1771,7 +1868,6 @@ Add a notification service (shoutrrr URL) to me or a board
 | `--url` | body | string | yes | shoutrrr service URL, e.g. discord://token@id or generic://host/path |
 | `--format` | body | string |  | text (default) \| markdown \| html |
 | `--boardId` | body | string |  | attach to a board instead of myself (needs board manage rights) |
-| `--userId` | body | string |  | admin only: attach to another user |
 
 ### `weave notification_service delete`
 
@@ -1872,7 +1968,7 @@ Upload a background image (thumbnail generated)
 
 ### `weave project create`
 
-Create a project (you become its manager)  
+Create a project (you become its manager). Any signed-in admin or boardUser may; workers, guests and agent accounts may not  
 `POST /projects` (auth: user)
 
 | flag | in | type | required | description |
@@ -1994,13 +2090,13 @@ List projects visible to you
 
 ### `weave project manager.add`
 
-Add a project manager  
+Add a project manager (any active person except guests and agent accounts)  
 `POST /projects/{id}/managers` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | Project id |
-| `--userId` | body | string | yes | User to promote (must be admin or projectOwner role) |
+| `--userId` | body | string | yes | User to make a project manager: any active person except guests and agent accounts |
 
 ### `weave project manager.list`
 
@@ -2013,13 +2109,38 @@ List project managers
 
 ### `weave project manager.remove`
 
-Remove a project manager (the last manager cannot be removed)  
+Remove a project manager (the last manager cannot be removed; the project's owning manager steps down only themself, unless their account is inactive)  
 `DELETE /projects/{id}/managers/{managerId}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | Project id |
 | `--managerId` | path | string | yes | Project manager id (see project.manager.list) |
+
+### `weave project orphans`
+
+List ownerless projects: no active manager left (admin recovery; ids, names, counts and former managers only, no content)  
+`GET /projects/orphans` (auth: admin)
+
+### `weave project reassign`
+
+Give an ownerless project a new manager (admin recovery; refused while the project has an active manager; audited)  
+`POST /projects/{id}/reassign` (auth: admin)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | Project id of an ownerless project (see project.orphans) |
+| `--userId` | body | string | yes | The new manager: an active person who is not a guest and not an agent account |
+
+### `weave project recovery.list`
+
+Audit trail of project recoveries: who gave which ownerless project to whom, and when (admin)  
+`GET /projects/recoveries` (auth: admin)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--projectId` | query | string |  | Only entries of this project |
+| `--limit` | query | number |  | Most recent entries to return (default 50, max 500) |
 
 ### `weave project unfavorite`
 
@@ -2032,7 +2153,7 @@ Remove a project from your favorites
 
 ### `weave project update`
 
-Update a project (name, description, hidden, labels toggle, background, agent prompt text)  
+Update a project (name, description, hidden, labels toggle, who may create boards, background, agent prompt text)  
 `PATCH /projects/{id}` (auth: user)
 
 | flag | in | type | required | description |
@@ -2046,6 +2167,7 @@ Update a project (name, description, hidden, labels toggle, background, agent pr
 | `--backgroundColor` | body | string |  | Hex colour like #1d6fa5 (type color) |
 | `--backgroundGradient` | body | string |  | Named gradient (type gradient), e.g. ocean-dive |
 | `--backgroundImageId` | body | string |  | Uploaded background image id (type image) |
+| `--boardCreation` | body | string |  | Who may create boards: owners (project managers only, the default) \| members (also anyone with access to a board of the project; they become the new board's owner) |
 | `--agentPrompt` | body | string |  | This project's text for the project agent prompt, plain text with {tokens} such as {project_name} {boards} {connect} {questionnaire} (max 20000 characters); empty string, or text equal to the default, goes back to the admin default |
 
 ## search
@@ -2420,25 +2542,25 @@ Update profile fields (phone, organization); name, email and role are managed by
 
 ### `weave webhook create`
 
-Create a webhook  
-`POST /webhooks` (auth: admin)
+Create a webhook (board scope: board owners and project managers; global and project scope: admins)  
+`POST /webhooks` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
-| `--name` | body | string | yes | label |
-| `--url` | body | string | yes | http(s) endpoint receiving POSTs |
-| `--accessToken` | body | string |  | sent as 'Authorization: Bearer <token>'; also the HMAC key when no secret is set |
-| `--secret` | body | string |  | HMAC-SHA256 signing key (headers X-Weave-Signature: sha256=<hex> and X-Weave-Signature-V2: t=<ts>,v1=<hex>; see docs/WEBHOOKS.md) |
-| `--events` | body | array<string> |  | only these event names (empty = all); see webhook.events |
+| `--name` | body | string | yes | label (max 255 characters) |
+| `--url` | body | string | yes | http(s) endpoint receiving POSTs (max 2048 characters). Board webhooks created by non-admins may not point at loopback, link-local, cloud metadata or (unless an admin allows it) private-network addresses |
+| `--accessToken` | body | string |  | sent as 'Authorization: Bearer <token>'; also the HMAC key when no secret is set (write-only, max 1024 characters) |
+| `--secret` | body | string |  | HMAC-SHA256 signing key (headers X-Weave-Signature: sha256=<hex> and X-Weave-Signature-V2: t=<ts>,v1=<hex>; see docs/WEBHOOKS.md); write-only, max 1024 characters |
+| `--events` | body | array<string> |  | only these event names (empty = all); see webhook.events (board webhooks: webhook.events scope=board) |
 | `--excludedEvents` | body | array<string> |  | never send these event names |
-| `--projectId` | body | string |  | scope: only events inside this project |
-| `--boardId` | body | string |  | scope: only events inside this board |
-| `--userId` | body | string |  | scope: only events caused by this user |
+| `--projectId` | body | string |  | admins only: scope to events inside this project |
+| `--boardId` | body | string |  | scope to events inside this board; required unless you are an admin (needs Manage on the board: board owner or project manager) |
+| `--userId` | body | string |  | admins only: only events caused by this user |
 
 ### `weave webhook delete`
 
 Delete a webhook (and its delivery log)  
-`DELETE /webhooks/{id}` (auth: admin)
+`DELETE /webhooks/{id}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -2447,7 +2569,7 @@ Delete a webhook (and its delivery log)
 ### `weave webhook deliveries`
 
 Delivery log of a webhook (newest first)  
-`GET /webhooks/{id}/deliveries` (auth: admin)
+`GET /webhooks/{id}/deliveries` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -2456,18 +2578,26 @@ Delivery log of a webhook (newest first)
 
 ### `weave webhook events`
 
-List the event names webhooks can subscribe to  
-`GET /webhooks/events` (auth: admin)
+List the event names webhooks can subscribe to (scope=board: those a board webhook may use)  
+`GET /webhooks/events` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--scope` | query | string |  | board: only the events a board-scoped webhook can subscribe to; empty: every event name |
 
 ### `weave webhook list`
 
-List webhooks  
-`GET /webhooks` (auth: admin)
+List webhooks: the board webhooks of boards you manage (admins also: global and project webhooks)  
+`GET /webhooks` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--boardId` | query | string |  | only the webhooks of this board (needs Manage on it) |
 
 ### `weave webhook retry`
 
 Redeliver a logged webhook delivery (async, with backoff)  
-`POST /webhook-deliveries/{id}/retry` (auth: admin)
+`POST /webhook-deliveries/{id}/retry` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -2475,8 +2605,8 @@ Redeliver a logged webhook delivery (async, with backoff)
 
 ### `weave webhook test`
 
-Send a synchronous 'ping' event to a webhook and report the result  
-`POST /webhooks/{id}/test` (auth: admin)
+Send a synchronous 'ping' event to a webhook and report the result (non-admins get the status and a short response snippet)  
+`POST /webhooks/{id}/test` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
@@ -2485,20 +2615,20 @@ Send a synchronous 'ping' event to a webhook and report the result
 ### `weave webhook update`
 
 Update a webhook  
-`PATCH /webhooks/{id}` (auth: admin)
+`PATCH /webhooks/{id}` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes |  |
 | `--name` | body | string |  |  |
 | `--url` | body | string |  |  |
-| `--accessToken` | body | string |  |  |
-| `--secret` | body | string |  |  |
+| `--accessToken` | body | string |  | write-only; empty clears it |
+| `--secret` | body | string |  | write-only; empty clears it |
 | `--events` | body | array<string> |  |  |
 | `--excludedEvents` | body | array<string> |  |  |
-| `--projectId` | body | string |  |  |
-| `--boardId` | body | string |  |  |
-| `--userId` | body | string |  |  |
+| `--projectId` | body | string |  | admins only |
+| `--boardId` | body | string |  | move to another board you manage (non-admins cannot remove the board scope) |
+| `--userId` | body | string |  | admins only |
 
 ## whoami
 

@@ -23,6 +23,9 @@ func envName(key string) string {
 	if key == "session.maxIdleMinutes" {
 		return "WEAVE_SESSION_MAX_IDLE_MINUTES" // matches auth.GetConfig, which enforces it
 	}
+	if key == UserAllowPrivateKey {
+		return "WEAVE_WEBHOOK_USER_ALLOW_PRIVATE"
+	}
 	return "WEAVE_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 }
 
@@ -105,7 +108,6 @@ type Settings struct {
 	OIDCEmailClaim    *string `json:"oidc.emailClaim" desc:"Claim used as e-mail (default email)"`
 	OIDCGroupsClaim   *string `json:"oidc.groupsClaim" desc:"Claim containing the user's groups (default groups)"`
 	OIDCAdminGroup    *string `json:"oidc.adminGroup" desc:"Group granting admin (default weave-admins)"`
-	OIDCOwnerGroup    *string `json:"oidc.ownerGroup" desc:"Group granting projectOwner (default weave-project-owners)"`
 	OIDCUserGroup     *string `json:"oidc.userGroup" desc:"Group granting boardUser (default weave-users)"`
 	OIDCWorkerGroup   *string `json:"oidc.workerGroup" desc:"Group granting worker (default weave-workers)"`
 	OIDCGuestGroup    *string `json:"oidc.guestGroup" desc:"Group granting guest (default weave-guests)"`
@@ -120,6 +122,8 @@ type Settings struct {
 
 	SessionHours          *string `json:"session.hours" desc:"Session lifetime in hours (default 24); when it ends the user is sent back through the identity provider"`
 	SessionMaxIdleMinutes *string `json:"session.maxIdleMinutes" desc:"Maximum idle minutes before any session ends (upper bound on per-user auto-logout); 0 or empty = no limit"`
+
+	WebhookUserAllowPrivate *string `json:"webhook.userAllowPrivate" desc:"true lets board webhooks created by non-admins reach private-network addresses (RFC 1918, ULA, CGNAT; for homelab receivers). Loopback, link-local and cloud metadata stay refused. Default false"`
 
 	TemplatesHidden *string `json:"templates.hidden" desc:"Built-in board templates to hide from the gallery: ids such as builtin:sprint, one per line or comma separated (or a JSON array); empty = show all"`
 
@@ -171,7 +175,7 @@ func AgentPromptDefault(e *ops.Env, scope string) (text string, admin bool) {
 var (
 	settingKeys   []string
 	secretKeys    = map[string]bool{"smtp.password": true, "oidc.clientSecret": true}
-	boolSettings  = map[string]bool{"smtp.skipVerify": true, "smtp.notifications": true, "oidc.autoProvision": true, "oidc.requireGroup": true, "terms.enabled": true}
+	boolSettings  = map[string]bool{"smtp.skipVerify": true, "smtp.notifications": true, "oidc.autoProvision": true, "oidc.requireGroup": true, "terms.enabled": true, UserAllowPrivateKey: true}
 	settingFields []reflect.StructField
 )
 

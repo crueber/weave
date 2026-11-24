@@ -22,7 +22,7 @@ import (
 //
 //	WEAVE_RATE_LIMIT          sustained requests/second per principal (default 20; burst WEAVE_RATE_BURST, default 200)
 //	WEAVE_RATE_LIMIT_SEARCH   search requests per minute (default 300, burst 30)
-//	WEAVE_RATE_LIMIT_HEAVY    exports, board import, notification-service tests per minute (default 60, burst 15)
+//	WEAVE_RATE_LIMIT_HEAVY    exports, board import, notification-service and webhook tests/redeliveries per minute (default 60, burst 15)
 //	WEAVE_RATE_LIMIT_IP       optional per-IP ceiling (requests/second) on top of the per-principal buckets (default off: offices share one IP)
 //	WEAVE_RATE_LIMIT_LOGIN    sign-in starts per minute per client IP (default 20, burst 20)
 //	WEAVE_MAX_STREAMS_PER_USER  concurrent /events streams per user (default 20)
@@ -164,6 +164,9 @@ func classify(r *http.Request) routeClass {
 		return classHeavy
 	case r.Method == http.MethodPost && (strings.HasSuffix(p, "/boards/import") || (strings.HasPrefix(p, "/notification-services/") || strings.HasPrefix(p, "/ui/notification-services/")) && strings.HasSuffix(p, "/test")):
 		return classHeavy
+	case r.Method == http.MethodPost && (strings.HasPrefix(p, "/webhooks/") || strings.HasPrefix(p, "/ui/webhooks/") || strings.HasPrefix(p, "/ui/admin/webhooks/")) && strings.HasSuffix(p, "/test"),
+		r.Method == http.MethodPost && (strings.HasPrefix(p, "/webhook-deliveries/") || strings.HasPrefix(p, "/ui/webhook-deliveries/")) && strings.HasSuffix(p, "/retry"):
+		return classHeavy // webhook pings and redeliveries make the server connect out
 	}
 	return classNone
 }

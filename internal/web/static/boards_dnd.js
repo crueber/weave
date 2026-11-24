@@ -28,7 +28,7 @@
     if (S || B.grab.active || !lists() || !B.canEdit()) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     var t = e.target; if (!t.closest) return;
-    if (t.closest('.boards-composer, .boards-menu, .boards-pop, input, textarea, select, [data-quick], [data-label-toggle], [data-collapse], [data-list-sheet], .boards-col-title-input')) return;
+    if (t.closest('.boards-composer, .boards-menu, .boards-pop, input, textarea, select, [data-quick], [data-also-on], [data-label-toggle], [data-collapse], [data-list-sheet], .boards-col-title-input')) return;
     var kind = '', el = null;
     var tile = t.closest('.boards-tile');
     if (tile && tile.closest('.boards-cards')) { kind = 'card'; el = tile; }
@@ -173,6 +173,8 @@
       B.post(l.dataset.cardDrop, { id: el.dataset.id, container: col.dataset.id, afterId: p ? p.dataset.id : '', beforeId: n ? n.dataset.id : '' }).then(function (r) {
         if (!r.ok) { B.toast(r.error || 'Could not move the card', { error: true }); B.refresh(true); return; }
         if (draft) { B.toast('Moved to ' + colName(col)); B.refresh(true); }   // the draft is now a card: re-render it as one
+        // into or out of a closed column: the card was closed or re-opened, so redraw the tile (closed check mark) now
+        else if (oldCol && oldCol !== col && (col.dataset.listType === 'closed') !== (oldCol.dataset.listType === 'closed')) B.refreshTile(el.dataset.id, el.contains(document.activeElement));   // keep keyboard focus (Space drop) on the new tile
       });
     } else {
       var cols = openCols(), i = cols.indexOf(el), pc = cols[i - 1], nc = cols[i + 1];

@@ -10,7 +10,7 @@ type WhoamiBoard struct {
 	Name        string `json:"name"`
 	ProjectID   string `json:"projectId"`
 	ProjectName string `json:"projectName"`
-	Role        string `json:"role" desc:"viewer | commenter | editor | manager (project manager or admin)"`
+	Role        string `json:"role" desc:"viewer | commenter | editor | manager (admin, project manager or board owner)"`
 }
 
 type WhoamiOut struct {
@@ -39,13 +39,11 @@ func init() {
 		if err != nil {
 			return WhoamiOut{}, err
 		}
-		q := `SELECT b.id,b.name,b.project_id,p.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.is_template=0`
-		var args []any
-		if e.User.Role != "admin" {
-			q += ` AND (b.id IN (SELECT board_id FROM board_memberships WHERE user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))
+		// the boards the caller is a member of or manages (the admin role adds none: it is not content access)
+		q := `SELECT b.id,b.name,b.project_id,p.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.is_template=0
+			AND (b.id IN (SELECT board_id FROM board_memberships WHERE user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))
 				OR b.project_id IN (SELECT project_id FROM project_managers WHERE user_id=?))`
-			args = []any{e.User.UserID, e.User.UserID, e.User.UserID}
-		}
+		args := []any{e.User.UserID, e.User.UserID, e.User.UserID}
 		rows, err := e.DB.QueryContext(e.Ctx, q+` ORDER BY p.name, b.position, b.name LIMIT 1000`, args...)
 		if err != nil {
 			return WhoamiOut{}, err

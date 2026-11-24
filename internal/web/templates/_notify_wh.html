@@ -1,0 +1,25 @@
+{{/* Webhook fields, shared by the admin console page and Board settings > Webhooks.
+   Args: W (webhook), Events (names), P (id prefix), Admin (scope picker and user filter; with Projects and Boards),
+   Board (board id: a board fragment posts it as boardId), AllowPrivate (board webhooks may reach private networks).
+   Secrets are write-only: blank keeps the stored value. */}}
+{{define "notify_whform"}}{{$p := .P}}<div class="bs-form">
+  {{template "adm_field" dict "ID" (print $p "-name") "Name" "name" "Title" "Name" "Help" "A label for this endpoint." "Type" "text" "Value" .W.Name "Required" true}}
+  {{if .Admin}}{{template "adm_field" dict "ID" (print $p "-url") "Name" "url" "Title" "URL" "Help" "Weave POSTs JSON here." "Type" "text" "Value" .W.URL "Placeholder" "https://example.com/hook" "Required" true}}
+  {{else}}{{template "adm_field" dict "ID" (print $p "-url") "Name" "url" "Title" "URL" "Help" (print "Weave POSTs JSON here (http or https). Loopback, link-local and cloud metadata addresses are refused" (or (and .AllowPrivate ".") "; so are private networks unless an admin allows them.")) "Type" "text" "Value" .W.URL "Placeholder" "https://example.com/hook" "Required" true}}{{end}}
+  <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="{{$p}}-token">Access token</label></b><small>Sent as a Bearer token.</small></span>
+    <span class="adm-stack"><input id="{{$p}}-token" type="password" name="accessToken" value="" maxlength="1024" autocomplete="new-password" placeholder="{{if .W.HasAccessToken}}(stored) leave blank to keep{{end}}">{{if .W.HasAccessToken}}<label class="bs-inline-toggle"><input type="checkbox" name="clearAccessToken" value="1"> Clear the stored token</label>{{end}}</span></div>
+  <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="{{$p}}-secret">Signing secret</label></b><small>HMAC-SHA256 in X-Weave-Signature (falls back to the access token).</small></span>
+    <span class="adm-stack"><input id="{{$p}}-secret" type="password" name="secret" value="" maxlength="1024" autocomplete="new-password" placeholder="{{if .W.HasSecret}}(stored) leave blank to keep{{end}}">{{if .W.HasSecret}}<label class="bs-inline-toggle"><input type="checkbox" name="clearSecret" value="1"> Clear the stored secret</label>{{end}}</span></div>
+  {{if .Admin}}{{$w := .W}}<div class="bs-row bs-row-stack"><span class="bs-text"><b id="{{$p}}-scope-l">Scope</b><small>Which events reach this webhook. Board owners manage their own board webhooks in Board settings.</small></span>
+    <span class="adm-stack" role="group" aria-labelledby="{{$p}}-scope-l">
+      <label class="sr-only" for="{{$p}}-scope">Scope</label><select id="{{$p}}-scope" name="scope"><option value="global"{{if eq $w.Scope "global"}} selected{{end}}>Everything (global)</option><option value="project"{{if eq $w.Scope "project"}} selected{{end}}>One project</option><option value="board"{{if eq $w.Scope "board"}} selected{{end}}>One board</option></select>
+      <label class="sr-only" for="{{$p}}-project">Project</label><select id="{{$p}}-project" name="projectId"><option value="">Project (for project scope)</option>{{range .Projects}}<option value="{{.ID}}"{{if eq .ID $w.ProjectID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+      <label class="sr-only" for="{{$p}}-board">Board</label><select id="{{$p}}-board" name="boardId"><option value="">Board (for board scope)</option>{{range .Boards}}<option value="{{.ID}}"{{if eq .ID $w.BoardID}} selected{{end}}>{{.Name}}</option>{{end}}</select>
+    </span></div>
+  {{template "adm_field" dict "ID" (print $p "-user") "Name" "userId" "Title" "User ID" "Help" "Optional: only events caused by this user." "Type" "text" "Value" .W.UserID}}
+  {{else}}<input type="hidden" name="boardId" value="{{.Board}}">{{end}}
+  <details class="adm-events"><summary>Only these events <span class="boards-badge">{{len .W.Events}} selected</span> <small>(none = all)</small></summary><div class="adm-pick">
+    {{$sel := .W.Events}}{{range .Events}}<label class="bs-inline-toggle"><input type="checkbox" name="events" value="{{.}}"{{if notifyHas $sel .}} checked{{end}}> {{.}}</label>{{end}}</div></details>
+  <details class="adm-events"><summary>Never send these events <span class="boards-badge">{{len .W.ExcludedEvents}} selected</span></summary><div class="adm-pick">
+    {{$exc := .W.ExcludedEvents}}{{range .Events}}<label class="bs-inline-toggle"><input type="checkbox" name="excludedEvents" value="{{.}}"{{if notifyHas $exc .}} checked{{end}}> {{.}}</label>{{end}}</div></details>
+</div>{{end}}

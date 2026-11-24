@@ -12,6 +12,28 @@
 .ls-secbody .cm-hint{margin:0}
 .ls-secbody code{font-family:var(--font-mono)}
 .ls-pophint{margin:0;padding:0 .5rem}
+
+/* the closing setting ("Close cards that land here"; lists.type closed = on): Properties popover, header chip and the
+   confirm shared with the column "..." menu (template boards_list_closes_confirm) */
+.ls .cm-prop{grid-template-columns:6rem minmax(0,1fr)} /* "Auto-close" on one line (phones hide the labels) */
+.ls .cm-pl{white-space:nowrap}
+.ls-closes-h{margin:0;padding:.15rem .5rem 0;font-size:var(--text-sm);font-weight:700;color:var(--fg)}
+.ls-closes-opts{display:flex;flex-direction:column}
+.ls-closes-val{display:inline-flex;align-items:center;gap:.3em}
+.ls-closes-val .closed-mark-ico{flex:none;color:var(--success)}
+.cm-chips .cards-badge-closed[hidden]{display:none}
+.cards-badge-closed .closed-mark-ico{flex:none}
+.ls-closes-confirm:empty{display:none}
+.cm .cards-popbody.ls-closes{max-height:min(34rem,80vh)}
+.ls-closes:has(.closes-confirm) .ls-pophint{display:none} /* the confirm says it: keep the buttons in view */
+.closes-confirm{display:flex;flex-direction:column;gap:.45rem;padding:.6rem .65rem;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-2);text-align:left}
+.closes-confirm-h{margin:0;font-size:var(--text-md);font-weight:700;color:var(--fg)}
+.closes-confirm-d{margin:0;font-size:var(--text-sm);line-height:1.45;color:var(--fg-2);white-space:normal}
+.closes-confirm-actions{display:flex;flex-direction:column;gap:.35rem}
+.closes-confirm-actions form{display:block;margin:0}
+.closes-confirm-actions form button{width:100%;justify-content:center}
+.closes-confirm-actions .closes-cancel,.cm .cards-popbody .closes-confirm-actions button.closes-cancel{align-self:center;padding:.2rem .5rem;background:none;border:0;box-shadow:none;color:var(--fg-2);font-size:var(--text-sm)}
+.closes-confirm-actions .closes-cancel:hover{background:none;color:var(--fg);text-decoration:underline}
 .ls-listeners{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--space-2)}
 .ls-listeners li{display:inline-flex;align-items:center;gap:.4rem;padding:.2rem .6rem .2rem .25rem;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--surface-2);font-size:var(--text-sm)}
 .ls-ln{font-weight:600}
@@ -33,3 +55,11 @@
   .ls .cm-ro[data-pl]::before,.ls .cm-val[data-pl]::before{content:attr(data-pl);color:var(--muted);font-size:var(--text-sm);font-weight:600}
   .ls .cm-val.ls-wipval:not(:has([data-ls-wip-val]:not([hidden])))::before{content:none}
 }
+
+/* auto-archive ("Keep the newest N cards"): the chip, the property value and the popover (shares the closing popover's
+   layout and confirm, template boards_list_archive_confirm) */
+.ls-keepchip{display:inline-flex;align-items:center;gap:.3em}
+.ls-keepchip .archive-after-ico,.ls-keep-val .archive-after-ico{flex:none;color:var(--fg-2)}
+.ls-keep-val{display:inline-flex;align-items:center;gap:.3em}
+.ls-archive form{display:flex;flex-direction:column;gap:.4rem;margin:0;padding:0 .5rem}
+.ls-archive:has(.closes-confirm) [data-ls-keep-ask] button{display:none}

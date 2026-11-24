@@ -158,6 +158,7 @@ type CalendarCard struct {
 	Name           string   `json:"name"`
 	DueDate        string   `json:"dueDate"`
 	IsDueCompleted bool     `json:"isDueCompleted"`
+	IsClosed       bool     `json:"isClosed" desc:"the card is closed (done)"`
 	ListID         string   `json:"listId"`
 	Colors         []string `json:"labelColors"`
 }
@@ -192,8 +193,8 @@ func init() {
 			return MapOut{}, err
 		}
 		out := MapOut{Points: []MapPoint{}}
-		rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,c.lat,c.lng,COALESCE(c.location_name,''),c.list_id FROM cards c JOIN lists l ON l.id=c.list_id
-			WHERE c.board_id=? AND c.lat IS NOT NULL AND c.lng IS NOT NULL AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.name`, in.BoardID)
+		rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,c.lat,c.lng,COALESCE(c.location_name,''),p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+			WHERE p.board_id=? AND c.lat IS NOT NULL AND c.lng IS NOT NULL AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.name, c.id`, in.BoardID)
 		if err != nil {
 			return out, err
 		}
@@ -235,20 +236,20 @@ func calendar(e *ops.Env, in CalendarIn) (CalendarOut, error) {
 			var c CalendarCard
 			var due *string
 			var done *bool
-			_ = rows.Scan(&c.ID, &c.Name, &due, &done, &c.ListID)
+			_ = rows.Scan(&c.ID, &c.Name, &due, &done, &c.IsClosed, &c.ListID)
 			if due != nil {
 				c.DueDate = *due
 			}
 			c.IsDueCompleted = done != nil && *done
-			c.Colors = strs(e, e.DB, `SELECT l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.card_id=? ORDER BY l.position`, c.ID)
+			c.Colors = strs(e, e.DB, `SELECT l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY l.position`, c.ID, in.BoardID)
 			res = append(res, c)
 		}
 		return res
 	}
-	out.Cards = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.list_id FROM cards c JOIN lists l ON l.id=c.list_id
-		WHERE c.board_id=? AND c.due_date>=? AND c.due_date<? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.due_date`,
+	out.Cards = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND c.due_date>=? AND c.due_date<? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.due_date, c.id`,
 		in.BoardID, from.Format("2006-01-02"), to.AddDate(0, 0, 1).Format("2006-01-02"))
-	out.Unscheduled = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.list_id FROM cards c JOIN lists l ON l.id=c.list_id
-		WHERE c.board_id=? AND c.due_date IS NULL AND c.is_draft=0 AND c.is_template=0 AND l.type='active' ORDER BY c.updated_at DESC LIMIT 50`, in.BoardID)
+	out.Unscheduled = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND c.due_date IS NULL AND c.is_draft=0 AND c.is_template=0 AND l.type='active' ORDER BY c.updated_at DESC, c.id DESC LIMIT 50`, in.BoardID)
 	return out, nil
 }

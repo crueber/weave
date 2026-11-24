@@ -1,10 +1,10 @@
 {{define "title"}}Users - Weave{{end}}
 {{define "page"}}{{template "admin_top" dict "Active" "users" "Crumb" .User.Name}}{{template "users-body" .}}{{template "admin_bottom"}}{{end}}
 
-{{define "users-body"}}{{with .Data}}<section id="adm-users" class="boards-sec" aria-labelledby="adm-users-h">
+{{define "users-body"}}{{with .Data}}{{$d := .}}<section id="adm-users" class="boards-sec" aria-labelledby="adm-users-h">
   <div class="bs-sec-head"><h2 id="adm-users-h">Users</h2>{{template "adm_status" dict "Done" (ne .Flash "") "Text" .Flash}}</div>
   {{template "adm_error" .Error}}
-  <p class="bs-desc">Accounts are created when people sign in through SSO. Roles and team groups follow your identity provider's groups and refresh on every sign-in; here you can deactivate, sign out or delete accounts.</p>
+  <p class="bs-desc">Accounts are created when people sign in through SSO. Roles and team groups follow your identity provider's groups and refresh on every sign-in; here you can deactivate, sign out or delete accounts. Projects and boards belong to the people who own them: the admin role gives no access to their content. A project whose last active manager is deactivated or deleted shows up in <a href="/admin/orphans">Orphaned projects</a>, where you name a new manager.</p>
   <form class="bs-add" role="search" hx-get="/admin/users" hx-trigger="input delay:250ms, submit" hx-target="#users-list" hx-select="#users-list" hx-swap="outerHTML" hx-replace-url="true" method="get" action="/admin/users">
     <label class="sr-only" for="adm-user-q">Search users</label>
     <input id="adm-user-q" type="search" name="q" value="{{.Q}}" placeholder="Search by name, e-mail or username" autocomplete="off">
@@ -13,24 +13,25 @@
   </form>
   <div id="users-list">
   <ul class="bs-members">
-  {{range .Users}}<li class="bs-member adm-item{{if .IsDeactivated}} is-off{{end}}"><details class="adm-user">
+  {{range .Users}}{{$orph := $d.Orphaned .ID}}<li class="bs-member adm-item{{if .IsDeactivated}} is-off{{end}}"><details class="adm-user">
     <summary>
       {{if .AvatarURL}}<img class="avatar" src="{{.AvatarURL}}" alt="" width="32" height="32">{{else}}<span class="avatar avatar-ph" aria-hidden="true">{{authInitial .Name}}</span>{{end}}
       <span class="bs-member-t"><b>{{.Name}}</b><small>{{if .IsAgent}}Agent account{{else}}{{.Email}}{{if .Username}} &middot; @{{deref .Username}}{{end}}{{end}}</small></span>
-      <span class="adm-badges"><span class="boards-badge" title="Managed by OIDC groups">{{.Role}}</span>{{if .IsAgent}}<span class="boards-badge badge-agent">{{template "auth_robot"}} agent</span>{{end}}{{if .IsDeactivated}}<span class="boards-badge is-warn">deactivated</span>{{end}}</span>
+      <span class="adm-badges"><span class="boards-badge" title="Managed by OIDC groups">{{.Role}}</span>{{if $orph}}<span class="boards-badge is-warn" title="Sole active manager of {{$orph}} project{{if gt $orph 1}}s{{end}}">sole manager</span>{{end}}{{if .IsAgent}}<span class="boards-badge badge-agent">{{template "auth_robot"}} agent</span>{{end}}{{if .IsDeactivated}}<span class="boards-badge is-warn">deactivated</span>{{end}}</span>
       <span class="presence presence-{{.Presence}}" title="{{.Presence}}" role="img" aria-label="{{.Presence}}"></span>
     </summary>
     <div class="adm-body">
+      {{if $orph}}<p class="adm-warn" role="note" data-orphan-warning="{{$orph}}">{{template "auth_warn_icon"}}<span>{{.Name}} is the only active manager of <b>{{$orph}} project{{if gt $orph 1}}s{{end}}</b>. Deactivating or deleting this account leaves {{if gt $orph 1}}them{{else}}it{{end}} without a manager; you then name a new one in <a href="/admin/orphans">Orphaned projects</a>. You do not get access to {{if gt $orph 1}}their{{else}}its{{end}} content either way.</span></p>{{end}}
       <div class="bs-row"><span class="bs-text"><b>Role</b><small>Managed by your identity provider's groups{{if .Phone}} &middot; {{deref .Phone}}{{end}}{{if .Organization}} &middot; {{deref .Organization}}{{end}}</small></span><span class="bs-value"><span class="boards-badge">{{.Role}}</span></span></div>
       {{if .IsDeactivated}}<form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/activate" hx-target="#adm-users" hx-swap="outerHTML" method="post" action="/ui/admin/users/{{.ID}}/activate">
         <span class="bs-text"><b>Activate</b><small>Let this account sign in again.</small></span><span class="bs-btns"><button type="submit">Activate</button></span></form>
-      {{else}}<form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/deactivate" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Deactivate this user and end their sessions?" method="post" action="/ui/admin/users/{{.ID}}/deactivate">
+      {{else}}<form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/deactivate" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Deactivate this user and end their sessions?{{if $orph}} {{$orph}} project{{if gt $orph 1}}s{{end}} will have no active manager (recover in Orphaned projects).{{end}}" method="post" action="/ui/admin/users/{{.ID}}/deactivate">
         <span class="bs-text"><b>Deactivate</b><small>Blocks sign-in, ends sessions and revokes API key access. Reversible.</small></span><span class="bs-btns"><button type="submit">Deactivate</button></span></form>{{end}}
       {{if not .IsAgent}}<form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/sessions/revoke-all" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Sign this user out of all sessions?" method="post" action="/ui/admin/users/{{.ID}}/sessions/revoke-all">
         <span class="bs-text"><b>Sign out everywhere</b><small>Ends every browser session of this user.</small></span><span class="bs-btns"><button type="submit">Sign out everywhere</button></span></form>
       {{if .IsSSO}}<form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/relink" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Unlink this account from its SSO identity? Their sessions end, and the next SSO login with this e-mail address binds a new identity." method="post" action="/ui/admin/users/{{.ID}}/relink">
         <span class="bs-text"><b>Relink SSO identity</b><small>Use after moving identity providers: the next sign-in with this e-mail binds a new identity.</small></span><span class="bs-btns"><button type="submit">Relink</button></span></form>{{end}}{{end}}
-      <form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/delete" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Permanently delete this user?" method="post" action="/ui/admin/users/{{.ID}}/delete">
+      <form class="bs-row" hx-post="/ui/admin/users/{{.ID}}/delete" hx-target="#adm-users" hx-swap="outerHTML" hx-confirm="Permanently delete this user?{{if $orph}} {{$orph}} project{{if gt $orph 1}}s{{end}} will have no active manager (recover in Orphaned projects).{{end}}" method="post" action="/ui/admin/users/{{.ID}}/delete">
         <span class="bs-text"><b>Delete user</b><small>Permanently removes the account. This cannot be undone.</small></span><span class="bs-btns"><button type="submit" class="danger">Delete</button></span></form>
     </div>
   </details></li>
@@ -39,3 +40,5 @@
   </div>
 </section>
 {{end}}{{end}}
+
+{{define "auth_warn_icon"}}<svg class="adm-warn-i" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M8 1.5 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>{{end}}

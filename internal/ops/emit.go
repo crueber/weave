@@ -11,6 +11,12 @@ type Event struct {
 	// Kind overrides the event-stream type derived from Name (e.g. "card.archived"
 	// for an archive whose realtime name stays "card.moved").
 	Kind string
+	// Boards, when set, is the explicit list of boards a card event concerns (BoardID should be among them; it stays
+	// the origin). notify.Record then writes one activity row and publishes to one room per listed board instead of
+	// asking the cards domain for the card's placements. Writers set it when the placements are gone by the time the
+	// event is recorded (a deleted card: read them BEFORE the write) and when an event must stay on fewer boards than
+	// the card is on (one board's labels or custom fields, the source half of a cross-board move).
+	Boards []string
 	// Mention/subscriber notification inputs are derived by notify from Type+Data.
 }
 

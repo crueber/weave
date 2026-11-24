@@ -7,14 +7,17 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"sort"
@@ -24,11 +27,31 @@ import (
 	"time"
 
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
 
 const canary = "CANARY"
+
+// sweepHookHost is the host of the seeded board webhook. Webhooks created by non-admins go through the strict
+// destination policy, which resolves the host: the test resolver answers a public documentation address, and the
+// dialer refuses at once, so no test ever connects out (and with no retry backoff nothing lingers).
+const sweepHookHost = "hooks.example.test"
+
+func init() {
+	real := notify.LookupIP
+	notify.LookupIP = func(ctx context.Context, host string) ([]net.IP, error) {
+		if host == sweepHookHost {
+			return []net.IP{net.ParseIP("203.0.113.7")}, nil
+		}
+		return real(ctx, host)
+	}
+	notify.WebhookDialer = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("test: outbound webhook connections are disabled")
+	}
+	notify.RetryBackoff = nil
+}
 
 type world struct {
 	e    *env
@@ -59,6 +82,20 @@ func (e *env) raw(key, method, path string, body any) (int, []byte) {
 	defer res.Body.Close()
 	b, _ := io.ReadAll(res.Body)
 	return res.StatusCode, b
+}
+
+// rawPatient is raw that waits out the per-principal rate limit (a sweep makes more requests than the burst allows,
+// and a 429 would otherwise count as "denied" without checking anything).
+func (e *env) rawPatient(key, method, path string, body any) (int, []byte) {
+	code, b := e.raw(key, method, path, body)
+	for tries := 0; code == http.StatusTooManyRequests && tries < 100; tries++ {
+		time.Sleep(100 * time.Millisecond)
+		code, b = e.raw(key, method, path, body)
+	}
+	if code == http.StatusTooManyRequests {
+		e.t.Errorf("%s %s: still rate limited after retries", method, path)
+	}
+	return code, b
 }
 
 // mk seeds data as the given key and returns the created item ({} when seeding failed).
@@ -121,7 +158,7 @@ func pngBytes() []byte {
 func newWorld(t *testing.T) *world {
 	e := newEnv(t)
 	w := &world{e: e, ids: map[string]string{}, keys: map[string]string{"anon": ""}, uid: map[string]string{}}
-	A := e.newUser("a-owner@x.io", "projectOwner")
+	A := e.newUser("a-owner@x.io", "boardUser")
 	w.keys["A"], w.keys["admin"] = A, e.admin
 	w.keys["B"] = e.newUser("b-outsider@x.io", "boardUser")
 	w.keys["V"] = e.newUser("v-viewer@x.io", "boardUser")
@@ -177,11 +214,18 @@ func newWorld(t *testing.T) *world {
 	I["draft"] = id(e.mk(A, "POST", "/boards/"+I["board"]+"/drafts", map[string]any{"name": "DraftCANARY"}))
 	I["cardtpl"] = id(e.mk(A, "POST", "/cards/"+I["card2"]+"/template", map[string]any{"name": "TplCANARY"}))
 	I["tplboard"] = id(e.mk(A, "POST", "/projects/"+I["project"]+"/boards", map[string]any{"name": "TemplateBoardCANARY"}))
+	e.mk(A, "POST", "/boards/"+I["tplboard"]+"/lists", map[string]any{"name": "Template column"}) // board.template.apply needs an open column
 	e.mk(A, "POST", "/boards/"+I["tplboard"]+"/template", map[string]any{"isTemplate": true, "visibility": "private"})
 	I["ns"] = id(e.mk(A, "POST", "/notification-services", map[string]any{"url": "generic://example.com/hook?token=CANARY", "boardId": I["board"]}))
-	I["webhook"] = "wh-fake"
+	// a board webhook and an agent created by the board's owner (A), not by an admin
+	I["webhook"] = id(e.mk(A, "POST", "/webhooks", map[string]any{"name": "HookCANARY", "url": "https://" + sweepHookHost + "/CANARY", "boardId": I["board"], "secret": "SECRET-CANARY"}))
+	I["delivery"] = "dl-CANARY"
+	if _, err := e.d.Exec(`INSERT INTO webhook_deliveries(id,webhook_id,event,attempts,payload,response_body,created_at) VALUES(?,?,?,1,?,?,?)`,
+		I["delivery"], I["webhook"], "cardCreate", `{"event":"cardCreate","data":"PayloadCANARY"}`, "ResponseCANARY", db.Now()); err != nil {
+		t.Errorf("delivery seed: %v", err)
+	}
 	I["group"] = id(e.mk(e.admin, "POST", "/user-groups", map[string]any{"name": "GroupCANARY"}))
-	I["agent"] = id(e.mk(e.admin, "POST", "/agents", map[string]any{"name": "AgentCANARY", "boardIds": []string{I["board"]}}))
+	I["agent"] = id(e.mk(A, "POST", "/agents", map[string]any{"name": "AgentCANARY", "boardIds": []string{I["board"]}}))
 	I["basegroup"] = id(e.mk(A, "POST", "/projects/"+I["project"]+"/base-custom-field-groups", map[string]any{"name": "BFG CANARY"}))
 	I["basefield"] = id(e.mk(A, "POST", "/base-custom-field-groups/"+I["basegroup"]+"/custom-fields", map[string]any{"name": "BF CANARY", "type": "text"}))
 	I["image"] = id(e.upload(A, "/projects/"+I["project"]+"/background-images", "bg.png", pngBytes()))
@@ -265,6 +309,8 @@ func (w *world) val(o *ops.Op, f ops.Field, caller string) (string, bool) {
 		return "original", true
 	case "id":
 		switch {
+		case o.Name == "webhook.retry":
+			return I["delivery"], true
 		case o.Name == "card.fromTemplate":
 			return I["cardtpl"], true
 		case o.Name == "card.draft.publish":
@@ -300,7 +346,7 @@ var bodyDefaults = map[string]any{
 	"hours": 1, "to": "x@x.io", "signature": "x", "type": "text", "role": "editor", "isPublic": true, "enabled": true,
 	"description": "pwn", "isClosed": true, "closed": true, "trash": false, "completed": true, "query": "x", "month": "2026-01",
 	"recurrence": "", "dueDate": "2030-01-01", "isDeactivated": true, "lat": 1.5, "lng": 2.5, "unset": false, "isTemplate": true,
-	"data": "{}", "canComment": true, "scope": "general",
+	"data": "{}", "canComment": true, "scope": "general", "confirm": true,
 }
 
 type result struct {
@@ -373,6 +419,15 @@ func (w *world) call(o *ops.Op, caller string) result {
 		body["format"], body["data"] = "json", `{"lists":[{"name":"x","cards":[{"name":"y"}]}]}`
 	case "card.fromTemplate":
 		body["listId"] = w.ids["list"]
+	case "agent.create":
+		body["boardIds"] = []string{w.ids["board"]}
+		delete(body, "role") // only admins choose an agent's role
+	case "agent.update":
+		delete(body, "role")
+	case "webhook.create", "webhook.update":
+		body["url"] = "https://" + sweepHookHost + "/x"
+		delete(body, "projectId") // admin-only scopes and filters
+		delete(body, "userId")
 	}
 	if len(q) > 0 {
 		path += "?" + strings.Join(q, "&")
@@ -381,7 +436,9 @@ func (w *world) call(o *ops.Op, caller string) result {
 	if o.Method != "GET" && o.Method != "DELETE" {
 		bd = body
 	}
-	code, b := w.e.raw(w.keys[caller], o.Method, path, bd)
+	// The per-principal rate limit (burst 200) would otherwise answer 429 to every op after the first ~200 of a
+	// sweep, so those ops were never checked: wait for a token and repeat the call.
+	code, b := w.e.rawPatient(w.keys[caller], o.Method, path, bd)
 	// search echoes the query back; only its results can leak
 	leak := strings.Contains(strings.ReplaceAll(string(b), `"query":"`+canary+`"`, ""), canary)
 	return result{caller: caller, op: o.Name, method: o.Method, path: path, status: code, leak: leak, body: string(b)}
@@ -403,12 +460,15 @@ var publicOps = map[string]string{
 var selfOps = map[string]string{
 	"auth.me": "self", "auth.whoami": "self", "dashboard.get": "self", "dashboard.update": "self", "notification.list": "self",
 	"notification.read_all": "self", "notification.unread_count": "self", "presence.list": "directory presence", "presence.set": "self",
-	"project.list": "only visible projects", "board.list": "only visible boards", "board.template.list": "built-in templates plus published ones visible to the caller (authz.TemplateVisible); the seeded template is private",
+	"project.list": "only visible projects", "project.create": "any signed-in admin or boardUser may create a project of their own (authz.CanCreateProject; workers, guests and agents get 403); it touches no seeded data", "board.list": "only visible boards", "board.template.list": "built-in templates plus published ones visible to the caller (authz.TemplateVisible); the seeded template is private",
 	"board.template.get": "built-in templates are open to every signed-in user; a published one answers not_found unless visible to the caller",
 	"search.query":       "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
 	"user.get": "directory entry", "user.list": "directory of active users", "group.get": "directory", "group.list": "directory",
 	"notification_service.list": "own services", "apikey.get": "own key status", "whoami": "self",
 	"subscription.list": "own watches, filtered to boards the caller can still view (authz.BoardLevels)",
+	"webhook.events":    "the static list of event names a board webhook may subscribe to (no data)",
+	"agent.list":        "only agents the caller created or that hold access to boards the caller manages (authz.CanSeeAgent); outsiders get an empty list",
+	"webhook.list":      "only board webhooks of boards the caller manages (authz.BoardLevels Manage); outsiders get an empty list",
 	"agent.prompt":      "scopes general/runner are instance text (the admin default or the built-in one) with no object data; project/board/list/workorder answer not_found unless the caller can view the object (the sweep checks the leak marker)",
 }
 
@@ -553,6 +613,9 @@ var ownerUnverified = map[string]bool{
 	"customfieldvalue.set": true, "label.project.create": true, "list.clear": true, "notification.read": true, "notification_service.test": true,
 	"project.background.upload": true, "project.manager.add": true, "project.manager.remove": true, "time.stop": true,
 	"user.avatar.get": true, "user.avatar.update": true,
+	// the seeded card is on one board: placing it on that board again is a conflict and removing its only board is
+	// refused (cards/multiboard_test.go covers both ops with a second board, per persona)
+	"card.place": true, "card.unplace": true,
 }
 
 // Every registered web route: anonymous callers get nothing from non-public pages; no caller outside
@@ -560,7 +623,7 @@ var ownerUnverified = map[string]bool{
 func TestAuthzSweepWebRoutes(t *testing.T) {
 	w := newWorld(t)
 	var ids []string
-	for _, k := range []string{"card", "board", "list", "project", "attachment", "comment", "task", "pubboard", "image", "cfgroup", "userA", "session", "ns", "member"} {
+	for _, k := range []string{"card", "board", "list", "project", "attachment", "comment", "task", "pubboard", "image", "cfgroup", "userA", "session", "ns", "member", "webhook", "agent"} {
 		ids = append(ids, w.ids[k])
 	}
 	for _, rp := range web.RoutePatterns() {
@@ -583,7 +646,7 @@ func TestAuthzSweepWebRoutes(t *testing.T) {
 				if strings.Contains(p, "{") || (strings.HasSuffix(p, "/") && strings.Contains(p, "/ui/cards/")) {
 					continue
 				}
-				code, b := w.e.raw(w.keys[caller], "GET", p, nil)
+				code, b := w.e.rawPatient(w.keys[caller], "GET", p, nil)
 				isShare := strings.HasPrefix(p, "/share/")
 				if code == 200 && !public && caller == "anon" {
 					t.Errorf("anon GET %s -> 200 on a non-public route", p)
@@ -606,7 +669,7 @@ func TestAuthzSweepWebRoutes(t *testing.T) {
 	for _, p := range []string{"/attachments/" + w.ids["attachment"] + "/download/secret.txt", "/attachments/" + w.ids["attachment"] + "/thumbnail",
 		"/boards/" + w.ids["board"] + "/media", "/ui/boards/" + w.ids["board"] + "/activity"} {
 		for _, caller := range []string{"anon", "B"} {
-			code, b := w.e.raw(w.keys[caller], "GET", p, nil)
+			code, b := w.e.rawPatient(w.keys[caller], "GET", p, nil)
 			if code == 200 || strings.Contains(string(b), "ATTACHMENT-CANARY-BODY") || strings.Contains(string(b), canary) {
 				t.Errorf("%s GET %s -> %d (must be denied)", caller, p, code)
 			}
@@ -614,7 +677,7 @@ func TestAuthzSweepWebRoutes(t *testing.T) {
 	}
 	for _, sec := range []string{"tasks", "comments", "attachments", "fields", "time", "activity"} {
 		for _, caller := range []string{"anon", "B"} {
-			code, b := w.e.raw(w.keys[caller], "GET", "/ui/cards/"+w.ids["card"]+"/"+sec, nil)
+			code, b := w.e.rawPatient(w.keys[caller], "GET", "/ui/cards/"+w.ids["card"]+"/"+sec, nil)
 			if strings.Contains(string(b), canary) {
 				t.Errorf("%s GET /ui/cards/<id>/%s -> %d leaked seeded data", caller, sec, code)
 			}

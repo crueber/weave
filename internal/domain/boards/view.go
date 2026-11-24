@@ -85,7 +85,13 @@ type Tile struct {
 	ClaimedBy                  string // name of the holder of an unexpired claim
 	ClaimedUntil               string // HH:MM
 	ClaimedUntilRaw            string
-	desc                       string
+	Running                    bool   // the card's stopwatch (time tracking) is running
+	Place                      string // the card's location (its name, or "lat, lng"); "" when none
+	AlsoOn                     int    // how many OTHER boards the viewer can see this card on ("also on" marker data; the marker itself comes later)
+	// CanEdit: the caller may edit this card although the board gives them no Edit (authz.CardCaps.CanEdit: a worker
+	// who is a member of the card). Board editors use PageData.CanEdit; the tile offers quick edit for either.
+	CanEdit bool
+	desc    string
 }
 type TileLabel struct{ ID, Name, Color string }
 type TileMember struct {
@@ -127,8 +133,9 @@ type PageData struct {
 	Board       Board
 	ProjectName string // empty on the public page (the project is not disclosed)
 	Level       string
-	CanEdit     bool
-	CanManage   bool
+	Caps        authz.BoardCaps // what the caller may do here (authz.Board; on the read-only public page: view only)
+	CanEdit     bool            // Caps.CanEdit (kept for the column, tile and composer templates)
+	CanManage   bool            // Caps.CanManage
 	ReadOnly    bool
 	Public      bool
 	View        string
@@ -158,8 +165,15 @@ func addCardPattern() string {
 
 // loadPage assembles a board's page data using the caller's permissions.
 func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, error) {
-	lvl := authz.BoardLevel(e, b.ID)
-	pd := &PageData{Board: b, Level: levelName(lvl), CanEdit: !readOnly && lvl >= authz.Edit, CanManage: !readOnly && lvl >= authz.Manage, ReadOnly: readOnly,
+	caps := authz.Board(e, b.ID)
+	if readOnly {
+		// The /public/{token} page is a read-only rendering whoever looks at it: it offers no writes, no settings,
+		// no watching and no Inbox, only "Connect an agent" for a signed-in viewer (agent.prompt needs View, which
+		// the public board gives them).
+		caps = authz.BoardCaps{BoardID: caps.BoardID, ProjectID: caps.ProjectID, Level: caps.Level, Public: caps.Public, CanView: caps.CanView,
+			CanConnectAgent: caps.CanConnectAgent}
+	}
+	pd := &PageData{Board: b, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, ReadOnly: readOnly,
 		Public: readOnly && e.User == nil, Filter: parseFilter(v)}
 	pd.Query = pd.Filter.Query()
 	pd.PageURL = "/boards/" + b.ID

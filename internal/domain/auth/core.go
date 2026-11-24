@@ -30,8 +30,8 @@ const (
 	pendingTTL   = 10 * time.Minute // pending-terms sessions
 )
 
-// Roles is the allowed role set.
-var Roles = []string{"admin", "projectOwner", "boardUser", "worker", "guest"}
+// Roles is the allowed role set (highest first). admin and boardUser may create projects; worker and guest may not.
+var Roles = []string{"admin", "boardUser", "worker", "guest"}
 
 func validRole(r string) bool {
 	for _, x := range Roles {
@@ -199,7 +199,7 @@ func authenticate(e *ops.Env, r *http.Request) *ops.Principal {
 			return nil
 		}
 		if keyExp.Valid && keyExpired(&keyExp.String) {
-			e.AuthMsg = "API key expired; generate a new one (Settings, or ask an administrator for an agent key)"
+			e.AuthMsg = "API key expired; generate a new one in Settings (an agent account: whoever created it rotates its key in Board settings > Agents)"
 			return nil
 		}
 		if p.IsAgent && !explicit && !strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
@@ -267,7 +267,7 @@ const BackgroundHeader = "X-Weave-Background"
 
 func isBackground(r *http.Request) bool {
 	switch p := r.URL.Path; {
-	case p == "/ui/presence", p == "/events", p == "/api/v1/presence":
+	case p == "/ui/presence", p == "/events", p == "/api/v1/presence", p == "/ui/notifications/badge":
 		return true
 	case strings.HasPrefix(p, "/ui/cards/") && (strings.HasSuffix(p, "/editing") || strings.HasSuffix(p, "/editing/touch")):
 		return true

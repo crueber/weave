@@ -160,6 +160,13 @@ the error tail, release, optional `--fail-list`). The lease is renewed automatic
 - Never work on a card claimed by someone else, and never claim more cards than you can handle at once.
 - Handlers must be **idempotent**: events are delivered at least once. Re-check state (`weave card show`) before acting.
 
+### One card on several boards
+
+A card may be on several boards (the same card: `weave card placements CARD`). Moves, column and labels are per
+board (`card move` moves the placement on the target list's board; pass `--boardId` when ambiguous); everything else
+is the card's, including **closed**, and **archive/trash/delete act on every board**. `card unplace CARD BOARD`
+("Remove from board") takes it off one board only. Details: `references/commands.md` "One card on several boards".
+
 ## 7. Safe defaults
 
 - Read before write: `board tree`, `card show --full`. Comment instead of editing descriptions you do not own.

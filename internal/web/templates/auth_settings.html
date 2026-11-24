@@ -56,7 +56,7 @@
       <input id="as-phone" name="phone" value="{{deref $u.Phone}}" autocomplete="tel"></div>
     <div class="bs-row bs-row-stack"><span class="bs-text"><b><label for="as-org">Organization</label></b><small>Optional.</small></span>
       <input id="as-org" name="organization" value="{{deref $u.Organization}}" autocomplete="organization"></div>
-    <div class="bs-row"><span class="bs-text"><b>Role</b><small>Name, email and role come from your identity provider (OIDC groups) and refresh when you sign in.</small></span><span class="bs-value"><span class="boards-badge">{{$u.Role}}</span></span></div>
+    <div class="bs-row"><span class="bs-text"><b>Role</b><small>Name, email and role come from your identity provider (OIDC groups) and refresh when you sign in.</small></span><span class="bs-value"><span class="boards-badge" title="{{$u.Role}}">{{authRoleLabel $u.Role}}</span></span></div>
   </form>
   <p class="bs-hint">Changes save automatically.</p>
 </section>{{end}}

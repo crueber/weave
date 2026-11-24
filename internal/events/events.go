@@ -45,6 +45,9 @@ type CardSnap struct {
 	ClaimedUntil         *string  `json:"claimedUntil"`
 	TasksTotal           int      `json:"tasksTotal"`
 	TasksCompleted       int      `json:"tasksCompleted"`
+	// AlsoOnBoards is per viewer (board.tree only, never in event envelopes): how many OTHER boards the viewer can
+	// see this card on.
+	AlsoOnBoards int `json:"alsoOnBoards,omitempty"`
 }
 
 // Actor is who caused an event.
@@ -56,7 +59,11 @@ type Actor struct {
 
 // Envelope is the event as seen by SSE clients.
 type Envelope struct {
-	ID         string         `json:"id,omitempty"`
+	ID string `json:"id,omitempty"`
+	// Origin identifies the logical event: an event about a card on several boards is stored once per board (one
+	// envelope per board, each with its own id), and every copy carries the same origin. Consumers streaming several
+	// boards dedupe by it. Envelopes stored before placements existed have none.
+	Origin     string         `json:"origin,omitempty"`
 	Type       string         `json:"type"`
 	BoardID    string         `json:"boardId"`
 	ListID     string         `json:"listId,omitempty"`
@@ -75,6 +82,74 @@ var Snapshot func(e *ops.Env, cardID string) *CardSnap
 
 // Snapshots is the batch form of Snapshot (same order as ids, missing cards skipped).
 var Snapshots func(e *ops.Env, ids []string) []CardSnap
+
+// SnapshotOn is the snapshot of a card as seen on one board (its placement there: boardId, listId, position, and
+// only the labels shown on that board); nil when the card is not placed on boardID. Snapshot and Snapshots keep
+// meaning the home board. Installed by the cards domain.
+var SnapshotOn func(e *ops.Env, cardID, boardID string) *CardSnap
+
+// SnapshotsOn is the batch form of SnapshotOn (same order as ids, cards not placed on boardID skipped).
+var SnapshotsOn func(e *ops.Env, boardID string, ids []string) []CardSnap
+
+// Placement is one board a card is on, as the event fan-out needs it.
+type Placement struct {
+	BoardID string
+	ListID  string
+	IsHome  bool
+}
+
+// Placements lists the placements of a card (home first, then by placed_at; empty when the card does not exist);
+// installed by the cards domain. notify.Record uses it to find the boards a card-level event concerns.
+var Placements func(e *ops.Env, cardID string) []Placement
+
+// CardOn is the full card payload (data.card of card events: the cards.Card shape) as seen on one board: that
+// placement's column and position, only that board's labels, and none of the per-viewer fields (watch state,
+// placements, share token). nil when the card is not placed on boardID. No access check: the payload goes to that
+// board's room, activity row and webhooks. Installed by the cards domain.
+var CardOn func(e *ops.Env, cardID, boardID string) any
+
+// Event types of placements (phase 4 ops `card.place` / `card.unplace` emit them; defined here so the fan-out and
+// webhook scope rules exist before any op can create a second placement).
+const (
+	TypePlace        = "cardPlace"              // activity type: the card was placed on ev.BoardID
+	TypeUnplace      = "cardUnplace"            // activity type: the card was removed from ev.BoardID
+	StreamPlaced     = "card.placed"            // stream type of TypePlace (agents treat it as an arrival on that board)
+	StreamUnplaced   = "card.unplaced"          // stream type of TypeUnplace
+	PlacementChanged = "card.placement.changed" // unstored realtime nudge to the card's OTHER boards: {cardId} only
+)
+
+// CardLevel is the routing key (ops.Event.Data) of a card event that moves EVERY placement of the card: card.archive
+// (archive or trash) and card.restore set it to true. Routing only: notify strips it from the stored data, the room
+// publishes and webhook payloads, and the envelope never carries it.
+const CardLevel = "cardLevel"
+
+// PlacementLists is the routing key (ops.Event.Data, map[string][2]string: board id -> [from, to] column of that
+// board's placement) of a card-level move (card.archive, card.restore): the fan-out gives each board's copy its own
+// fromListId/toListId, so a lists= filter or the column activity of the column a placement LEFT on another board
+// sees the move. Never stored, published or sent (notify strips it like CardLevel).
+const PlacementLists = "placementLists"
+
+// PlacementScoped reports whether a card event concerns ONE placement (scope = ev.BoardID only) rather than the card
+// (scope = every board the card is on). Placement events: a card created in a column; a card.moved that moved one
+// placement (card.move within a board or to another board, a column moved, archived or deleted with its cards, a
+// column's archive-after rule); a card placed on or removed from a board. A card.moved that carries CardLevel
+// (card.archive, card.restore: they move every placement) is card-level, and so is everything else (fields, closed
+// state, comments, members, labels' card rows, tasks, claims, delete). An event that lists its boards explicitly
+// (ops.Event.Boards) is fanned out to that list, whatever its type; this still decides whether the card's other
+// boards get the card.placement.changed nudge and who the notification planner considers.
+func PlacementScoped(ev ops.Event) bool {
+	switch ev.Type {
+	case "cardCreate", TypePlace, TypeUnplace:
+		return true
+	case "cardMove":
+		if fb := sval(ev.Data, "fromBoardId"); fb != "" && fb != ev.BoardID {
+			return true // a cross-board relocation of one placement
+		}
+		all, _ := ev.Data[CardLevel].(bool)
+		return !all
+	}
+	return false
+}
 
 // TaskCounts returns {total, completed} checklist task counts per card id (cards without tasks
 // may be absent) in one aggregate query; installed by the cardextras domain, which owns tasks.
@@ -120,21 +195,34 @@ func sval(m map[string]any, k string) string {
 	return s
 }
 
-var noise = []string{"card", "actionId", "cardId", "boardId", "fromListId", "toListId", "listId"}
+var noise = []string{"card", "actionId", "originId", "actionAt", CardLevel, PlacementLists, "cardId", "boardId", "fromListId", "toListId", "listId"}
 
-// Build assembles the envelope for an op event (call after the mutation committed).
+// Build assembles the envelope for an op event (call after the mutation committed). For a card event the card is
+// the snapshot on ev.BoardID (notify.Record calls Build once per board of the event, with that board's event).
+// Origin is ev.Data["originId"] (a fan-out copy) or else ev.Data["actionId"] (the origin itself).
 func Build(e *ops.Env, ev ops.Event) Envelope {
 	env := Envelope{Type: TypeFor(ev), BoardID: ev.BoardID, CardID: ev.CardID, At: db.Now(), Actor: Actor{Name: "system"}}
+	if env.Origin = sval(ev.Data, "originId"); env.Origin == "" {
+		env.Origin = sval(ev.Data, "actionId")
+	}
+	if at := sval(ev.Data, "actionAt"); at != "" {
+		env.At = at // every copy of one logical event has the same time
+	}
 	if e.User != nil {
 		env.Actor = Actor{ID: e.User.UserID, Name: e.User.Name, IsAgent: e.User.IsAgent}
 	}
 	d := ev.Data
 	env.FromListID, env.ToListID = sval(d, "fromListId"), sval(d, "toListId")
 	env.ListID = sval(d, "listId")
-	if ev.CardID != "" && Snapshot != nil {
+	switch {
+	case ev.CardID != "" && ev.BoardID != "" && SnapshotOn != nil:
+		// the card as seen on the event's board; nil when it is not placed there (e.g. the source-board "deleted"
+		// half of a cross-board move): never expose another board's placement
+		env.Card = SnapshotOn(e, ev.CardID, ev.BoardID)
+	case ev.CardID != "" && Snapshot != nil:
 		env.Card = Snapshot(e, ev.CardID)
 		if env.Card != nil && ev.BoardID != "" && env.Card.BoardID != ev.BoardID {
-			env.Card = nil // e.g. the source-board "deleted" half of a cross-board move: never expose the other board's card
+			env.Card = nil
 		}
 	}
 	if env.ListID == "" && env.Card != nil {
@@ -248,12 +336,16 @@ func Query(ctx context.Context, d *db.DB, f Filter) ([]Row, error) {
 // target of a move), newest first. before > 0 pages: only events with seq < before. Only the
 // given event types are returned (empty = all). Events past the retention window (see Purge)
 // have no envelope any more and are not returned.
+//
+// Quiet per-card events (data.quiet = true: bulk side effects such as a column's auto-archive pass) are left out; each
+// bulk change records its own summary event on the column (list.updated), which is what the feed shows.
 func Recent(ctx context.Context, d *db.DB, boardID, listID string, types []string, before int64, limit int) ([]Row, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	args := []any{boardID, listID, listID, listID}
-	q := `SELECT seq,board_id,etype,envelope FROM actions WHERE board_id=? AND seq IS NOT NULL AND envelope IS NOT NULL AND (list_id=? OR from_list_id=? OR to_list_id=?) `
+	q := `SELECT seq,board_id,etype,envelope FROM actions WHERE board_id=? AND seq IS NOT NULL AND envelope IS NOT NULL AND (list_id=? OR from_list_id=? OR to_list_id=?)
+		AND (card_id IS NULL OR json_extract(envelope,'$.data.quiet') IS NOT 1) `
 	if len(types) > 0 {
 		q += `AND ` + in("etype", types, &args) + ` `
 	}

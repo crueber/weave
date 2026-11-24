@@ -16,12 +16,12 @@
       </select>
       <label class="projects-check"><input type="checkbox" name="hidden" value="true"{{if .Data.Hidden}} checked{{end}}> Show hidden</label>
     </form>
-    {{if .Data.CanCreate}}<button class="primary" hx-get="/ui/projects/new" hx-target="#modal">New project</button>{{end}}
+    {{if .Data.CanCreate}}<button class="primary" data-cap="home-create-project" hx-get="/ui/projects/new" hx-target="#modal">New project</button>{{end}}
   </header>
   <div id="project-list">{{template "projects-list" .}}</div>
 </section>{{end}}
 
-{{define "projects-list"}}{{if not .Data.Sections}}<div class="empty-state"><span class="empty-art" aria-hidden="true">{{if .Data.Search}}&#128270;{{else}}&#127793;{{end}}</span>{{if .Data.Search}}<h2>Nothing matches that</h2><p>No projects match your search. Try a different word, or clear the filter.</p>{{else}}<h2>A fresh start</h2><p>You have no projects yet.{{if .Data.CanCreate}} Create your first project and start weaving work together.{{else}} Ask an administrator to create a project or make you a project owner.{{end}}</p>{{if .Data.CanCreate}}<button class="primary" hx-get="/ui/projects/new" hx-target="#modal">Create a project</button>{{end}}{{end}}</div>{{end}}
+{{define "projects-list"}}{{if not .Data.Sections}}<div class="empty-state"><span class="empty-art" aria-hidden="true">{{if .Data.Search}}&#128270;{{else}}&#127793;{{end}}</span>{{if .Data.Search}}<h2>Nothing matches that</h2><p>No projects match your search. Try a different word, or clear the filter.</p>{{else}}<h2>{{if .Data.CanCreate}}Start your first project{{else}}Nothing here yet{{end}}</h2>{{if .Data.CanCreate}}<p>A project holds boards; boards hold columns of cards. Create a project and you manage it: add boards, invite people to them as owners, editors or viewers, and connect AI agents.</p><p>Projects you are invited to show up here too.</p><button class="primary" hx-get="/ui/projects/new" hx-target="#modal">Create your first project</button>{{else}}<p>You have no projects yet. When someone adds you to a board, its project shows up here.</p>{{end}}{{end}}</div>{{end}}
 {{range .Data.Sections}}<section class="projects-section">{{if .Title}}<h2>{{.Title}}</h2>{{end}}
   <div class="projects-grid">{{range .Projects}}{{template "projects-card" dict "P" .}}{{end}}</div>
 </section>{{end}}{{end}}

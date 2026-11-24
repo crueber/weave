@@ -42,7 +42,7 @@ func exportBoardFields(ctx context.Context, q boards.Querier, boardID string, wi
 		return nil, nil, err
 	}
 	if withValues {
-		cg, err := query(ctx, q, scan, sel+`g.card_id IN (SELECT id FROM cards WHERE board_id=?) ORDER BY g.position,g.id`, boardID)
+		cg, err := query(ctx, q, scan, sel+`g.card_id IN (SELECT card_id FROM card_placements WHERE board_id=?) ORDER BY g.position,g.id`, boardID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -82,7 +82,7 @@ func exportBoardFields(ctx context.Context, q boards.Querier, boardID string, wi
 	rows, err := query(ctx, q, func(r *sql.Rows) ([3]string, error) {
 		var x [3]string
 		return x, r.Scan(&x[0], &x[1], &x[2])
-	}, `SELECT r.card_id,r.group_id,r.id FROM custom_field_rows r JOIN cards c ON c.id=r.card_id WHERE c.board_id=? ORDER BY r.position,r.id`, boardID)
+	}, `SELECT r.card_id,r.group_id,r.id FROM custom_field_rows r JOIN card_placements p ON p.card_id=r.card_id WHERE p.board_id=? ORDER BY r.position,r.id`, boardID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -94,7 +94,7 @@ func exportBoardFields(ctx context.Context, q boards.Querier, boardID string, wi
 	vs, err := query(ctx, q, func(r *sql.Rows) ([5]string, error) {
 		var x [5]string
 		return x, r.Scan(&x[0], &x[1], &x[2], &x[3], &x[4])
-	}, `SELECT v.card_id,v.group_id,v.field_id,v.row_id,COALESCE(v.content,'') FROM custom_field_values v JOIN cards c ON c.id=v.card_id WHERE c.board_id=? ORDER BY v.card_id`, boardID)
+	}, `SELECT v.card_id,v.group_id,v.field_id,v.row_id,COALESCE(v.content,'') FROM custom_field_values v JOIN card_placements p ON p.card_id=v.card_id WHERE p.board_id=? ORDER BY v.card_id`, boardID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,6 +128,11 @@ func importBoardFields(ctx context.Context, tx *sql.Tx, boardID string, groups [
 		fields   map[string]fk
 	}
 	made := map[string]gk{}
+	// Board-wide groups go after the board's own (0 on a new board; board.template.apply adds to an existing one).
+	var base float64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),0) FROM custom_field_groups WHERE board_id=?`, boardID).Scan(&base); err != nil {
+		return err
+	}
 	for i, g := range groups {
 		if i >= maxDocGroups {
 			break
@@ -146,8 +151,12 @@ func importBoardFields(ctx context.Context, tx *sql.Tx, boardID string, groups [
 			continue // a card-level group of a card that is not part of the copy
 		}
 		gid := db.NewID()
+		pos := float64(i+1) * db.PositionGap
+		if g.Card == "" {
+			pos += base
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO custom_field_groups(id,board_id,card_id,name,repeatable,position,created_at) VALUES(?,?,?,?,?,?,?)`,
-			gid, board, card, nullIfEmpty(name), b2i(g.Repeatable), float64(i+1)*db.PositionGap, now); err != nil {
+			gid, board, card, nullIfEmpty(name), b2i(g.Repeatable), pos, now); err != nil {
 			return err
 		}
 		made[g.ID] = gk{id: gid, card: newCard, rep: g.Repeatable, fields: map[string]fk{}}

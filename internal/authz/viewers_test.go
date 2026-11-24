@@ -71,12 +71,13 @@ func TestViewersAmongAgreesWithBoardLevel(t *testing.T) {
 	}
 	// spot checks so the agreement above is not vacuous
 	priv := authz.ViewersAmong(e, "priv", ids)
-	for _, id := range []string{"admin", "mgr", "member", "viewer", "grp", "guestm", "worker"} {
+	for _, id := range []string{"mgr", "member", "viewer", "grp", "guestm", "worker"} {
 		if !priv[id] {
 			t.Errorf("%s should view the private board", id)
 		}
 	}
-	for _, id := range []string{"outsider", "guest", "deact", "deleted", "deactadmin"} {
+	// an admin without a membership is an outsider: the admin role gives no content access
+	for _, id := range []string{"admin", "outsider", "guest", "deact", "deleted", "deactadmin"} {
 		if priv[id] {
 			t.Errorf("%s must not view the private board", id)
 		}

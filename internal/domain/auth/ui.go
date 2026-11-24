@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/web"
 )
@@ -19,7 +21,23 @@ const (
 	oidcVerifierCk = "weave_oidc_pkce"
 )
 
+// RoleLabel is the friendly name of a user role for people (the API keeps the raw value).
+func RoleLabel(role string) string {
+	switch role {
+	case "admin":
+		return "Admin"
+	case "boardUser":
+		return "Member"
+	case "worker":
+		return "Worker"
+	case "guest":
+		return "Guest"
+	}
+	return role
+}
+
 func init() {
+	web.AddFuncs(template.FuncMap{"authRoleLabel": RoleLabel})
 	web.AddFuncs(template.FuncMap{"authInitial": func(s string) string {
 		r, _ := utf8.DecodeRuneInString(strings.TrimSpace(s))
 		if r == utf8.RuneError {
@@ -378,7 +396,17 @@ type usersData struct {
 	Q               string
 	ShowDeactivated bool
 	Flash, Error    string
+	// Orphans counts, per user id, the projects that would have no active manager left if that person were
+	// deactivated or deleted (OwnershipImpact; counts only, never names).
+	Orphans map[string]int
 }
+
+// OwnershipImpact is set by the projects domain (which owns project_managers): for each user id, how many projects
+// would become ownerless without that person. nil (no projects domain linked) shows no warning.
+var OwnershipImpact func(ctx context.Context, d *db.DB, userIDs []string) map[string]int
+
+// Orphaned is the template helper for the per-user warning.
+func (d usersData) Orphaned(userID string) int { return d.Orphans[userID] }
 
 func renderUsers(c *web.Ctx, flash, errm string) error {
 	q := c.R.URL.Query()
@@ -390,6 +418,13 @@ func renderUsers(c *web.Ctx, flash, errm string) error {
 		return err
 	}
 	d := usersData{Users: l.Items, Roles: Roles, Q: q.Get("q"), ShowDeactivated: q.Get("includeDeactivated") == "true", Flash: flash, Error: errm}
+	if OwnershipImpact != nil {
+		ids := make([]string, 0, len(l.Items))
+		for _, u := range l.Items {
+			ids = append(ids, u.ID)
+		}
+		d.Orphans = OwnershipImpact(c.Env.Ctx, c.Env.DB, ids)
+	}
 	if c.IsHTMX() {
 		return c.RenderBlock("auth_admin_users.html", "users-body", d)
 	}

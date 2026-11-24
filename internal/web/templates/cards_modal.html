@@ -5,12 +5,14 @@
      properties rail (one labelled row per property, each editing in a small popover). Lazy sections keep
      their hx-get endpoints and ids; popovers are <details class="cards-pop" data-pop="..."> managed by cards_ui.js. */}}
 {{define "cards_modal_body"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}
-<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script>
-<div id="card-modal" class="cards-modal cm" hx-target="#card-modal" hx-swap="outerHTML" data-card="{{$c.ID}}" data-board="{{$c.BoardID}}" aria-label="Card: {{$c.Name}}">
+<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script><script src="/static/cards_place.js"></script>
+<div id="card-modal" class="cards-modal cm" hx-target="#card-modal" hx-swap="outerHTML" data-card="{{$c.ID}}" data-board="{{$c.BoardID}}" data-list-type="{{$o.ListType}}"{{if $edit}} data-can-edit="1"{{end}}{{if $c.IsClosed}} data-closed="1"{{end}}{{if $c.IsDraft}} data-draft="1"{{end}}{{if $c.IsTemplate}} data-template="1"{{end}}{{if $d.Multi}} data-multi="1"{{end}}{{if $d.Caps.CanPlace}} data-can-place="1"{{end}}{{if $d.Others}} data-others="{{$d.Others}}"{{end}} hx-vals='{"board":"{{$c.BoardID}}"}' aria-label="Card: {{$c.Name}}">
+  {{/* hx-vals: every request of the sheet (fragments, edits, re-renders) carries the context board as "board"
+       (web.Ctx.BoardHint); it is the RESOLVED board (card.get), never the raw ?board= of the request. */}}
   <div class="cm-top">
     <nav class="cm-crumb" aria-label="Breadcrumb">
-      {{if $o.ProjectName}}<a href="/projects/{{$o.ProjectID}}">{{$o.ProjectName}}</a><span class="cm-sep" aria-hidden="true">/</span>{{end}}<a href="/boards/{{$c.BoardID}}">{{$o.BoardName}}</a><span class="cm-sep" aria-hidden="true">/</span>
-      {{if and $edit (not $c.IsTemplate) (not $c.IsDraft) $o.Lists}}
+      {{if $o.ProjectName}}<a href="/projects/{{$o.ProjectID}}">{{$o.ProjectName}}</a><span class="cm-sep" aria-hidden="true">/</span>{{end}}{{template "cards_crumb_board" .}}<span class="cm-sep" aria-hidden="true">/</span>
+      {{if and $o.CanEditHere (not $c.IsTemplate) (not $c.IsDraft) $o.Lists}}
       <details class="cm-list cards-pop" data-pop="list"><summary title="Move to another list" aria-label="List: {{$o.ListName}}. Change list"><span>{{$o.ListName}}</span><i class="cm-chev" aria-hidden="true"></i></summary>
         <div class="cm-popbody cards-popbody cm-lists" role="group" aria-label="Move to list">{{$cur := ""}}
           {{range $o.Lists}}{{if ne $cur .BoardID}}{{$cur = .BoardID}}<div class="cm-pop-h">{{.BoardName}}</div>{{end}}
@@ -29,12 +31,12 @@
   <header class="cm-head">
     {{template "cards_title" .}}
     <div class="cm-chips" role="group" aria-label="Status">
-      {{if $c.DueDate}}<span class="cm-chip cm-due-chip cards-due {{if cards_done $c.IsDueCompleted}}cards-due-done{{else if cards_overdue $c.DueDate}}cards-due-late{{end}}">
+      {{if $c.DueDate}}<span class="cm-chip cm-due-chip cards-due {{if cards_done $c.IsDueCompleted}}cards-due-done{{else if and (not $c.IsClosed) (cards_overdue $c.DueDate)}}cards-due-late{{end}}">
         {{if $edit}}<button type="button" class="cm-tickbtn" role="checkbox" aria-checked="{{if cards_done $c.IsDueCompleted}}true{{else}}false{{end}}" aria-label="Due date completed" title="{{if cards_done $c.IsDueCompleted}}Mark incomplete{{else}}Mark complete{{end}}" hx-post="/ui/cards/{{$c.ID}}/due/complete" hx-vals='{"completed":"{{if cards_done $c.IsDueCompleted}}false{{else}}true{{end}}"}'>{{if cards_done $c.IsDueCompleted}}&#10003;{{end}}</button>
         <button type="button" class="cm-chipbtn" data-open-pop="due" title="Change due date (d)">Due {{cards_when $c.DueDate}}</button>
         {{else}}Due {{cards_when $c.DueDate}}{{end}}</span>{{end}}
-      {{range $o.CardLabels}}{{if $edit}}<button type="button" class="cards-label cm-lab cards-color-{{.Color}}" data-open-pop="labels" title="Edit labels (l)">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</button>{{else}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}{{end}}
-      {{if $c.IsClosed}}<span class="cards-badge">closed</span>{{end}}
+      {{range $o.CardLabels}}{{if $o.CanEditHere}}<button type="button" class="cards-label cm-lab cards-color-{{.Color}}" data-open-pop="labels" title="Edit labels (l)">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</button>{{else}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}{{end}}
+      {{if $c.IsClosed}}<span class="cards-badge cards-badge-closed">{{template "closed_mark" false}}Closed</span>{{end}}
       {{if $c.IsDraft}}<span class="cards-badge">draft</span>{{end}}
       {{if $c.IsTemplate}}<span class="cards-badge">template</span>{{end}}
       {{if eq $o.ListType "archive"}}<span class="cards-badge">archived</span>{{end}}
@@ -59,7 +61,7 @@
           <div role="tabpanel" id="cm-panel-activity" aria-labelledby="cm-tab-activity" data-section="activity" hidden hx-get="/ui/cards/{{$c.ID}}/activity" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
         </div>
       </section>
-      {{if $o.CanComment}}<div class="cm-dock">
+      {{if $o.CanComment}}<div class="cm-dock" data-cap="card-comment">
         <form id="cm-comment-form" class="cm-composer" hx-post="/ui/cards/{{$c.ID}}/comments" hx-target="#x-comments" hx-swap="outerHTML" aria-label="Write a comment">
           <textarea name="text" rows="1" class="cm-composer-input" placeholder="Write a comment... (markdown supported)" aria-label="Write a comment" data-comment-input maxlength="16384"></textarea>
           <div class="cm-composer-bar">
@@ -87,9 +89,12 @@
   <div class="cm-help" id="cm-help" role="dialog" aria-label="Card shortcuts" tabindex="-1" hidden>
     <h3>Card shortcuts</h3>
     <dl>
-      <dt><kbd>m</kbd></dt><dd>Members</dd><dt><kbd>l</kbd></dt><dd>Labels</dd><dt><kbd>d</kbd></dt><dd>Due date</dd>
+      <dt><kbd>m</kbd></dt><dd>Members</dd><dt><kbd>l</kbd> <kbd>L</kbd></dt><dd>Labels</dd><dt><kbd>d</kbd></dt><dd>Due date</dd>
       <dt><kbd>a</kbd></dt><dd>Attach a file</dd><dt><kbd>t</kbd></dt><dd>Add a checklist item</dd><dt><kbd>c</kbd></dt><dd>Write a comment</dd>
-      <dt><kbd>e</kbd></dt><dd>Edit description</dd><dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous card</dd>
+      <dt><kbd>e</kbd></dt><dd>Edit description</dd>{{if $edit}}<dt><kbd>p</kbd></dt><dd>Location</dd>
+      <dt><kbd>s</kbd> <kbd>S</kbd></dt><dd>Start / stop time tracking</dd><dt><kbd>x</kbd></dt><dd>Close or re-open</dd>
+      <dt><kbd>b</kbd></dt><dd>Add to board&hellip;</dd><dt><kbd>A</kbd></dt><dd>Archive</dd><dt><kbd>Del</kbd></dt><dd>Move to trash (asks first)</dd>{{end}}
+      <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous card</dd>
       <dt><kbd>Esc</kbd></dt><dd>Close popover, then the card</dd><dt><kbd>?</kbd></dt><dd>This help</dd>
     </dl>
     <p class="cards-muted">You can also drop files or paste an image anywhere on the card.</p>
@@ -114,7 +119,7 @@
 
 {{/* the "..." actions menu: rare actions, destructive ones at the bottom */}}
 {{define "cards_menu"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}
-<details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Card actions" title="Card actions" aria-haspopup="true">&hellip;</summary>
+<details class="cm-menu cards-pop" data-pop="menu" id="cm-menu"><summary class="cm-iconbtn" aria-label="Card actions" title="Card actions" aria-haspopup="true">&hellip;</summary>
   <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Card actions">
     {{if $o.CanEdit}}{{if not $c.IsTemplate}}{{if not $c.IsDraft}}
     <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/duplicate" hx-target="#modal" hx-swap="innerHTML">Duplicate</button>
@@ -131,17 +136,47 @@
     {{if $o.CanEdit}}{{if not $c.IsTemplate}}{{if not $c.IsDraft}}
     <hr class="cm-sepline">
     <button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/close" hx-vals='{"closed":"{{if $c.IsClosed}}false{{else}}true{{end}}"}'>{{if $c.IsClosed}}Re-open{{else}}Close card{{end}}</button>
-    {{if or (eq $o.ListType "archive") (eq $o.ListType "trash")}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/restore">Restore</button>
-    {{else}}<button type="button" class="cm-mi cm-warn" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"false"}'>Archive</button><button type="button" class="cm-mi cm-warn cards-danger" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"true"}'>Move to trash</button>{{end}}
+    {{if $d.Caps.CanPlace}}<button type="button" class="cm-mi" data-place-open title="Add to board (b)">Add to board&hellip;</button>{{end}}
+    {{if $d.CanRemoveHere}}<button type="button" class="cm-mi" data-cap="card-remove-from-board" data-unplace="{{$c.BoardID}}" data-board-name="{{$o.BoardName}}">Remove from this board<small>It stays on its {{$d.Others}} other board{{if ne $d.Others 1}}s{{end}}</small></button>{{end}}
+    {{/* Archive and trash are CARD actions: they cover every board the card is on (docs/DESIGN.md "Placements"). A card
+         on other boards says so and asks first; a card on one board archives at once (Undo in the toast). */}}
+    {{if or (eq $o.ListType "archive") (eq $o.ListType "trash")}}<button type="button" class="cm-mi" hx-post="/ui/cards/{{$c.ID}}/restore">Restore{{if $d.Others}}<small>On every board it is on</small>{{end}}</button>
+    {{else}}<hr class="cm-sepline"><button type="button" class="cm-mi cm-warn" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"false"}'{{if $d.Others}} hx-confirm="This card is also on {{$d.Others}} other board{{if ne $d.Others 1}}s{{end}}; it will be archived on all of them." data-confirm-title="Archive this card?" data-confirm-ok="Archive card"{{end}}>Archive card{{if $d.Others}}<small>On all {{len $d.Boards}} boards it is on</small>{{end}}</button>
+    <button type="button" class="cm-mi cm-warn cards-danger" hx-post="/ui/cards/{{$c.ID}}/archive" hx-vals='{"trash":"true"}'{{if $d.Others}} hx-confirm="This card is also on {{$d.Others}} other board{{if ne $d.Others 1}}s{{end}}; it goes to the trash on all of them." data-confirm-title="Move this card to the trash?" data-confirm-ok="Move to trash"{{end}}>Move card to trash{{if $d.Others}}<small>On all {{len $d.Boards}} boards it is on</small>{{end}}</button>{{end}}
     {{end}}{{end}}
-    {{if or (eq $o.ListType "trash") $c.IsDraft $c.IsTemplate}}<hr class="cm-sepline"><button type="button" class="cm-mi cards-danger" hx-post="/ui/cards/{{$c.ID}}/delete" hx-confirm="Delete this card permanently?" hx-swap="none">Delete permanently</button>{{end}}
+    {{if $o.CanEdit}}{{if or (eq $o.ListType "trash") $c.IsDraft $c.IsTemplate}}<hr class="cm-sepline"><button type="button" class="cm-mi cards-danger" data-cap="card-delete" hx-post="/ui/cards/{{$c.ID}}/delete" hx-confirm="{{if $d.Others}}It is deleted from all {{len $d.Boards}} boards it is on, with its comments, checklists and attachments. This cannot be undone.{{else}}The card is deleted with its comments, checklists and attachments. This cannot be undone.{{end}}" data-confirm-title="Delete this card permanently?" data-confirm-ok="Delete permanently" hx-swap="none">Delete permanently{{if $d.Others}}<small>From all {{len $d.Boards}} boards</small>{{end}}</button>{{end}}{{end}}
     {{end}}
   </div>
 </details>{{end}}
 
+{{/* Board crumb switcher (docs/DESIGN.md "Placements"): only when the card is on more than one board the caller can
+   see. The current board links to that board (as the plain crumb does); every other placement reopens the sheet
+   on that board (/cards/{id}?board=X; cards_ui.js swaps it in place when the sheet is a dialog). Read-only: no
+   permission gate beyond seeing the boards, which card.get already applied (hidden placements are never listed). */}}
+{{define "cards_boardsw"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}
+<details class="cm-boardsw cards-pop" data-pop="boards" id="cm-crumb-board"><summary title="This card is on {{len $d.Boards}} boards: show it on another" aria-label="Board: {{$o.BoardName}}. This card is on {{len $d.Boards}} boards, show it on another"><svg class="cm-bsw-ico" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5.5 5.5V3A1.5 1.5 0 0 1 7 1.5h6A1.5 1.5 0 0 1 14.5 3v6a1.5 1.5 0 0 1-1.5 1.5h-2.5"/><rect x="1.5" y="5.5" width="9" height="9" rx="1.5"/></g></svg><span>{{$o.BoardName}}</span><i class="cm-chev" aria-hidden="true"></i></summary>
+  <div class="cm-popbody cards-popbody cm-boardsw-pop" role="group" aria-label="Show this card on another board"><div class="cm-pop-h">On {{len $d.Boards}} boards</div>
+    {{range $d.Boards}}{{if .IsCtx}}<a class="cm-opt is-on" href="/boards/{{.BoardID}}" aria-current="true" title="Open this board"><span class="cm-tick" aria-hidden="true">&#10003;</span>{{template "cards_board_lines" .}}</a>
+    {{else}}<a class="cm-opt" href="/cards/{{$c.ID}}?board={{.BoardID}}" data-card-ctx="{{.BoardID}}"><span class="cm-tick" aria-hidden="true"></span>{{template "cards_board_lines" .}}</a>{{end}}{{end}}
+  </div></details>{{end}}
+
+{{/* the board part of the breadcrumb: the switcher for a card on several visible boards, else a link (id: the live
+   refresh of the sheet swaps it, see cards_boards_live) */}}
+{{define "cards_crumb_board"}}{{$d := .Data}}{{if $d.Multi}}{{template "cards_boardsw" .}}{{else}}<a href="/boards/{{$d.Card.BoardID}}" id="cm-crumb-board">{{$d.Opts.BoardName}}</a>{{end}}{{end}}
+
+{{/* card.placements' UI route: the parts of an open sheet that show the card's boards, for the live refresh
+   (cards_place.js swaps each one by id unless it is in use: an open popover, focus inside). data-board is the
+   context board as resolved now: when it differs from the sheet's, the sheet reloads instead (when idle). */}}
+{{define "cards_boards_live"}}{{$d := .Data}}<div data-boards-live data-board="{{$d.Card.BoardID}}"{{if $d.Multi}} data-multi="1"{{end}}{{if $d.Caps.CanPlace}} data-can-place="1"{{end}}>{{template "cards_crumb_board" .}}{{template "cards_boards_prop" .}}{{template "cards_menu" .}}</div>{{end}}
+
+{{/* one placement: the board name (and "home"), then its column and, for another project, the project */}}
+{{define "cards_board_lines"}}<span class="cm-bsw-t"><span class="cm-bsw-n">{{.BoardName}}</span><span class="cm-bsw-s"><span class="cm-sr">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></span>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{end}}
+
 {{/* properties rail: each property is a labelled row; empty ones collapse to a quiet "+ Add" */}}
 {{define "cards_props"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}{{$r := cards_rec $c.Recurrence}}
 {{if $c.IsDraft}}{{if $edit}}<div class="cm-prop cm-prop-wide"><details class="cm-pv cards-pop" data-pop="publish" open><summary class="cm-val cm-publish"><span>Publish draft&hellip;</span></summary><div class="cm-popbody cards-popbody"><form hx-post="/ui/cards/{{$c.ID}}/publish"><select name="listId" aria-label="List">{{range $o.Lists}}<option value="{{.ID}}">{{.BoardName}} / {{.Name}}</option>{{end}}</select><button class="primary">Publish</button></form></div></details></div>{{end}}{{end}}
+
+{{template "cards_boards_prop" .}}
 
 {{if or $edit $o.CardMembers}}<div class="cm-prop" data-prop="members"><span class="cm-pl" id="cm-pl-members">Members</span>
   {{if $edit}}<details class="cm-pv cards-pop" data-pop="members"><summary class="cm-val" aria-labelledby="cm-pl-members" title="Members (m)">
@@ -154,8 +189,8 @@
       {{else}}<p class="cards-muted">No board members.</p>{{end}}</div></details>
   {{else}}<span class="cm-pv cm-ro"><span class="cm-avs">{{range $o.CardMembers}}<span class="cards-avatar" title="{{.Name}}">{{cards_initials .Name}}</span>{{end}}</span></span>{{end}}</div>{{end}}
 
-{{if or $edit $o.CardLabels}}<div class="cm-prop" data-prop="labels"><span class="cm-pl" id="cm-pl-labels">Labels</span>
-  {{if $edit}}<details class="cm-pv cards-pop" data-pop="labels"><summary class="cm-val" aria-labelledby="cm-pl-labels" title="Labels (l)">
+{{if or $o.CanEditHere $o.CardLabels}}<div class="cm-prop" data-prop="labels"><span class="cm-pl" id="cm-pl-labels">Labels</span>
+  {{if $o.CanEditHere}}<details class="cm-pv cards-pop" data-pop="labels"><summary class="cm-val" aria-labelledby="cm-pl-labels" title="Labels (l)">
     {{if $o.CardLabels}}<span class="cm-labs">{{range $o.CardLabels}}<span class="cards-label cm-lab cards-color-{{.Color}}">{{if .Name}}{{.Name}}{{else}}&nbsp;&nbsp;{{end}}</span>{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Labels</span></span>{{end}}</summary>
     <div class="cm-popbody cards-popbody" role="group" aria-label="Labels">
       {{if gt (len $o.Labels) 8}}<input type="search" class="cm-filter" placeholder="Find a label" aria-label="Find a label" data-filter>{{end}}
@@ -170,13 +205,13 @@
   <div class="cm-pv cm-duerow">
   {{if $edit}}{{if $c.DueDate}}<button type="button" class="cm-tickbtn cm-tickbtn-lg" role="checkbox" aria-checked="{{if cards_done $c.IsDueCompleted}}true{{else}}false{{end}}" aria-label="Completed" title="{{if cards_done $c.IsDueCompleted}}Mark incomplete{{else}}Mark complete{{end}}" hx-post="/ui/cards/{{$c.ID}}/due/complete" hx-vals='{"completed":"{{if cards_done $c.IsDueCompleted}}false{{else}}true{{end}}"}'>{{if cards_done $c.IsDueCompleted}}&#10003;{{end}}</button>{{end}}
     <details class="cards-pop cm-grow" data-pop="due"><summary class="cm-val" aria-labelledby="cm-pl-due" title="Due date (d)">
-      {{if $c.DueDate}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if cards_overdue $c.DueDate}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{else if cards_overdue $c.DueDate}} &middot; overdue{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Due date</span></span>{{end}}</summary>
+      {{if $c.DueDate}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if and (not $c.IsClosed) (cards_overdue $c.DueDate)}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{else if and (not $c.IsClosed) (cards_overdue $c.DueDate)}} &middot; overdue{{end}}</span>{{else}}<span class="cm-empty"><b aria-hidden="true">+</b><span class="cm-add-d">Add</span><span class="cm-add-m">Due date</span></span>{{end}}</summary>
       <div class="cm-popbody cards-popbody" role="group" aria-label="Due date">
         <form hx-post="/ui/cards/{{$c.ID}}/due"><input type="datetime-local" name="dueDate" value="{{cards_dt $c.DueDate}}" required aria-label="Due date and time">
           <div class="cm-presets"><button type="button" data-due-preset="0">Today</button><button type="button" data-due-preset="1">Tomorrow</button><button type="button" data-due-preset="7">Next week</button></div>
           <button class="primary">Save</button></form>
         {{if $c.DueDate}}<form hx-post="/ui/cards/{{$c.ID}}/due"><input type="hidden" name="dueDate" value=""><button class="cm-quiet">Remove due date</button></form>{{end}}</div></details>
-  {{else}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if cards_overdue $c.DueDate}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{end}}</span>{{end}}
+  {{else}}<span class="cm-vtext cards-due-text {{if cards_done $c.IsDueCompleted}}is-done{{else if and (not $c.IsClosed) (cards_overdue $c.DueDate)}}is-late{{end}}">{{cards_when $c.DueDate}}{{if cards_done $c.IsDueCompleted}} &middot; done{{end}}</span>{{end}}
   </div></div>{{end}}
 
 {{if or $edit $c.Recurrence}}<div class="cm-prop" data-prop="recurrence"><span class="cm-pl" id="cm-pl-recurrence">Repeat</span>
@@ -218,8 +253,45 @@
 
 {{end}}
 
+{{/* Boards row (docs/DESIGN.md "Placements"): the placements the caller can see (home first, marked "home"), each
+   linking to its board, with an "x" (Remove from this board: CardCaps.CanRemoveFromBoard, it asks first) and the
+   "Add to board..." button (CardCaps.CanPlace: the picker of cards_place.js). Shown for a card on several visible
+   boards, or on one when the caller may add it to another; otherwise an empty placeholder (the live refresh's target). */}}
+{{define "cards_boards_prop"}}{{$d := .Data}}{{$c := $d.Card}}{{if $d.ShowBoards}}<div class="cm-prop cm-prop-top" data-prop="boards" id="cm-boards-prop"><span class="cm-pl" id="cm-pl-boards">Boards</span>
+  <div class="cm-pv cm-boardsbox">
+  <ul class="cm-boards" aria-labelledby="cm-pl-boards">{{range $d.Boards}}<li class="cm-board{{if .IsCtx}} is-ctx{{end}}"><span class="cm-board-r"><a href="/boards/{{.BoardID}}"{{if .IsCtx}} aria-current="true"{{end}} title="Open {{.BoardName}}">{{.BoardName}}</a>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{if .CanRemove}}<button type="button" class="cm-board-x" data-cap="card-remove-from-board" data-unplace="{{.BoardID}}" data-board-name="{{.BoardName}}" aria-label="Remove from {{.BoardName}}" title="Remove from {{.BoardName}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>{{end}}</span><span class="cm-bsw-s"><span class="cm-sr">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></li>{{end}}</ul>
+  {{if $d.Caps.CanPlace}}<span class="cm-board-addrow"><button type="button" class="cm-board-add" data-cap="card-add-to-board" data-place-open aria-haspopup="dialog" title="Add to another board (b)"><b aria-hidden="true">+</b> Add to board&hellip;</button>{{if not $d.Multi}}{{template "help_tip" dict "ID" (printf "cm-help-everywhere-%s" $c.ID) "Text" "Archive or delete the card to remove it everywhere."}}{{end}}</span>{{else if not $d.Multi}}{{template "help_tip" dict "ID" (printf "cm-help-everywhere-%s" $c.ID) "Text" "Archive or delete the card to remove it everywhere."}}{{end}}
+  </div></div>{{else}}<div id="cm-boards-prop" hidden></div>{{end}}{{end}}
+
+{{/* The "Add to board..." picker (GET /ui/cards/{id}/place-picker, placement_ui.go): boards the caller can edit that
+   do not hold the card yet, by project; choosing one shows its columns (the first open one first). cards_place.js
+   hosts it (never clipped: fixed over the page, inside the sheet's dialog when the sheet is open; a bottom sheet on
+   phones), filters as you type and keeps it open after each placement. No hx-* here: the script posts. */}}
+{{define "cards_place_picker"}}{{$d := .Data}}<div class="cm-place" role="dialog" aria-labelledby="cm-place-h" tabindex="-1" data-place-picker="{{$d.CardID}}" data-board="{{$d.Board}}">
+  <div class="cm-place-head"><span class="cm-place-h" id="cm-place-h">Add to board</span><span class="cm-place-card">{{$d.CardName}}</span>
+    <button type="button" class="cm-place-close" data-place-close aria-label="Close (Esc)" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div>
+  {{if $d.Projects}}<div class="cm-place-step" data-step="boards">
+    <input type="search" class="cm-place-filter" placeholder="Find a board" aria-label="Find a board" autocomplete="off" data-place-filter>
+    <div class="cm-place-list" role="group" aria-label="Boards you can add the card to">
+    {{range $d.Projects}}<div class="cm-place-group" data-place-group><div class="cm-place-ph">{{.Name}}</div>
+      {{range .Boards}}<button type="button" class="cm-place-opt" data-place-board="{{.ID}}" data-text="{{.Name}} {{.ProjectName}}"><span class="cm-place-t">{{.Name}}</span><i class="cm-place-chev" aria-hidden="true"></i></button>{{end}}
+    </div>{{end}}
+    <p class="cm-place-none" hidden>No boards match.</p></div>
+  </div>
+  {{range $d.Projects}}{{range .Boards}}{{$b := .}}<div class="cm-place-step cm-place-cols" data-step="cols" data-cols-for="{{.ID}}" hidden>
+    <button type="button" class="cm-place-back" data-place-back><i class="cm-place-chev is-back" aria-hidden="true"></i>All boards</button>
+    <div class="cm-place-bh"><span class="cm-place-bn">{{.Name}}</span><span class="cm-place-bp">{{.ProjectName}}</span></div>
+    <div class="cm-place-list" role="group" aria-label="Columns of {{.Name}}">
+    {{range .Lists}}<button type="button" class="cm-place-opt cm-place-col{{if eq .ID $b.Default}} is-default{{end}}" data-place-list="{{.ID}}" data-place-to="{{$b.ID}}" data-board-name="{{$b.Name}}"><span class="cm-place-t">{{.Name}}</span>{{if eq .Type "closed"}}<small>closes cards</small>{{end}}</button>{{end}}
+    </div>
+  </div>{{end}}{{end}}
+  <p class="cm-place-err" role="alert" hidden></p><p class="cm-place-ok" role="status"></p>
+  <p class="cm-place-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> &middot; <kbd>Enter</kbd> choose &middot; <kbd>Esc</kbd> done</p>
+  {{else}}<p class="cm-place-empty">No other board to add this card to: it is already on every board you can edit.</p>{{end}}
+</div>{{end}}
+
 {{define "cards_title"}}{{$d := .Data}}{{$c := $d.Card}}<div id="card-title" class="cards-title cm-title">
-  {{if $d.Opts.CanEdit}}<form hx-post="/ui/cards/{{$c.ID}}/update" hx-trigger="change, submit" hx-sync="this:replace" hx-target="#card-title" hx-swap="outerHTML"><input type="hidden" name="_part" value="title"><input class="cards-title-input" name="name" value="{{$c.Name}}" maxlength="1024" required aria-label="Card title" placeholder="Card title"></form>
+  {{if $d.Opts.CanEdit}}<form data-cap="card-edit" hx-post="/ui/cards/{{$c.ID}}/update" hx-trigger="change, submit" hx-sync="this:replace" hx-target="#card-title" hx-swap="outerHTML"><input type="hidden" name="_part" value="title"><input class="cards-title-input" name="name" value="{{$c.Name}}" maxlength="1024" required aria-label="Card title" placeholder="Card title"></form>
   {{else}}<h2>{{$c.Name}}</h2>{{end}}</div>{{end}}
 
 {{define "cards_desc"}}{{$d := .Data}}{{$c := $d.Card}}

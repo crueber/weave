@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/realtime"
@@ -83,7 +84,8 @@ func loadUser(e *ops.Env, id string) (*User, error) {
 	return u, err
 }
 
-func isAdmin(e *ops.Env) bool { return e.User != nil && e.User.Role == "admin" }
+// isAdmin is authz.SystemAdmin: system administration (users, groups, SSO, agent accounts), never content access.
+func isAdmin(e *ops.Env) bool { return authz.SystemAdmin(e) }
 
 // redact removes private details when e is neither the user nor an admin.
 func redact(e *ops.Env, u *User) *User {

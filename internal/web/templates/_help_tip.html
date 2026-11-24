@@ -1,0 +1,5 @@
+{{/* Help tip: a small "?" in a circle that explains a control or a rule in one sentence, instead of permanent hint text
+   that eats space. Usage: {{template "help_tip" dict "ID" "unique-id-on-the-page" "Text" "One short sentence."}}
+   It is a button (keyboard focusable; hover, focus or tap shows the tip; Escape or a click elsewhere hides it), the text is
+   the button's accessible description, and weave.js positions the tip (fixed, clamped to the viewport, never clipped). */}}
+{{define "help_tip"}}<button type="button" class="help-tip" data-help-tip aria-label="Help" aria-describedby="{{.ID}}">?<span class="help-tip-pop" role="tooltip" id="{{.ID}}" hidden>{{.Text}}</span></button>{{end}}

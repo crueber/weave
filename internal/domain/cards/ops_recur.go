@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/crueber/weave/internal/db"
+	"github.com/crueber/weave/internal/domain/boards"
 	"github.com/crueber/weave/internal/ops"
 	"github.com/crueber/weave/internal/realtime"
 	"github.com/crueber/weave/internal/server"
@@ -123,7 +124,8 @@ func recurrenceSet(e *ops.Env, in RecurrenceIn) (Card, error) {
 			r.Until = u
 		}
 		if r.ListID != "" {
-			if b, t, err := listRef(e.Ctx, e.DB, r.ListID); err != nil || b != boardID || (t != "active" && t != "closed") {
+			// the occurrences spawn on the home board (and are placed on the card's other boards too)
+			if b, t, err := listRef(e.Ctx, e.DB, r.ListID); err != nil || b != c.BoardID || (t != "active" && t != "closed") {
 				return c, ops.Invalid("listId must be an active list of the same board")
 			}
 		}
@@ -136,7 +138,7 @@ func recurrenceSet(e *ops.Env, in RecurrenceIn) (Card, error) {
 	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET recurrence=?,updated_at=? WHERE id=?`, v, db.Now(), in.ID); err != nil {
 		return c, err
 	}
-	c, err = loadCard(e, e.DB, in.ID)
+	c, err = loadCardOn(e, e.DB, in.ID, boardID)
 	if err == nil {
 		emit(e, "cardUpdate", "card.updated", boardID, in.ID, map[string]any{"card": c})
 	}
@@ -208,6 +210,7 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 	}
 	// the old card gives up its rule either way, so it never spawns twice
 	var newID string
+	var landed boards.LandResult
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET recurrence=NULL,updated_at=? WHERE id=? AND recurrence IS NOT NULL`, db.Now(), cardID); err != nil {
 			return err
@@ -238,8 +241,30 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 			}
 		}
 		due := next.Format(time.RFC3339)
-		pos := positionFor(e.Ctx, tx, list, "", "", "", nil)
-		newID, err = cloneCard(e, tx, src, cloneOpts{Name: src.Name, ListID: list, Position: pos, DueDate: &due, Recurrence: rec})
+		pos, err := positionFor(e.Ctx, tx, list, "", "", "", nil)
+		if err != nil {
+			return err
+		}
+		// the series belongs to every board the card is on: the next occurrence is placed on each of them, in the same
+		// column when it is still an open column, else that board's first open column (a board with none is skipped)
+		var also []boards.Landing
+		pls, err := placementsTx(e.Ctx, tx, cardID)
+		if err != nil {
+			return err
+		}
+		for _, p := range pls {
+			if p.IsHome {
+				continue
+			}
+			l := p.List
+			if p.ListType != "active" {
+				l = firstActive(e.Ctx, tx, p.Board)
+			}
+			if l != "" {
+				also = append(also, boards.Landing{ListID: l})
+			}
+		}
+		newID, landed, err = cloneCard(e, tx, src, cloneOpts{Name: src.Name, ListID: list, Position: pos, DueDate: &due, Recurrence: rec, Also: also})
 		return err
 	})
 	if err != nil {
@@ -249,7 +274,20 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 		if c, err := loadCard(e, e.DB, newID); err == nil {
 			emit(e, "cardCreate", "card.created", c.BoardID, newID, map[string]any{"card": c, "listId": c.ListID, "recurrenceOf": cardID})
 		}
+		// the occurrence is created on every board the series is on: a card created in a column is a placement event,
+		// so each other board gets its own card.created (its column, its labels), not just the nudge
+		if pls, err := placementsTx(e.Ctx, e.DB, newID); err == nil {
+			for _, p := range pls {
+				if p.IsHome {
+					continue
+				}
+				if c, err := loadCardOn(e, e.DB, newID, p.Board); err == nil {
+					emit(e, "cardCreate", "card.created", p.Board, newID, map[string]any{"card": c, "listId": p.List, "recurrenceOf": cardID})
+				}
+			}
+		}
 	}
+	boards.EmitAutoArchived(e, landed)
 	if cur, err := loadCard(e, e.DB, cardID); err == nil {
 		emit(e, "cardUpdate", "card.updated", cur.BoardID, cardID, map[string]any{"card": cur})
 	}
@@ -271,8 +309,11 @@ func firstActive(ctx context.Context, q querier, boardID string) (id string) {
 // were created. The server scheduler calls it every minute; it is idempotent
 // because the spawning card gives up its rule.
 func RunRecurrence(ctx context.Context, d *db.DB, hub *realtime.Hub, now time.Time) (int, error) {
-	rows, err := d.QueryContext(ctx, `SELECT c.id,c.recurrence,c.due_date,COALESCE(c.is_due_completed,0) FROM cards c JOIN lists l ON l.id=c.list_id
-		WHERE c.recurrence IS NOT NULL AND c.is_template=0 AND c.is_draft=0 AND c.due_date IS NOT NULL AND l.type IN ('active','closed')`)
+	// a card recurs while it is in an open or closing column on ANY board it is on (an auto-archive archives one
+	// board's placement only: the card stays live on its other boards)
+	rows, err := d.QueryContext(ctx, `SELECT c.id,c.recurrence,c.due_date,COALESCE(c.is_due_completed,0) FROM cards c
+		WHERE c.recurrence IS NOT NULL AND c.is_template=0 AND c.is_draft=0 AND c.due_date IS NOT NULL
+		AND EXISTS(SELECT 1 FROM card_placements p JOIN lists l ON l.id=p.list_id WHERE p.card_id=c.id AND l.type IN ('active','closed'))`)
 	if err != nil {
 		return 0, err
 	}

@@ -9,7 +9,7 @@ import (
 // _cards_claim.html) so the sheet template only carries one include line.
 
 func renderClaim(c *web.Ctx, id string) error {
-	card, err := cardGetCard(c.Env, id)
+	card, err := cardGetOn(c, id)
 	if err != nil {
 		return err
 	}
@@ -20,7 +20,7 @@ func renderClaim(c *web.Ctx, id string) error {
 		}
 	}
 	return c.RenderBlock("cards_modal.html", "cards_claim", map[string]any{
-		"Card": card, "Until": until, "CanEdit": authz.BoardLevel(c.Env, card.BoardID) >= authz.Edit,
+		"Card": card, "Until": until, "CanEdit": authz.Card(c.Env, card.ID).CanEditExtras, // card.claim|release|renew need board Edit
 	})
 }
 

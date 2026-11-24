@@ -247,7 +247,7 @@ func TestAgentKeyExpiry(t *testing.T) {
 	if reqEnv(e, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+a.Key.Key) }).User != nil {
 		t.Fatal("expired agent key must be rejected")
 	}
-	list := call[[]AgentOut](t, admin, "agent.list", NoInput{})
+	list := call[[]AgentOut](t, admin, "agent.list", AgentListIn{})
 	if len(list) != 1 || !list[0].APIKeyExpired {
 		t.Fatalf("agent.list must flag the expired key: %+v", list)
 	}

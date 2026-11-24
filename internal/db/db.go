@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +33,39 @@ func Open(path string) (*DB, error) {
 	sdb.SetMaxOpenConns(8)
 	d := &DB{sdb}
 	return d, d.migrate()
+}
+
+// OpenReadOnly opens an existing database for reading only: no migrations, no journal-mode change, no file
+// creation, and every connection is query_only. It is for host tools that inspect a deployed data directory
+// before an upgrade (`weave admin preflight`), possibly while the older server is still running. When the
+// directory is not writable (a read-only volume, so SQLite cannot create the WAL index), it falls back to
+// immutable=1, which reads the main file as it is: stop the server first in that case or the last committed
+// writes still in the WAL are not seen.
+func OpenReadOnly(path string) (*DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	var last error
+	for _, extra := range []string{"", "&immutable=1"} {
+		dsn := "file:" + path + "?mode=ro" + extra + "&_pragma=busy_timeout(10000)&_pragma=query_only(1)"
+		sdb, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			last = err
+			continue
+		}
+		var n int
+		if err = sdb.QueryRow(`SELECT COUNT(*) FROM sqlite_master`).Scan(&n); err != nil {
+			sdb.Close()
+			last = err
+			continue
+		}
+		sdb.SetMaxOpenConns(2)
+		if extra != "" {
+			fmt.Fprintf(os.Stderr, "weave: warning: %s opened as immutable (read-only directory, %v): changes still in the WAL are not seen; stop the server first for an exact report\n", path, last)
+		}
+		return &DB{sdb}, nil
+	}
+	return nil, last
 }
 
 func (d *DB) migrate() error {

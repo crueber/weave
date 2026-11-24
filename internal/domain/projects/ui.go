@@ -9,6 +9,7 @@ import (
 
 	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
+	"github.com/crueber/weave/internal/domain/auth"
 	"github.com/crueber/weave/internal/domain/boards"
 	"github.com/crueber/weave/internal/domain/notify"
 	"github.com/crueber/weave/internal/ops"
@@ -23,7 +24,9 @@ type section struct {
 type homeData struct {
 	Sections            []section
 	Search, View, Order string
-	Hidden, CanCreate   bool
+	Hidden              bool
+	Caps                authz.HomeCaps // what the caller may do here (authz.Home)
+	CanCreate           bool           // Caps.CanCreateProject
 }
 
 type boardRef struct {
@@ -36,7 +39,8 @@ type boardRef struct {
 type pageData struct {
 	P              Project
 	Boards         []boardRef
-	CanCreateBoard bool
+	Caps           authz.ProjectCaps // every button of the page asks this (authz.Project)
+	CanCreateBoard bool              // Caps.CanCreateBoard, and the board.create op is registered
 }
 
 type gradient struct {
@@ -60,8 +64,8 @@ type settingsData struct {
 	Candidates []candidate
 	Groups     []BaseGroup
 	FieldTypes []string
-	Prompt     promptEdit // "Agents": the project prompt text editor
-	IsAdmin    bool
+	Prompt     promptEdit        // "Agents": the project prompt text editor
+	Caps       authz.ProjectCaps // what the caller may do here (authz.Project)
 }
 
 // promptEdit feeds the shared bs_prompt editor (same shape as boards.PromptEdit).
@@ -196,8 +200,6 @@ func init() {
 	web.Route("DELETE /ui/basefields/{id}", fieldsTab("project.field.delete"))
 }
 
-func canCreateBoard(e *ops.Env, projectID string) bool { return IsManager(e, projectID) }
-
 // boardURL finds the new board's id in an op result of unknown type.
 func boardURL(out any, projectID string) string {
 	b, _ := json.Marshal(out)
@@ -250,7 +252,8 @@ func buildHome(c *web.Ctx) (homeData, error) {
 	default:
 		order = "byDefault"
 	}
-	d := homeData{Search: q.Get("search"), View: view, Order: order, Hidden: q.Get("hidden") == "true", CanCreate: authz.CanCreateProject(c.Env)}
+	hc := authz.Home(c.Env)
+	d := homeData{Search: q.Get("search"), View: view, Order: order, Hidden: q.Get("hidden") == "true", Caps: hc, CanCreate: hc.CanCreateProject}
 	ps, err := List(c.Env, ListOpts{Search: d.Search, IncludeHidden: d.Hidden, Order: order})
 	if err != nil {
 		return d, err
@@ -305,11 +308,12 @@ func projectPage(c *web.Ctx) error {
 	if err != nil {
 		return err
 	}
-	d := pageData{P: p, CanCreateBoard: p.CanManage && ops.Get("board.create") != nil}
+	pc := authz.Project(c.Env, p.ID)
+	d := pageData{P: p, Caps: pc, CanCreateBoard: pc.CanCreateBoard && ops.Get("board.create") != nil}
 	// Read-only listing of the boards the caller can open (page-specific join).
 	q := `SELECT b.id,b.name,COALESCE(b.color,'') FROM boards b WHERE b.project_id=? AND b.is_template=0`
 	args := []any{p.ID}
-	if !p.CanManage {
+	if !pc.CanManage {
 		q += ` AND b.id IN (SELECT board_id FROM board_memberships WHERE user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`
 		args = append(args, c.Env.User.UserID, c.Env.User.UserID)
 	}
@@ -370,10 +374,11 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 	if err != nil {
 		return settingsData{}, err
 	}
-	if !p.CanManage {
+	pc := authz.Project(c.Env, id)
+	if !pc.CanManage {
 		return settingsData{}, ops.Forbidden()
 	}
-	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes, IsAdmin: c.Env.User != nil && c.Env.User.Role == "admin"}
+	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes, Caps: pc}
 	def, admin := notify.AgentPromptDefault(c.Env, agentprompt.ScopeProject)
 	d.Prompt = promptEdit{Text: def, From: "Weave's built-in text", Tokens: agentprompt.Tokens(agentprompt.ScopeProject)}
 	if admin {
@@ -399,25 +404,42 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 	if d.Managers, err = ops.Typed[[]Manager](c.Env, "project.manager.list", IDIn{id}); err != nil {
 		return d, err
 	}
-	// Read-only candidate lookup on users (page-specific join).
-	rows, qerr := c.Env.DB.QueryContext(c.Env.Ctx, `SELECT id,name,email FROM users WHERE role IN ('admin','projectOwner')
-		AND is_deactivated=0 AND deleted_at IS NULL AND id NOT IN (SELECT user_id FROM project_managers WHERE project_id=?) ORDER BY name COLLATE NOCASE`, id)
-	if qerr != nil {
-		return d, qerr
+	// project.manager.remove: never the last manager; the owning manager only with CanRemoveOwnerManager.
+	for i := range d.Managers {
+		m := &d.Managers[i]
+		m.CanRemove = len(d.Managers) > 1 && (!m.IsOwner || pc.CanRemoveOwnerManager)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cd candidate
-		if err := rows.Scan(&cd.ID, &cd.Name, &cd.Email); err != nil {
-			return d, err
-		}
-		d.Candidates = append(d.Candidates, cd)
-	}
-	if err := rows.Err(); err != nil {
+	// Manager candidates come from the caller's own directory (user.list: the same privacy rules as everywhere else,
+	// e-mail addresses only for admins), minus people who cannot be managers and those who already are.
+	if d.Candidates, err = managerCandidates(c.Env, d.Managers); err != nil {
 		return d, err
 	}
 	d.Groups, err = ops.Typed[[]BaseGroup](c.Env, "project.fieldgroup.list", IDIn{id})
 	return d, err
+}
+
+// managerCandidates lists the people the caller may add as project managers, from the user.list directory op.
+func managerCandidates(e *ops.Env, managers []Manager) ([]candidate, error) {
+	l, err := ops.Typed[auth.UserList](e, "user.list", auth.ListIn{})
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, m := range managers {
+		have[m.UserID] = true
+	}
+	out := []candidate{}
+	for _, u := range l.Items {
+		if u == nil || have[u.ID] || u.IsDeactivated || !CanBeManager(u.Role, u.IsAgent) {
+			continue
+		}
+		cd := candidate{ID: u.ID, Name: u.Name, Email: u.Email}
+		if cd.Email == "" && u.Username != nil && *u.Username != "" {
+			cd.Email = "@" + *u.Username
+		}
+		out = append(out, cd)
+	}
+	return out, nil
 }
 
 // renderSection re-renders one settings section after a change; done shows the "Saved" tick.

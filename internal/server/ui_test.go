@@ -59,7 +59,7 @@ func TestAgentsAdminPage(t *testing.T) {
 	agentID := id(list["items"].([]any)[0].(map[string]any))
 	// grant/revoke, rotate, delete through the UI
 	code, html = e.page(e.admin, "POST", "/ui/admin/agents/"+agentID+"/access", url.Values{"boardId": {bd.id}, "revoke": {"true"}}, true)
-	if code != 200 || !strings.Contains(html, "No board access yet") {
+	if code != 200 || !strings.Contains(html, "no board access") {
 		t.Fatalf("revoke: %d", code)
 	}
 	if _, html = e.page(e.admin, "POST", "/ui/admin/agents/"+agentID+"/key", url.Values{}, true); !strings.Contains(html, `id="agent-key"`) {
@@ -72,6 +72,15 @@ func TestAgentsAdminPage(t *testing.T) {
 	e.must(e.admin, "POST", "/agents", map[string]any{"name": "Badge Bot"})
 	if _, html = e.page(e.admin, "GET", "/admin/users", nil, false); !strings.Contains(html, "badge-agent") {
 		t.Fatal("agent badge missing on /admin/users")
+	}
+	// another person's board: neither in the picker nor named on the agent row, only counted
+	other := e.newUser("o@x.io", "boardUser")
+	op := e.must(other, "POST", "/projects", map[string]any{"name": "Theirs"})
+	ob := e.must(other, "POST", "/projects/"+id(op)+"/boards", map[string]any{"name": "Their secret board"})
+	e.must(other, "POST", "/agents", map[string]any{"name": "Their bot", "boardIds": []string{id(ob)}})
+	if _, html = e.page(e.admin, "GET", "/admin/agents", nil, false); strings.Contains(html, "Their secret board") || !strings.Contains(html, "Their bot") ||
+		!strings.Contains(html, "1 you do not manage") || strings.Contains(html, `href="/boards/`) {
+		t.Fatalf("admin agents page shows another person's board (or misses the account): %s", html)
 	}
 }
 
@@ -128,4 +137,28 @@ func TestBoardPageShowsListenersClaimsAndAgents(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("listener indicator still shown after disconnect")
+}
+
+// TestUsersPageWarnsAboutOwnerlessProjects: the admin Users page marks the only active manager of projects and warns,
+// with a count and a link to Orphaned projects, before a deactivation or deletion leaves those projects without one.
+func TestUsersPageWarnsAboutOwnerlessProjects(t *testing.T) {
+	e := newEnv(t)
+	sole := e.newUser("sole@x.io", "boardUser")
+	co := e.newUser("co@x.io", "boardUser")
+	p1 := e.must(sole, "POST", "/projects", map[string]any{"name": "Sole one"})
+	e.must(sole, "POST", "/projects", map[string]any{"name": "Sole two"})
+	p3 := e.must(sole, "POST", "/projects", map[string]any{"name": "Shared"})
+	_, me := e.api(co, "GET", "/auth/me", nil)
+	e.must(sole, "POST", "/projects/"+id(p3)+"/managers", map[string]any{"userId": id(me["item"].(map[string]any))})
+	_ = p1
+	code, html := e.page(e.admin, "GET", "/admin/users", nil, false)
+	if code != 200 || !strings.Contains(html, `data-orphan-warning="2"`) || !strings.Contains(html, `href="/admin/orphans"`) || !strings.Contains(html, "sole manager") {
+		t.Fatalf("users page: %d, missing the ownerless warning", code)
+	}
+	if strings.Contains(html, "Sole one") || strings.Contains(html, "Shared") {
+		t.Fatal("the users page names projects (counts only)")
+	}
+	if strings.Count(html, "data-orphan-warning=") != 1 {
+		t.Fatal("only the sole manager gets the warning (the co-manager of a shared project does not)")
+	}
 }

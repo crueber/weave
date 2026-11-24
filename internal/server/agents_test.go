@@ -12,12 +12,15 @@ func TestAgentLifecycle(t *testing.T) {
 	b1, b2 := e.newBoard("One"), e.newBoard("Two")
 	human := e.newUser("human@x.io", "boardUser")
 
-	// only admins manage agents
-	if code, _ := e.api(human, "POST", "/agents", map[string]any{"name": "nope"}); code != 403 {
-		t.Fatalf("non-admin create: %d", code)
+	// a non-admin creates agents only for boards they manage; they see only their own (none yet)
+	if code, _ := e.api(human, "POST", "/agents", map[string]any{"name": "nope"}); code != 422 {
+		t.Fatalf("non-admin create without boards: %d", code)
 	}
-	if code, _ := e.api(human, "GET", "/agents", nil); code != 403 {
-		t.Fatalf("non-admin list: %d", code)
+	if code, _ := e.api(human, "POST", "/agents", map[string]any{"name": "nope", "boardIds": []string{b1.id}}); code != 404 {
+		t.Fatalf("non-admin create on a board they cannot see: %d", code)
+	}
+	if code, out := e.api(human, "GET", "/agents", nil); code != 200 || len(out["items"].([]any)) != 0 {
+		t.Fatalf("non-admin list: %d %v", code, out)
 	}
 
 	a := e.must(e.admin, "POST", "/agents", map[string]any{"name": "Reviewer", "boardIds": []string{b1.id}, "role": "worker"})
