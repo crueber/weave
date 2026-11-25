@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -316,6 +317,7 @@ func avatarGet(c *web.Ctx) error {
 type settingsData struct {
 	User        *User
 	Sessions    []SessionInfo
+	Keys        []APIKeyInfo
 	Done        bool // render the "Saved" confirmation in the section head
 	Error       string
 	NewAPIKey   string
@@ -333,7 +335,7 @@ type settingsData struct {
 
 type settingsSection struct{ ID, Title string }
 
-var settingsSections = []settingsSection{{"profile", "Profile"}, {"appearance", "Appearance"}, {"workspace", "Workspace"}, {"watching", "Watching"}, {"apikey", "API key"}, {"sessions", "Sessions"}}
+var settingsSections = []settingsSection{{"profile", "Profile"}, {"appearance", "Appearance"}, {"workspace", "Workspace"}, {"watching", "Watching"}, {"apikey", "API keys"}, {"sessions", "Sessions"}}
 
 func renderSettings(c *web.Ctx, d *settingsData) error {
 	u, err := ops.Typed[*User](c.Env, "auth.me", NoInput{})
@@ -343,6 +345,9 @@ func renderSettings(c *web.Ctx, d *settingsData) error {
 	d.User = u
 	if s, err := ops.Typed[SessionList](c.Env, "session.list", NoInput{}); err == nil {
 		d.Sessions = s.Items
+	}
+	if k, err := ops.Typed[[]APIKeyInfo](c.Env, "apikey.list", &APIKeyListIn{ID: "me"}); err == nil {
+		d.Keys = k
 	}
 	d.BaseURL = cfgOf(c.Env).BaseURL
 	d.Sections = settingsSections
@@ -516,4 +521,43 @@ func ssoResult(c *web.Ctx, err error, flash string) error {
 		return renderSSO(c, "", m)
 	}
 	return renderSSO(c, flash, "")
+}
+
+func init() {
+	web.AddFuncs(template.FuncMap{
+		// keyDay shows the date part of an RFC3339 timestamp ("2026-11-25").
+		"keyDay": func(ts string) string {
+			if len(ts) >= 10 {
+				return ts[:10]
+			}
+			return ts
+		},
+		// keyAgo renders a "last used" time relative to now ("3 hours ago"); nil = "never".
+		"keyAgo": func(ts *string) string {
+			if ts == nil || *ts == "" {
+				return "never"
+			}
+			t, err := time.Parse(time.RFC3339, *ts)
+			if err != nil {
+				return *ts
+			}
+			d := time.Since(t)
+			plural := func(n int, unit string) string {
+				if n == 1 {
+					return "1 " + unit + " ago"
+				}
+				return strconv.Itoa(n) + " " + unit + "s ago"
+			}
+			switch {
+			case d < time.Hour:
+				return "just now"
+			case d < 24*time.Hour:
+				return plural(int(d.Hours()), "hour")
+			case d < 60*24*time.Hour:
+				return plural(int(d.Hours()/24), "day")
+			default:
+				return t.UTC().Format("2006-01-02")
+			}
+		},
+	})
 }

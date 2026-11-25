@@ -40,6 +40,10 @@ weave schema card.create    # one op with field types and descriptions
 
 Weave signs people in with OIDC only, so the CLI authenticates with an **API key** (Settings -> API key, or
 `weave agent create` for agents). The key is sent as `Authorization: Bearer` and acts with that account's role.
+**Use one key per computer:** `weave apikey generate me --name "work laptop"` ADDS a key and never invalidates the others;
+`weave apikey list me` shows them (name, prefix, created, last used, expiry; never the key); `weave apikey revoke me --keyId K`
+revokes one and `weave apikey revoke me --all` revokes all of them (one of the two is required). An agent account holds a
+single key, replaced with `weave agent rotateKey`.
 Anyone who manages a board creates agents for it: `weave agent create --name triage-bot --boardIds BOARD [--boardRole editor|commenter|viewer]`
 (non-admins must name boards they manage; the key is printed once), `weave agent list [--boardId B]` shows the agents you created or that
 hold access to boards you manage, `weave agent access ID --boardId B [--role viewer] [--revoke]` grants or removes access (Manage on B, or

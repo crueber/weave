@@ -62,10 +62,21 @@ recovery, from the page, the API or the host command, is written to the `project
 project, to whom, when, the previous managers; it survives deletions) and an `AUDIT` line in the server log; read it in
 the Recovery log on the same admin page or with `weave project recovery.list`.
 
+## API keys per person (migration 0901)
+
+Upgrading to the release with "any number of API keys" runs migration `0901_api_keys` automatically: every existing key (people's,
+agents' and `mint-key` ones) is copied into the new `api_keys` table with its hash, prefix, creation time and expiry, so nothing
+needs re-issuing. The old `users.api_key_*` columns are left in place but are no longer used.
+**Rollback caveat:** the previous binary reads only those old columns, so rolling back revives every key that was revoked or
+rotated since the upgrade (the old column still holds it) and ignores every key created since. After a rollback, revoke or
+rotate keys again (people: Settings -> API keys; agents: `weave agent rotateKey`) and treat any key you had revoked as live
+until you do. `apikey.revoke` now needs
+`keyId` or `all=true` (scripts that called it bare must add `?all=true`), and `weave admin mint-key` adds a key instead of replacing.
+
 ## Admin audit log
 
 Admin-side actions that change who can reach what leave a row in the `admin_audit` table (migration 0111), written in the
-same transaction as the change, plus an `AUDIT` line in the server log: rotating an agent's API key (`agent.rotateKey`, by
+same transaction as the change, plus an `AUDIT` line in the server log: revoking another person's API keys (`apikey.revoke`, admins only; your own revocations are not recorded), rotating an agent's API key (`agent.rotateKey`, by
 its creator, a manager of its boards or an admin), adding a person to a group (`group.member.add` and the initial `memberIds` of `group.create`; every real
 add, a self-add is flagged `self`; re-adding a member records nothing) and unlinking an SSO identity (`user.relink` and the host
 command `weave admin relink`, recorded with source `host` and no actor). Rows keep names and e-mail addresses as text and

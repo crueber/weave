@@ -66,3 +66,7 @@ body:has(.auth-landing) main{padding:0}
 .auth-settings .as-newkey .bs-hint{flex-basis:100%;margin:0}
 .auth-settings .bs-member form{margin:0}
 @media(max-width:640px){.auth-settings .bs-row-stack>select,.auth-settings .as-narrow{flex:1 1 100%}}
+.auth-settings .as-head{display:inline-flex;align-items:center;gap:var(--space-2)}
+.auth-settings .as-key{flex-wrap:wrap}
+.auth-settings .as-key .bs-member-t small code{font-size:inherit}
+@media(max-width:640px){.auth-settings .as-key form{flex:1 1 100%}.auth-settings .as-create .bs-btns{flex-wrap:wrap;width:100%}.auth-settings .as-create .bs-btns>input{flex:1 1 100%}.auth-settings .as-create .bs-btns>select{flex:1 1 0;min-width:0}}

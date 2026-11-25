@@ -193,8 +193,10 @@ func authenticate(e *ops.Env, r *http.Request) *ops.Principal {
 	ctx := r.Context()
 	if explicit || strings.HasPrefix(tok, apiKeyPrefix) {
 		var p ops.Principal
-		var keyExp sql.NullString
-		err := e.DB.QueryRowContext(ctx, `SELECT id,role,name,is_agent,api_key_expires_at FROM users WHERE api_key_hash=? AND is_deactivated=0 AND deleted_at IS NULL`, sha(tok)).Scan(&p.UserID, &p.Role, &p.Name, &p.IsAgent, &keyExp)
+		var keyID string
+		var keyExp, keyUsed sql.NullString
+		err := e.DB.QueryRowContext(ctx, `SELECT u.id,u.role,u.name,u.is_agent,k.id,k.expires_at,k.last_used_at FROM api_keys k JOIN users u ON u.id=k.user_id
+			WHERE k.key_hash=? AND u.is_deactivated=0 AND u.deleted_at IS NULL`, sha(tok)).Scan(&p.UserID, &p.Role, &p.Name, &p.IsAgent, &keyID, &keyExp, &keyUsed)
 		if err != nil {
 			return nil
 		}
@@ -205,6 +207,7 @@ func authenticate(e *ops.Env, r *http.Request) *ops.Principal {
 		if p.IsAgent && !explicit && !strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
 			return nil // agents use keys in headers only, never a browser (cookie) session
 		}
+		touchKey(e, r, keyID, keyUsed)
 		return &p
 	}
 	var p ops.Principal
@@ -252,7 +255,22 @@ func maxIdleMinutes(e *ops.Env) int {
 	return n
 }
 
-// keyExpired reports whether an api_key_expires_at timestamp (nil = never) is in the past.
+// touchKey records that a key was used, at most once per lastUsedEvery per key (the stored value is the throttle, so it
+// holds across restarts) and a failed write never fails the request. Background requests count too (an agent listening
+// on /events must show a real "Last used", and a header must not hide a stolen key); isBackground governs sessions only.
+func touchKey(e *ops.Env, r *http.Request, keyID string, lastUsed sql.NullString) {
+	now := time.Now().UTC()
+	if lastUsed.Valid {
+		if t, err := time.Parse(time.RFC3339, lastUsed.String); err == nil && now.Sub(t) < lastUsedEvery {
+			return
+		}
+	}
+	// the guard repeats in SQL so two simultaneous requests write once
+	_, _ = e.DB.ExecContext(r.Context(), `UPDATE api_keys SET last_used_at=? WHERE id=? AND (last_used_at IS NULL OR last_used_at<=?)`,
+		now.Format(time.RFC3339), keyID, now.Add(-lastUsedEvery).Format(time.RFC3339))
+}
+
+// keyExpired reports whether a key's expires_at timestamp (nil = never) is in the past.
 func keyExpired(exp *string) bool {
 	if exp == nil || *exp == "" {
 		return false

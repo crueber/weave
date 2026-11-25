@@ -35,7 +35,7 @@ type AgentOut struct {
 	Role            string       `json:"role"`
 	IsAgent         bool         `json:"isAgent"`
 	IsDeactivated   bool         `json:"isDeactivated"`
-	KeyPrefix       string       `json:"keyPrefix,omitempty"`
+	KeyPrefix       string       `json:"keyPrefix,omitempty" desc:"prefix of the agent's key (an agent holds exactly one)"`
 	APIKeyExpiresAt *string      `json:"apikeyExpiresAt,omitempty" desc:"when the key stops working; absent = never"`
 	APIKeyExpired   bool         `json:"apikeyExpired,omitempty" desc:"true when the key has expired and is rejected"`
 	CreatedAt       string       `json:"createdAt"`
@@ -106,8 +106,9 @@ func boardRoleOK(r string) bool { return r == "" || r == "editor" || r == "viewe
 func loadAgent(e *ops.Env, id string) (AgentOut, error) {
 	var a AgentOut
 	var cb, cbName *string
-	err := e.DB.QueryRowContext(e.Ctx, `SELECT u.id,u.name,u.role,u.is_deactivated,COALESCE(u.api_key_prefix,''),u.created_at,u.api_key_expires_at,u.created_by,c.name
-		FROM users u LEFT JOIN users c ON c.id=u.created_by WHERE u.id=? AND u.is_agent=1 AND u.deleted_at IS NULL`, id).
+	err := e.DB.QueryRowContext(e.Ctx, `SELECT u.id,u.name,u.role,u.is_deactivated,COALESCE(k.prefix,''),u.created_at,k.expires_at,u.created_by,c.name
+		FROM users u LEFT JOIN users c ON c.id=u.created_by
+		LEFT JOIN api_keys k ON k.id=(SELECT id FROM api_keys WHERE user_id=u.id ORDER BY created_at DESC,id DESC LIMIT 1) WHERE u.id=? AND u.is_agent=1 AND u.deleted_at IS NULL`, id).
 		Scan(&a.ID, &a.Name, &a.Role, &a.IsDeactivated, &a.KeyPrefix, &a.CreatedAt, &a.APIKeyExpiresAt, &cb, &cbName)
 	if err == sql.ErrNoRows {
 		return a, ops.NotFound("agent")
@@ -337,7 +338,7 @@ func init() {
 				return AgentOut{}, err
 			}
 		}
-		key, err := setAPIKey(e.Ctx, e.DB, id, in.ExpiresInDays)
+		key, err := replaceAPIKey(e.Ctx, e.DB, id, in.ExpiresInDays)
 		if err != nil {
 			_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM users WHERE id=? AND is_agent=1`, id)
 			return AgentOut{}, err
@@ -410,7 +411,7 @@ func init() {
 		return loadAgent(e, in.ID)
 	})
 
-	ops.Register(ops.Op{Name: "agent.rotateKey", Summary: "Issue a new API key for an agent (the old key stops working); returned once", Method: "POST", Path: "/agents/{id}/key",
+	ops.Register(ops.Op{Name: "agent.rotateKey", Summary: "Issue a new API key for an agent (an agent holds exactly one key; the old one stops working); returned once", Method: "POST", Path: "/agents/{id}/key",
 		UI: "POST /ui/agents/{id}/key"}, func(e *ops.Env, in AgentRotateIn) (AgentOut, error) {
 		if err := authz.RequireAgentManage(e, in.ID); err != nil {
 			return AgentOut{}, err
@@ -424,7 +425,7 @@ func init() {
 		au := AuditEntry{Action: AuditAgentRotateKey, TargetKind: "agent", TargetID: ag.ID, TargetName: ag.Name, Source: auditSource(e)}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 			var err error
-			if key, err = setAPIKey(e.Ctx, tx, in.ID, in.ExpiresInDays); err != nil {
+			if key, err = replaceAPIKey(e.Ctx, tx, in.ID, in.ExpiresInDays); err != nil {
 				return err
 			}
 			au.Details = map[string]any{"keyPrefix": key.Prefix}

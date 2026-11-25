@@ -305,7 +305,7 @@
  {
   "name": "agent.rotateKey",
   "tag": "agent",
-  "summary": "Issue a new API key for an agent (the old key stops working); returned once",
+  "summary": "Issue a new API key for an agent (an agent holds exactly one key; the old one stops working); returned once",
   "method": "POST",
   "path": "/agents/{id}/key",
   "auth": "user",
@@ -367,7 +367,7 @@
  {
   "name": "apikey.generate",
   "tag": "apikey",
-  "summary": "Create or rotate a personal API key (Bearer / X-API-Key); the old key stops working",
+  "summary": "Add a personal API key (Bearer / X-API-Key); your other keys keep working. One key per computer or tool",
   "method": "POST",
   "path": "/users/{id}/api-key",
   "auth": "user",
@@ -381,6 +381,13 @@
     "desc": "user id, or \"me\""
    },
    {
+    "name": "name",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "optional label for this key, e.g. the computer it is for (max 80 characters; default \"Key YYYY-MM-DD\")"
+   },
+   {
     "name": "expiresInDays",
     "in": "body",
     "type": "number",
@@ -390,9 +397,27 @@
   ]
  },
  {
+  "name": "apikey.list",
+  "tag": "apikey",
+  "summary": "List your personal API keys (name, prefix, created, last used, expiry; never the key itself)",
+  "method": "GET",
+  "path": "/users/{id}/api-keys",
+  "auth": "user",
+  "ui": "GET /settings (API key)",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "user id, or \"me\"; only your own keys"
+   }
+  ]
+ },
+ {
   "name": "apikey.revoke",
   "tag": "apikey",
-  "summary": "Revoke a user's API key (admins may revoke others')",
+  "summary": "Revoke one API key (keyId) or all of a user's keys (all=true); admins may revoke others' keys (audited)",
   "method": "DELETE",
   "path": "/users/{id}/api-key",
   "auth": "user",
@@ -404,6 +429,20 @@
     "type": "string",
     "required": true,
     "desc": "user id, or \"me\""
+   },
+   {
+    "name": "keyId",
+    "in": "query",
+    "type": "string",
+    "required": false,
+    "desc": "the key to revoke (from apikey.list)"
+   },
+   {
+    "name": "all",
+    "in": "query",
+    "type": "bool",
+    "required": false,
+    "desc": "true revokes every key of this user instead; give keyId or all=true, never neither"
    }
   ]
  },
@@ -597,7 +636,7 @@
  {
   "name": "audit.list",
   "tag": "audit",
-  "summary": "Admin audit log, newest first: agent key rotations, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only",
+  "summary": "Admin audit log, newest first: agent key rotations, revocations of other people's API keys, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only",
   "method": "GET",
   "path": "/audit",
   "auth": "admin",
@@ -608,7 +647,7 @@
     "in": "query",
     "type": "string",
     "required": false,
-    "desc": "only this action: agent.rotateKey | group.member.add | user.relink"
+    "desc": "only this action: agent.rotateKey | apikey.revoke | group.member.add | user.relink"
    },
    {
     "name": "before",

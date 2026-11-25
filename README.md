@@ -266,8 +266,10 @@ How it behaves:
 - Group names can be changed in `/admin/sso` or with `WEAVE_OIDC_ADMIN_GROUP`, `..._USER_GROUP`, `..._WORKER_GROUP`, `..._GUEST_GROUP`, `..._GROUPS_CLAIM`, `..._TEAM_PREFIX`, `..._REQUIRE_GROUP`.
 
 ### The CLI and agents use API keys
-Sessions are browser-only. Each user creates a personal API key under **Settings -> API key**
-and uses it as `WEAVE_TOKEN` (or `weave login`); the key acts with that user's current role. Agents get their own accounts, which
+Sessions are browser-only. Each user creates personal API keys under **Settings -> API key**: **one key per computer or tool**, as many as needed
+(`WEAVE_MAX_API_KEYS`, default 50). Creating a key never invalidates your other keys; each has a name, its own expiry and a
+"last used" time, and you revoke them one by one. Use a key as `WEAVE_TOKEN` (or `weave login`); it acts with that user's current role.
+A key can create further keys for its owner (as before it could replace itself), so revoke every key you do not recognise. Agents get their own accounts, which
 board owners create for their boards (Board settings > Agents, `weave agent create --boardIds B`; admins manage every agent *account* under `/admin/agents`, without seeing which of other people's boards it works on). See `docs/CLI.md` and `docs/AGENTS.md`.
 
 ### Getting the very first API key (break-glass)
@@ -306,7 +308,7 @@ host break-glass. The Users page warns before you deactivate or delete someone w
 Keys never expire unless you ask: `apikey.generate` / `agent.create` / `agent.rotateKey` accept `expiresInDays` (1-3650;
 omit or `0` = never). Settings -> API key has a select (never / 30 / 90 / 365 days, default never). An expired key is
 rejected with `401 API key expired; ...`, and shown as expired in Settings, `/admin/agents` and in `apikeyExpiresAt` /
-`apikeyExpired` in user and agent output. Rotate it to get a new one.
+`apikeyExpired` in user and agent output (the newest key). Create a new key to replace an expired one. An agent account keeps exactly one key, replaced with `agent.rotateKey`.
 
 ## Configuration
 
@@ -342,6 +344,7 @@ Environment variables (secrets in env override values stored in the admin UI):
 | `WEAVE_WEBHOOK_USER_ALLOW_PRIVATE` | `false` | let webhooks created by board owners (non-admins) reach private networks (RFC 1918, ULA, CGNAT) for LAN receivers; also settable as `webhook.userAllowPrivate` in Admin console > Settings > Webhooks (the env var pins it). Loopback, link-local/cloud metadata, multicast and unspecified addresses stay refused; admin-created webhooks are not restricted |
 | `WEAVE_WEBHOOKS_PER_BOARD` | `20` | webhooks one board may have, `0` = unlimited |
 | `WEAVE_AGENTS_PER_USER` | `50` | agent accounts one person (not an admin) may create, `0` = unlimited |
+| `WEAVE_MAX_API_KEYS` | `50` | personal API keys one person may hold at once, `0` = unlimited |
 | `WEAVE_MCP_UPLOAD_ROOTS` | cwd + OS temp dir | **client side (`weave mcp`)**: OS path list of the directories MCP uploads may read and `saveTo` may write; replaces the defaults. The cwd is never a default root when it is `$HOME` or `/`. Credential/config paths (`.ssh`, `.git`, `.env*`, `*.pem`, Weave's config dir, ...) are refused even inside |
 | `WEAVE_MCP_MAX_UPLOAD_MB` | `256` | client side: largest file `weave mcp` uploads, also bounded by the op's own cap; `0` = the op's cap |
 | `WEAVE_MCP_MAX_BASE64_MB` | `2` | client side: largest `contentBase64` upload |

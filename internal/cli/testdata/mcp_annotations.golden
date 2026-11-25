@@ -11,6 +11,7 @@ weave_agent_prompt_preview POST
 weave_agent_rotateKey POST destructive
 weave_agent_update PATCH idempotent
 weave_apikey_generate POST 
+weave_apikey_list GET readOnly,idempotent
 weave_apikey_revoke DELETE destructive,idempotent
 weave_attachment_cover POST 
 weave_attachment_create POST openWorld

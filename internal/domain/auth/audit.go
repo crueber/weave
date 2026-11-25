@@ -20,6 +20,7 @@ import (
 //
 // Admin-side actions that change who can reach what leave one row, written in the SAME transaction as the change, plus
 // an AUDIT line in the server log: agent.rotateKey (by the agent's creator, a manager of its boards or an admin),
+// apikey.revoke (only when an admin revokes ANOTHER person's keys; revoking your own needs no row),
 // group.member.add (every add that really adds someone; an add of a person already in the group changes nothing and
 // writes nothing; a self-add is flagged), user.relink and the host command `weave admin relink` (source host, no
 // actor). Rows are append-only and carry no foreign keys: names and e-mail addresses are snapshots, so the trail
@@ -32,17 +33,18 @@ import (
 // Audit actions.
 const (
 	AuditAgentRotateKey = "agent.rotateKey"
+	AuditAPIKeyRevoke   = "apikey.revoke"
 	AuditGroupMemberAdd = "group.member.add"
 	AuditUserRelink     = "user.relink"
 )
 
-var auditActions = []string{AuditAgentRotateKey, AuditGroupMemberAdd, AuditUserRelink}
+var auditActions = []string{AuditAgentRotateKey, AuditAPIKeyRevoke, AuditGroupMemberAdd, AuditUserRelink}
 
 // AuditEntry is one row of the admin audit log.
 type AuditEntry struct {
 	ID          string         `json:"id"`
 	At          string         `json:"at"`
-	Action      string         `json:"action" desc:"agent.rotateKey | group.member.add | user.relink"`
+	Action      string         `json:"action" desc:"agent.rotateKey | apikey.revoke | group.member.add | user.relink"`
 	ActorID     string         `json:"actorId,omitempty" desc:"who did it (empty for a host command)"`
 	ActorName   string         `json:"actorName,omitempty"`
 	ActorEmail  string         `json:"actorEmail,omitempty"`
@@ -50,13 +52,13 @@ type AuditEntry struct {
 	TargetID    string         `json:"targetId"`
 	TargetName  string         `json:"targetName" desc:"name at the time of the change"`
 	TargetEmail string         `json:"targetEmail,omitempty"`
-	Details     map[string]any `json:"details" desc:"non-secret facts: keyPrefix/expiresAt (rotateKey), groupId/groupName/self (group add), sessionsEnded (relink)"`
+	Details     map[string]any `json:"details" desc:"non-secret facts: keyPrefix/expiresAt (rotateKey), keysRevoked/keyPrefixes/all (apikey.revoke), groupId/groupName/self (group add), sessionsEnded (relink)"`
 	Source      string         `json:"source" desc:"ui | api | host"`
 }
 
 // AuditListIn pages the audit log, newest first.
 type AuditListIn struct {
-	Action string `query:"action" desc:"only this action: agent.rotateKey | group.member.add | user.relink"`
+	Action string `query:"action" desc:"only this action: agent.rotateKey | apikey.revoke | group.member.add | user.relink"`
 	Before string `query:"before" desc:"cursor: the nextCursor of the previous page"`
 	Limit  int    `query:"limit" desc:"entries per page (default 50, max 200)"`
 }
@@ -217,6 +219,22 @@ func auditView(a AuditEntry) auditRow {
 			}
 			r.Detail += ", expires " + exp
 		}
+	case AuditAPIKeyRevoke:
+		n, _ := a.Details["keysRevoked"].(float64)
+		if all, _ := a.Details["all"].(bool); all {
+			r.What = fmt.Sprintf("Revoked all %d API keys of %s", int(n), target)
+		} else {
+			r.What = "Revoked an API key of " + target
+		}
+		if ps, ok := a.Details["keyPrefixes"].([]any); ok && len(ps) > 0 {
+			var l []string
+			for _, p := range ps {
+				if s, ok := p.(string); ok {
+					l = append(l, s+"...")
+				}
+			}
+			r.Detail = "Keys " + strings.Join(l, ", ")
+		}
 	case AuditGroupMemberAdd:
 		r.What = "Added " + target + " to group " + str("groupName")
 		r.Self, _ = a.Details["self"].(bool)
@@ -245,7 +263,7 @@ func auditPage(c *web.Ctx) error {
 		return err
 	}
 	d := auditData{Action: in.Action, Next: p.NextCursor, Older: in.Before != "", Actions: []auditChoice{
-		{"", "All actions"}, {AuditAgentRotateKey, "Agent key rotated"}, {AuditGroupMemberAdd, "Added to a group"}, {AuditUserRelink, "SSO identity unlinked"}}}
+		{"", "All actions"}, {AuditAgentRotateKey, "Agent key rotated"}, {AuditAPIKeyRevoke, "API key revoked"}, {AuditGroupMemberAdd, "Added to a group"}, {AuditUserRelink, "SSO identity unlinked"}}}
 	for _, a := range p.Items {
 		d.Rows = append(d.Rows, auditView(a))
 	}
@@ -253,7 +271,7 @@ func auditPage(c *web.Ctx) error {
 }
 
 func init() {
-	ops.Register(ops.Op{Name: "audit.list", Summary: "Admin audit log, newest first: agent key rotations, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only",
+	ops.Register(ops.Op{Name: "audit.list", Summary: "Admin audit log, newest first: agent key rotations, revocations of other people's API keys, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only",
 		Method: "GET", Path: "/audit", Auth: ops.AuthAdmin, UI: "GET /admin/audit"},
 		func(e *ops.Env, in AuditListIn) (AuditPage, error) {
 			if err := authz.RequireAuditLog(e); err != nil {

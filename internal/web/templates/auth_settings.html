@@ -96,23 +96,29 @@
 </section>{{end}}
 
 {{define "auth_set_apikey"}}{{template "auth_set_apikey_in" .Data}}{{end}}
-{{define "auth_set_apikey_in"}}{{$u := .User}}<section id="set-apikey" class="boards-sec bs-panel" data-panel="apikey" aria-labelledby="set-apikey-h">
-  <div class="bs-sec-head"><h2 id="set-apikey-h">API key</h2>{{template "bs_status" .}}</div>
+{{define "auth_set_apikey_in"}}<section id="set-apikey" class="boards-sec bs-panel" data-panel="apikey" aria-labelledby="set-apikey-h">
+  <div class="bs-sec-head"><span class="as-head"><h2 id="set-apikey-h">API keys</h2>{{template "help_tip" dict "ID" "as-help-keys" "Text" "Make one key per computer or tool, so you can revoke one without touching the others."}}</span>{{template "bs_status" .}}</div>
   {{template "as_error" .}}
-  <p class="bs-desc">For the CLI or an agent: <code>weave config set url {{.BaseURL}}</code> then <code>weave config set token &lt;key&gt;</code> (or set <code>WEAVE_URL</code> / <code>WEAVE_TOKEN</code>). The key acts with your role. Send it as <code>X-API-Key</code> or <code>Authorization: Bearer</code>.</p>
+  <p class="bs-desc">For the CLI or an agent: <code>weave config set url {{.BaseURL}}</code> then <code>weave config set token &lt;key&gt;</code> (or set <code>WEAVE_URL</code> / <code>WEAVE_TOKEN</code>). A key acts with your role. Send it as <code>X-API-Key</code> or <code>Authorization: Bearer</code>.</p>
   {{if .NewAPIKey}}<div class="bs-link as-newkey">
     <label class="sr-only" for="as-key-in">New API key</label>
     <input id="as-key-in" readonly value="{{.NewAPIKey}}" data-secret>
     <button type="button" class="primary" data-copy="as-key-in">Copy key</button>
     <p class="bs-hint">Copy your new key now. It will not be shown again.</p>
   </div>{{end}}
-  <div class="bs-row"><span class="bs-text"><b>Current key</b><small>{{if $u.HasAPIKey}}<code>{{$u.APIKeyPrefix}}...</code>{{if $u.APIKeyExpired}} <span class="boards-badge">expired {{deref $u.APIKeyExpiresAt}}</span> It no longer works; create a new one.{{else if $u.APIKeyExpiresAt}} Expires {{deref $u.APIKeyExpiresAt}}.{{else}} Never expires.{{end}}{{else}}No API key yet.{{end}}</small></span>
-    {{if $u.HasAPIKey}}<form hx-post="/ui/settings/apikey/revoke" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey/revoke" class="bs-btns" hx-confirm="Revoke this key? Anything using it stops working."><button type="submit">Revoke</button></form>{{end}}</div>
-  <form class="bs-row" hx-post="/ui/settings/apikey" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey"{{if $u.HasAPIKey}} hx-confirm="Rotating replaces your current key, which stops working. Continue?"{{end}}>
-    <span class="bs-text"><b>{{if $u.HasAPIKey}}Rotate key{{else}}Create key{{end}}</b><small>Choose how long the new key stays valid.</small></span>
-    <span class="bs-btns"><label class="sr-only" for="as-exp">Expires</label><select id="as-exp" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select>
-    <button type="submit" class="primary">{{if $u.HasAPIKey}}Rotate{{else}}Create{{end}}</button></span>
+  <ul class="bs-members as-keys">
+  {{range .Keys}}<li class="bs-member as-key" data-key-id="{{.ID}}">
+    <span class="bs-member-t"><b>{{.Name}}{{if .Expired}} <span class="boards-badge">Expired</span>{{end}}</b><small><code>{{.Prefix}}...</code></small><small>Created {{keyDay .CreatedAt}} &middot; Last used: {{keyAgo .LastUsedAt}} &middot; {{if .ExpiresAt}}{{if .Expired}}Expired{{else}}Expires{{end}} {{keyDay (deref .ExpiresAt)}}{{else}}Never expires{{end}}</small></span>
+    <form hx-post="/ui/settings/apikey/revoke?keyId={{.ID}}" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey/revoke?keyId={{.ID}}" hx-confirm="Revoke the key &quot;{{.Name}}&quot; ({{.Prefix}}...)? Anything using it stops working."><button type="submit" class="as-revoke">Revoke</button></form>
+  </li>{{else}}<li class="bs-empty-row">No API keys yet.</li>{{end}}
+  </ul>
+  <form class="bs-row as-create" hx-post="/ui/settings/apikey" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey">
+    <span class="bs-text"><b>Create a key</b><small>Name it after the computer it is for.</small></span>
+    <span class="bs-btns"><label class="sr-only" for="as-name">Name</label><input id="as-name" name="name" maxlength="80" placeholder="e.g. work laptop"><label class="sr-only" for="as-exp">Expires</label><select id="as-exp" name="expiresInDays"><option value="0" selected>Never expires</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 365 days</option></select>
+    <button type="submit" class="primary">Create</button></span>
   </form>
+  {{if gt (len .Keys) 1}}<div class="bs-row"><span class="bs-text"><b>Revoke all</b><small>Stops every key above at once.</small></span>
+    <form hx-post="/ui/settings/apikey/revoke?all=true" hx-target="#set-apikey" hx-swap="outerHTML" method="post" action="/ui/settings/apikey/revoke?all=true" class="bs-btns" hx-confirm="Revoke ALL {{len .Keys}} of your keys? Everything using any of them stops working."><button type="submit">Revoke all</button></form></div>{{end}}
   <div class="bs-row"><span class="bs-text"><b>Connect an agent</b><small>Copy a prompt for Claude Code, Codex, Gemini or OpenCode. It uses <code>$WEAVE_TOKEN</code>, never contains your key, and the agent acts with your full role.</small></span>
     <span class="bs-btns"><button type="button" hx-get="/ui/agent-prompt?scope=general" hx-target="#modal" hx-swap="innerHTML">About Weave</button><button type="button" hx-get="/ui/agent-prompt?scope=runner" hx-target="#modal" hx-swap="innerHTML">Runner</button></span></div>
 </section>{{end}}

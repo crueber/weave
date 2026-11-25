@@ -123,7 +123,7 @@ func TestAPIKey(t *testing.T) {
 	as := testutil.As(e, u)
 	k := call[APIKeyOut](t, as, "apikey.generate", APIKeyGenIn{ID: "me"})
 	var h string
-	_ = e.DB.QueryRow(`SELECT api_key_hash FROM users`).Scan(&h)
+	_ = e.DB.QueryRow(`SELECT key_hash FROM api_keys`).Scan(&h)
 	if h == k.Key || h != sha(k.Key) {
 		t.Fatal("api key must be hashed")
 	}
@@ -136,10 +136,13 @@ func TestAPIKey(t *testing.T) {
 		}
 	}
 	k2 := call[APIKeyOut](t, as, "apikey.generate", APIKeyGenIn{ID: "me"})
-	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", k.Key) }).User != nil {
-		t.Fatal("rotated key still valid")
+	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", k.Key) }).User == nil {
+		t.Fatal("generating a second key must not invalidate the first")
 	}
-	call[OKOut](t, as, "apikey.revoke", IDIn{ID: "me"})
+	call[OKOut](t, as, "apikey.revoke", APIKeyRevokeIn{ID: "me", All: true})
+	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", k.Key) }).User != nil {
+		t.Fatal("revoked key valid")
+	}
 	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", k2.Key) }).User != nil {
 		t.Fatal("revoked key valid")
 	}
@@ -432,13 +435,13 @@ func TestMintKey(t *testing.T) {
 	if c.User == nil || c.User.Role != "admin" {
 		t.Fatalf("minted key does not authenticate as admin: %+v", c.User)
 	}
-	// re-minting rotates the key and may change the role
+	// re-minting ADDS a key (existing ones keep working) and may change the role
 	out2, err := MintKey(e.Ctx, e.DB, "boss@x.io", "worker")
 	if err != nil || out2.Key == out.Key {
 		t.Fatalf("remint: %v", err)
 	}
-	if reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out.Key) }).User != nil {
-		t.Fatal("old key still valid")
+	if c := reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out.Key) }); c.User == nil || c.User.Role != "worker" {
+		t.Fatalf("first minted key must keep working: %+v", c.User)
 	}
 	if c := reqEnv(e, func(r *http.Request) { r.Header.Set("X-API-Key", out2.Key) }); c.User == nil || c.User.Role != "worker" {
 		t.Fatalf("role not updated: %+v", c.User)

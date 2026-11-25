@@ -117,7 +117,7 @@ Admin: render an editable agent prompt or a shared block with sample data (the s
 
 ### `weave agent rotateKey`
 
-Issue a new API key for an agent (the old key stops working); returned once  
+Issue a new API key for an agent (an agent holds exactly one key; the old one stops working); returned once  
 `POST /agents/{id}/key` (auth: user)
 
 | flag | in | type | required | description |
@@ -141,22 +141,34 @@ Rename an agent or deactivate it (its creator, a manager of all its boards, or a
 
 ### `weave apikey generate`
 
-Create or rotate a personal API key (Bearer / X-API-Key); the old key stops working  
+Add a personal API key (Bearer / X-API-Key); your other keys keep working. One key per computer or tool  
 `POST /users/{id}/api-key` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | user id, or "me" |
+| `--name` | body | string |  | optional label for this key, e.g. the computer it is for (max 80 characters; default "Key YYYY-MM-DD") |
 | `--expiresInDays` | body | number |  | optional: the key stops working after this many days (1-3650); 0 or omitted = never expires |
+
+### `weave apikey list`
+
+List your personal API keys (name, prefix, created, last used, expiry; never the key itself)  
+`GET /users/{id}/api-keys` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | user id, or "me"; only your own keys |
 
 ### `weave apikey revoke`
 
-Revoke a user's API key (admins may revoke others')  
+Revoke one API key (keyId) or all of a user's keys (all=true); admins may revoke others' keys (audited)  
 `DELETE /users/{id}/api-key` (auth: user)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | user id, or "me" |
+| `--keyId` | query | string |  | the key to revoke (from apikey.list) |
+| `--all` | query | bool |  | true revokes every key of this user instead; give keyId or all=true, never neither |
 
 ## attachment
 
@@ -243,12 +255,12 @@ Rename an attachment
 
 ### `weave audit list`
 
-Admin audit log, newest first: agent key rotations, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only  
+Admin audit log, newest first: agent key rotations, revocations of other people's API keys, group additions and SSO identity unlinks (who, whom, when; never a key or secret). Admin only  
 `GET /audit` (auth: admin)
 
 | flag | in | type | required | description |
 |---|---|---|---|---|
-| `--action` | query | string |  | only this action: agent.rotateKey \| group.member.add \| user.relink |
+| `--action` | query | string |  | only this action: agent.rotateKey \| apikey.revoke \| group.member.add \| user.relink |
 | `--before` | query | string |  | cursor: the nextCursor of the previous page |
 | `--limit` | query | number |  | entries per page (default 50, max 200) |
 

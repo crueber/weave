@@ -40,10 +40,11 @@ type User struct {
 	EnableFavoritesByDefault      bool    `json:"enableFavoritesByDefault"`
 	IsSSO                         bool    `json:"isSso"`
 	IsDeactivated                 bool    `json:"isDeactivated"`
-	HasAPIKey                     bool    `json:"hasApiKey"`
-	APIKeyPrefix                  string  `json:"apiKeyPrefix,omitempty"`
-	APIKeyExpiresAt               *string `json:"apikeyExpiresAt,omitempty" desc:"when the API key stops working; absent = never"`
-	APIKeyExpired                 bool    `json:"apikeyExpired,omitempty"`
+	HasAPIKey                     bool    `json:"hasApiKey" desc:"true when the user holds at least one API key"`
+	APIKeyCount                   int     `json:"apiKeyCount" desc:"how many API keys the user holds (apikey.list shows them, for yourself)"`
+	APIKeyPrefix                  string  `json:"apiKeyPrefix,omitempty" desc:"prefix of the newest key"`
+	APIKeyExpiresAt               *string `json:"apikeyExpiresAt,omitempty" desc:"when the newest API key stops working; absent = never"`
+	APIKeyExpired                 bool    `json:"apikeyExpired,omitempty" desc:"true when the newest key has expired"`
 	Presence                      string  `json:"presence"`
 	TermsAcceptedAt               *string `json:"termsAcceptedAt,omitempty"`
 	CreatedAt                     string  `json:"createdAt"`
@@ -53,8 +54,11 @@ type User struct {
 
 const userCols = `id,email,username,name,role,COALESCE(avatar,''),phone,organization,language,theme,card_density,colour_blind_mode,auto_logout_minutes,
 default_editor_mode,default_home_view,default_projects_order,subscribe_own_cards,subscribe_to_card_when_commenting,turn_off_recent_card_highlighting,
-enable_favorites_by_default,is_sso,is_deactivated,api_key_hash IS NOT NULL,COALESCE(api_key_prefix,''),presence,
-last_seen_at,terms_accepted_at,created_at,is_agent,api_key_expires_at`
+enable_favorites_by_default,is_sso,is_deactivated,
+(SELECT COUNT(*) FROM api_keys k WHERE k.user_id=users.id),
+COALESCE((SELECT prefix FROM api_keys k WHERE k.user_id=users.id ORDER BY k.created_at DESC,k.id DESC LIMIT 1),''),presence,
+last_seen_at,terms_accepted_at,created_at,is_agent,
+(SELECT expires_at FROM api_keys k WHERE k.user_id=users.id ORDER BY k.created_at DESC,k.id DESC LIMIT 1)`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -63,11 +67,12 @@ func scanUser(r rowScanner) (*User, error) {
 	var lastSeen *string
 	err := r.Scan(&u.ID, &u.Email, &u.Username, &u.Name, &u.Role, &u.avatarFile, &u.Phone, &u.Organization, &u.Language, &u.Theme, &u.CardDensity, &u.ColourBlindMode,
 		&u.AutoLogoutMinutes, &u.DefaultEditorMode, &u.DefaultHomeView, &u.DefaultProjectsOrder, &u.SubscribeOwnCards, &u.SubscribeToCardWhenCommenting,
-		&u.TurnOffRecentCardHighlighting, &u.EnableFavoritesByDefault, &u.IsSSO, &u.IsDeactivated, &u.HasAPIKey, &u.APIKeyPrefix,
+		&u.TurnOffRecentCardHighlighting, &u.EnableFavoritesByDefault, &u.IsSSO, &u.IsDeactivated, &u.APIKeyCount, &u.APIKeyPrefix,
 		&u.Presence, &lastSeen, &u.TermsAcceptedAt, &u.CreatedAt, &u.IsAgent, &u.APIKeyExpiresAt)
 	if err != nil {
 		return nil, err
 	}
+	u.HasAPIKey = u.APIKeyCount > 0
 	u.APIKeyExpired = keyExpired(u.APIKeyExpiresAt)
 	u.Presence = effectivePresence(u.Presence, lastSeen)
 	if u.avatarFile != "" {

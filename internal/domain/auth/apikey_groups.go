@@ -3,8 +3,13 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/ops"
@@ -12,20 +17,76 @@ import (
 )
 
 type APIKeyOut struct {
+	ID        string  `json:"id" desc:"key id (use it with apikey.revoke); the key itself is never shown again"`
+	Name      string  `json:"name" desc:"your label for the key, e.g. the computer it lives on"`
 	Key       string  `json:"key" desc:"the full key; shown only once"`
 	Prefix    string  `json:"prefix"`
 	CreatedAt string  `json:"createdAt"`
 	ExpiresAt *string `json:"expiresAt,omitempty" desc:"when the key stops working; absent = never"`
 }
 
+// APIKeyInfo is one listed key: everything except the key itself.
+type APIKeyInfo struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Prefix     string  `json:"prefix" desc:"the first characters of the key, to recognise it"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt,omitempty" desc:"when the key last authenticated a request (rounded to 10 minutes); absent = never used"`
+	ExpiresAt  *string `json:"expiresAt,omitempty" desc:"when the key stops working; absent = never"`
+	Expired    bool    `json:"expired,omitempty" desc:"true when the key has expired and is rejected"`
+}
+
+// APIKeyListIn is the input of apikey.list.
+type APIKeyListIn struct {
+	ID string `path:"id" desc:"user id, or \"me\"; only your own keys"`
+}
+
 // APIKeyGenIn is the input of apikey.generate.
 type APIKeyGenIn struct {
 	ID            string `path:"id" desc:"user id, or \"me\""`
+	Name          string `json:"name" desc:"optional label for this key, e.g. the computer it is for (max 80 characters; default \"Key YYYY-MM-DD\")"`
 	ExpiresInDays int    `json:"expiresInDays" desc:"optional: the key stops working after this many days (1-3650); 0 or omitted = never expires"`
+}
+
+// APIKeyRevokeIn is the input of apikey.revoke.
+type APIKeyRevokeIn struct {
+	ID    string `path:"id" desc:"user id, or \"me\""`
+	KeyID string `query:"keyId" desc:"the key to revoke (from apikey.list)"`
+	All   bool   `query:"all" desc:"true revokes every key of this user instead; give keyId or all=true, never neither"`
 }
 
 // maxKeyDays bounds expiresInDays (ten years).
 const maxKeyDays = 3650
+
+// maxKeyNameLen bounds an API key's label.
+const maxKeyNameLen = 80
+
+// defaultAPIKeysPerUser caps the keys one person may hold (WEAVE_MAX_API_KEYS; 0 = no cap).
+const defaultAPIKeysPerUser = 50
+
+var (
+	maxKeysOnce sync.Once
+	maxKeysVal  = defaultAPIKeysPerUser
+	// maxKeysEnv reads the variable; tests replace it and reset maxKeysOnce.
+	maxKeysEnv = func() string { return os.Getenv("WEAVE_MAX_API_KEYS") }
+)
+
+// maxAPIKeys parses WEAVE_MAX_API_KEYS once (a negative or garbage value logs one warning and falls back to 50).
+func maxAPIKeys() int {
+	maxKeysOnce.Do(func() {
+		if v := strings.TrimSpace(maxKeysEnv()); v != "" {
+			if x, err := strconv.Atoi(v); err == nil && x >= 0 {
+				maxKeysVal = x
+			} else {
+				fmt.Println("WEAVE_MAX_API_KEYS: invalid value", v, "- using", defaultAPIKeysPerUser)
+			}
+		}
+	})
+	return maxKeysVal
+}
+
+// lastUsedEvery is the most often a key's last_used_at is written (authentication touches it at most this often).
+const lastUsedEvery = 10 * time.Minute
 
 func keyExpiry(days int) (*string, error) {
 	if days < 0 || days > maxKeyDays {
@@ -36,6 +97,23 @@ func keyExpiry(days int) (*string, error) {
 	}
 	s := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour).Format(time.RFC3339)
 	return &s, nil
+}
+
+// keyName trims a label; empty becomes "Key YYYY-MM-DD".
+func keyName(s string) (string, error) {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) || r == 0x200E || r == 0x200F {
+			return -1
+		}
+		return r
+	}, s))
+	if s == "" {
+		return "Key " + time.Now().UTC().Format("2006-01-02"), nil
+	}
+	if len([]rune(s)) > maxKeyNameLen {
+		return "", ops.Invalid("name is at most 80 characters")
+	}
+	return s, nil
 }
 
 type Group struct {
@@ -76,29 +154,57 @@ func ownerOnly(e *ops.Env, id string) (string, error) {
 	return "", ops.Forbidden()
 }
 
-// setAPIKey stores a fresh hashed API key for the user and returns it.
-// expiresInDays 0 means the key never expires.
-func setAPIKey(ctx context.Context, d auditExec, id string, expiresInDays int) (APIKeyOut, error) {
+// addAPIKey inserts one more key for the user (existing keys stay valid) and returns it. expiresInDays 0 means the
+// key never expires. Callers own the rules around it (cap, single-key agents).
+func addAPIKey(ctx context.Context, d auditExec, userID, name string, expiresInDays int) (APIKeyOut, error) {
 	exp, err := keyExpiry(expiresInDays)
 	if err != nil {
 		return APIKeyOut{}, err
 	}
 	key := apiKeyPrefix + db.Token(24)
-	now := db.Now()
-	prefix := key[:8]
+	out := APIKeyOut{ID: db.NewID(), Name: name, Key: key, Prefix: key[:8], CreatedAt: db.Now(), ExpiresAt: exp}
 	var expArg any
 	if exp != nil {
 		expArg = *exp
 	}
-	if _, err := d.ExecContext(ctx, `UPDATE users SET api_key_hash=?,api_key_prefix=?,api_key_created_at=?,api_key_expires_at=? WHERE id=?`, sha(key), prefix, now, expArg, id); err != nil {
+	if _, err := d.ExecContext(ctx, `INSERT INTO api_keys(id,user_id,name,key_hash,prefix,created_at,expires_at) VALUES(?,?,?,?,?,?,?)`,
+		out.ID, userID, name, sha(key), out.Prefix, out.CreatedAt, expArg); err != nil {
 		return APIKeyOut{}, err
 	}
-	return APIKeyOut{Key: key, Prefix: prefix, CreatedAt: now, ExpiresAt: exp}, nil
+	return out, nil
+}
+
+// replaceAPIKey is the agent rule: an agent account holds exactly one key, so the old ones are deleted and one new key is
+// inserted (used by agent.create and agent.rotateKey, inside the caller's transaction).
+func replaceAPIKey(ctx context.Context, d auditExec, userID string, expiresInDays int) (APIKeyOut, error) {
+	if _, err := d.ExecContext(ctx, `DELETE FROM api_keys WHERE user_id=?`, userID); err != nil {
+		return APIKeyOut{}, err
+	}
+	return addAPIKey(ctx, d, userID, "Agent key", expiresInDays)
+}
+
+// listAPIKeys returns the user's keys, newest first (never the key or its hash).
+func listAPIKeys(e *ops.Env, userID string) ([]APIKeyInfo, error) {
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,name,prefix,created_at,last_used_at,expires_at FROM api_keys WHERE user_id=? ORDER BY created_at DESC, id DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []APIKeyInfo{}
+	for rows.Next() {
+		var k APIKeyInfo
+		if err := rows.Scan(&k.ID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt); err != nil {
+			return nil, err
+		}
+		k.Expired = keyExpired(k.ExpiresAt)
+		out = append(out, k)
+	}
+	return out, rows.Err()
 }
 
 // MintKey is the break-glass path behind `weave admin mint-key`: it runs on the server
 // host with direct database access (never over HTTP), creates or updates the user with
-// the given email (and role, when non-empty), and returns a fresh API key. The account is
+// the given email (and role, when non-empty), and returns an ADDITIONAL API key named "mint-key" (existing keys keep working). The account is
 // marked SSO-linked by email; the next OIDC login re-applies IdP-owned roles.
 func MintKey(ctx context.Context, d *db.DB, email, role string) (APIKeyOut, error) {
 	email, err := cleanEmail(email)
@@ -127,27 +233,122 @@ func MintKey(ctx context.Context, d *db.DB, email, role string) (APIKeyOut, erro
 			return APIKeyOut{}, err
 		}
 	}
-	return setAPIKey(ctx, d, id, 0)
+	return addAPIKey(ctx, d, id, "mint-key", 0)
 }
 
 func init() {
-	ops.Register(ops.Op{Name: "apikey.generate", Summary: "Create or rotate a personal API key (Bearer / X-API-Key); the old key stops working", Method: "POST", Path: "/users/{id}/api-key", UI: "POST /ui/settings/apikey"},
+	ops.Register(ops.Op{Name: "apikey.list", Summary: "List your personal API keys (name, prefix, created, last used, expiry; never the key itself)", Method: "GET", Path: "/users/{id}/api-keys", UI: "GET /settings (API key)"},
+		func(e *ops.Env, in APIKeyListIn) ([]APIKeyInfo, error) {
+			id, err := ownerOnly(e, in.ID)
+			if err != nil {
+				return nil, err
+			}
+			return listAPIKeys(e, id)
+		})
+
+	ops.Register(ops.Op{Name: "apikey.generate", Summary: "Add a personal API key (Bearer / X-API-Key); your other keys keep working. One key per computer or tool", Method: "POST", Path: "/users/{id}/api-key", UI: "POST /ui/settings/apikey"},
 		func(e *ops.Env, in APIKeyGenIn) (APIKeyOut, error) {
 			id, err := ownerOnly(e, in.ID)
 			if err != nil {
 				return APIKeyOut{}, err
 			}
-			return setAPIKey(e.Ctx, e.DB, id, in.ExpiresInDays)
+			if e.User.IsAgent {
+				return APIKeyOut{}, &ops.Error{Status: 403, Code: "forbidden", Msg: "an agent holds exactly one key: agent keys are rotated with agent.rotateKey by whoever owns the agent"}
+			}
+			name, err := keyName(in.Name)
+			if err != nil {
+				return APIKeyOut{}, err
+			}
+			if _, err := keyExpiry(in.ExpiresInDays); err != nil {
+				return APIKeyOut{}, err
+			}
+			var out APIKeyOut
+			// the cap check and the insert share one (IMMEDIATE) transaction so concurrent calls cannot overshoot it
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				if limit := maxAPIKeys(); limit > 0 {
+					var n int
+					if err := tx.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM api_keys WHERE user_id=? AND (expires_at IS NULL OR expires_at>?)`, id, time.Now().UTC().Format(time.RFC3339)).Scan(&n); err != nil {
+						return err
+					}
+					if n >= limit {
+						return ops.Conflict(fmt.Sprintf("you already have %d API keys, the most one person may hold (WEAVE_MAX_API_KEYS); revoke one first", n))
+					}
+				}
+				var err error
+				out, err = addAPIKey(e.Ctx, tx, id, name, in.ExpiresInDays)
+				return err
+			})
+			return out, err
 		})
 
-	ops.Register(ops.Op{Name: "apikey.revoke", Summary: "Revoke a user's API key (admins may revoke others')", Method: "DELETE", Path: "/users/{id}/api-key", UI: "POST /ui/settings/apikey/revoke"},
-		func(e *ops.Env, in IDIn) (OKOut, error) {
+	ops.Register(ops.Op{Name: "apikey.revoke", Summary: "Revoke one API key (keyId) or all of a user's keys (all=true); admins may revoke others' keys (audited)", Method: "DELETE", Path: "/users/{id}/api-key", UI: "POST /ui/settings/apikey/revoke"},
+		func(e *ops.Env, in APIKeyRevokeIn) (OKOut, error) {
 			id, err := resolve(e, in.ID, false)
 			if err != nil {
 				return OKOut{}, err
 			}
-			_, err = e.DB.ExecContext(e.Ctx, `UPDATE users SET api_key_hash=NULL,api_key_prefix=NULL,api_key_created_at=NULL,api_key_expires_at=NULL WHERE id=?`, id)
-			return OKOut{true}, err
+			keyID := strings.TrimSpace(in.KeyID)
+			if (keyID == "") == !in.All {
+				return OKOut{}, ops.Invalid("pass keyId to revoke one key, or all=true to revoke every key")
+			}
+			// the user is read first so an admin's audit row can name them (an unknown id answers not_found)
+			var tName, tEmail string
+			var tAgent bool
+			if err := e.DB.QueryRowContext(e.Ctx, `SELECT name,email,is_agent FROM users WHERE id=? AND deleted_at IS NULL`, id).Scan(&tName, &tEmail, &tAgent); err != nil {
+				if err == sql.ErrNoRows {
+					return OKOut{}, ops.NotFound("user")
+				}
+				return OKOut{}, err
+			}
+			others := id != e.User.UserID // only an admin gets here (resolve); the owner revoking their own keys needs no audit row
+			var au *AuditEntry
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				au = nil
+				q, args := `SELECT prefix FROM api_keys WHERE user_id=?`, []any{id}
+				if keyID != "" {
+					q, args = q+` AND id=?`, append(args, keyID)
+				}
+				var prefixes []string
+				rows, err := tx.QueryContext(e.Ctx, q, args...)
+				if err != nil {
+					return err
+				}
+				for rows.Next() {
+					var p string
+					if rows.Scan(&p) == nil {
+						prefixes = append(prefixes, p)
+					}
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					return err
+				}
+				if keyID != "" && len(prefixes) == 0 {
+					return ops.NotFound("key") // an unknown id, or another user's key: nothing is deleted
+				}
+				dq := strings.Replace(q, `SELECT prefix`, `DELETE`, 1)
+				if _, err := tx.ExecContext(e.Ctx, dq, args...); err != nil {
+					return err
+				}
+				if others && len(prefixes) > 0 {
+					kind := "user"
+					if tAgent {
+						kind = "agent"
+					}
+					au = &AuditEntry{Action: AuditAPIKeyRevoke, TargetKind: kind, TargetID: id, TargetName: tName, TargetEmail: tEmail, Source: auditSource(e),
+						Details: map[string]any{"keysRevoked": len(prefixes), "keyPrefixes": prefixes, "all": keyID == ""}}
+					auditActor(e.Ctx, tx, e.User, au)
+					return writeAudit(e.Ctx, tx, au)
+				}
+				return nil
+			})
+			if err != nil {
+				return OKOut{}, err
+			}
+			if au != nil {
+				logAudit(*au)
+			}
+			return OKOut{true}, nil
 		})
 
 	// ---- user groups ----

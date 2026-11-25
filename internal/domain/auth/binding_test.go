@@ -202,7 +202,7 @@ func TestAPIKeyExpiry(t *testing.T) {
 	}
 
 	past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
-	if _, err := e.DB.Exec(`UPDATE users SET api_key_expires_at=? WHERE id=?`, past, u.UserID); err != nil {
+	if _, err := e.DB.Exec(`UPDATE api_keys SET expires_at=? WHERE id=?`, past, k.ID); err != nil {
 		t.Fatal(err)
 	}
 	got := hdr(k.Key)
@@ -213,7 +213,10 @@ func TestAPIKeyExpiry(t *testing.T) {
 	if !me.APIKeyExpired {
 		t.Fatal("expired key must be flagged in user output")
 	}
-	// rotating clears the expiry
+	// the older, non-expiring key is untouched, and a new key works too
+	if hdr(forever.Key).User == nil {
+		t.Fatal("expiry is per key: the other key must keep working")
+	}
 	k2 := call[APIKeyOut](t, as, "apikey.generate", APIKeyGenIn{ID: "me"})
 	if hdr(k2.Key).User == nil {
 		t.Fatal("new key must work")
@@ -224,7 +227,7 @@ func TestAPIKeyExpiryOverHTTP401(t *testing.T) {
 	c, _ := newClient(t)
 	u := mkUser(t, c.e, "h@x.io", "boardUser")
 	k := call[APIKeyOut](t, testutil.As(c.e, u), "apikey.generate", APIKeyGenIn{ID: "me", ExpiresInDays: 1})
-	if _, err := c.e.DB.Exec(`UPDATE users SET api_key_expires_at=?`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)); err != nil {
+	if _, err := c.e.DB.Exec(`UPDATE api_keys SET expires_at=?`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	w := c.do("GET", "/api/v1/auth/me", nil, map[string]string{"X-API-Key": k.Key})
@@ -241,7 +244,7 @@ func TestAgentKeyExpiry(t *testing.T) {
 		t.Fatalf("agent.create expiry: %+v", a)
 	}
 	wantErr(t, admin, "agent.create", AgentCreateIn{Name: "bad", ExpiresInDays: 9999}, 422)
-	if _, err := e.DB.Exec(`UPDATE users SET api_key_expires_at=? WHERE id=?`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339), a.ID); err != nil {
+	if _, err := e.DB.Exec(`UPDATE api_keys SET expires_at=? WHERE user_id=?`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339), a.ID); err != nil {
 		t.Fatal(err)
 	}
 	if reqEnv(e, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+a.Key.Key) }).User != nil {

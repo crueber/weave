@@ -8,7 +8,7 @@
 //	auth.SetConfig(e, key, value)    upsert a `config` row (used for oidc.*, terms.*)
 //	auth.UserBrief(e, id)            id, name, username, avatarUrl of any user (nil if missing)
 //	auth.ClientIP(e)                 remote address honouring WEAVE_TRUST_PROXY
-//	auth.MintKey(ctx, db, email, role)  break-glass API key minting (weave admin mint-key)
+//	auth.MintKey(ctx, db, email, role)  break-glass: ADDS an API key named "mint-key" (weave admin mint-key)
 //
 // Config keys read: oidc.issuer, oidc.clientId, oidc.clientSecret,
 // oidc.scopes, oidc.emailClaim, oidc.nameClaim, oidc.usernameClaim, oidc.groupsClaim,

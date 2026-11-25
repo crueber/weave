@@ -437,6 +437,9 @@ func (w *world) call(o *ops.Op, caller string) result {
 		delete(body, "projectId") // admin-only scopes and filters
 		delete(body, "userId")
 	}
+	if o.Name == "apikey.revoke" {
+		q = append(q, "all=true") // the op wants keyId or all=true; the owner's own keys, outsiders are refused at resolve
+	}
 	if o.Name == "card.archive.list" {
 		q = nil // no filters: the response must include the seeded archive/trash cards
 	}
@@ -475,7 +478,7 @@ var selfOps = map[string]string{
 	"board.template.get": "built-in templates are open to every signed-in user; a published one answers not_found unless visible to the caller",
 	"search.query":       "search is permission-filtered", "session.list": "own sessions", "session.revoke_others": "own sessions",
 	"user.get": "directory entry", "user.list": "directory of active users", "group.get": "directory", "group.list": "directory",
-	"notification_service.list": "own services", "apikey.get": "own key status", "whoami": "self",
+	"notification_service.list": "own services", "apikey.get": "own key status", "apikey.list": "owner-only (ownerOnly): any other id answers forbidden; the sweep checks the leak marker", "whoami": "self",
 	"subscription.list": "own watches, filtered to boards the caller can still view (authz.BoardLevels)",
 	"webhook.events":    "the static list of event names a board webhook may subscribe to (no data)",
 	"agent.list":        "only agents the caller created or that hold access to boards the caller manages (authz.CanSeeAgent); outsiders get an empty list",

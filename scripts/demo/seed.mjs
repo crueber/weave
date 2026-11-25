@@ -119,7 +119,7 @@ for (const u of ['sam']) await R('POST', `/boards/${desk.id}/members`, {userId: 
 // an orphaned project: Morgan created it, then left (deactivated), so no manager is active
 const old = await api('morgan', 'POST', '/projects', {name: 'Office Move', description: 'Boxes, desks and the new floor plan.'});
 await api('morgan', 'POST', `/projects/${old.id}/boards`, {name: 'Moving day'});
-await api('morgan', 'DELETE', `/users/${sess.morgan.id}/api-key`);
+await api('morgan', 'DELETE', `/users/${sess.morgan.id}/api-key?all=true`);
 await A('POST', `/users/${sess.morgan.id}/deactivate`);
 
 // admin audit log: a group with a self-add and two adds (no key rotation: its log line shows a key prefix)
@@ -128,7 +128,7 @@ for (const u of ['avery', 'jordan', 'sam']) await A('POST', `/user-groups/${grp.
 
 // clean slate for recording: no unread badge, and no API key anywhere (browser sessions only)
 for (const u of ['avery', 'jordan', 'sam', 'riley']) await api(u, 'POST', '/notifications/read-all').catch(() => {});
-for (const u of ['jordan', 'sam', 'riley', 'avery']) await api(u, 'DELETE', `/users/${sess[u].id}/api-key`);
+for (const u of ['jordan', 'sam', 'riley', 'avery']) await api(u, 'DELETE', `/users/${sess[u].id}/api-key?all=true`);
 
 fs.writeFileSync(DIR + '/state.json', JSON.stringify({project: prj.id, project2: prj2.id, board: board.id, board2: b2.id, desk: desk.id, lists: L, lists2: L2, lists3: L3,
   launch: launch.id, csv: csv.id, labels: lab, agent: agent.id}, null, 1));

@@ -150,7 +150,7 @@ await api(agentKey, 'POST', `/cards/${triage.id}/comments`, {text: 'Claimed. Fou
 
 // clean slate: no unread badges, and no human API keys (browser sessions only)
 for (const u of ['avery', 'jordan', 'sam', 'riley']) await api(u, 'POST', '/notifications/read-all').catch(() => {});
-for (const u of ['jordan', 'sam', 'riley', 'avery']) await api(u, 'DELETE', `/users/${sess[u].id}/api-key`);
+for (const u of ['jordan', 'sam', 'riley', 'avery']) await api(u, 'DELETE', `/users/${sess[u].id}/api-key?all=true`);
 
 fs.writeFileSync(DIR + '/state.json', JSON.stringify({
   personal: personal.id, week: week.id, apollo: apollo.id, platform: plat.id, timeline: tl.id, bugs: bugs.id, release: rel.id,

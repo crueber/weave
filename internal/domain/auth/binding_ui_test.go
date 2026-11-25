@@ -42,7 +42,7 @@ func TestAdminUIRelinkSignOutAndKeyExpiryForm(t *testing.T) {
 		t.Fatalf("create expiring key: %d %s", w.Code, w.Body.String())
 	}
 	var exp *string
-	_ = c.e.DB.QueryRow(`SELECT api_key_expires_at FROM users WHERE email='boss@x.io'`).Scan(&exp)
+	_ = c.e.DB.QueryRow(`SELECT k.expires_at FROM api_keys k JOIN users u ON u.id=k.user_id WHERE u.email='boss@x.io'`).Scan(&exp)
 	if exp == nil {
 		t.Fatal("expiry not stored")
 	}
