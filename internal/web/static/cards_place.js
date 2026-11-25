@@ -99,7 +99,7 @@
   document.addEventListener('htmx:confirm', function (e) {
     var el = e.detail && e.detail.elt; if (!el || !el.dataset || !el.dataset.confirmTitle || !e.detail.question) return;
     e.preventDefault();
-    confirmBox({ title: el.dataset.confirmTitle, text: e.detail.question, ok: el.dataset.confirmOk || 'OK', danger: true, onOk: function () { e.detail.issueRequest(true); } });
+    confirmBox({ title: el.dataset.confirmTitle, text: e.detail.question, ok: el.dataset.confirmOk || 'OK', danger: el.dataset.confirmDanger !== 'false', onOk: function () { e.detail.issueRequest(true); } });
   });
 
   // ---------------------------------------------------------------- the picker ----

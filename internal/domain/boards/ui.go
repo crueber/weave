@@ -168,7 +168,7 @@ func registerUI() {
 			return err
 		}
 		q := c.R.URL.Query()
-		if q.Get("view") == "" {
+		if q.Get("view") == "" && boardShow(q) == boardShowActive {
 			switch d.Board.DefaultView {
 			case "calendar", "map":
 				c.Redirect("/boards/" + d.Board.ID + "/" + d.Board.DefaultView)

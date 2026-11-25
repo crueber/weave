@@ -620,6 +620,26 @@ Archive (or trash) a card: it moves to the archive (trash) list of every board i
 | `--id` | path | string | yes |  |
 | `--trash` | body | bool |  | true = move to the trash list, false = archive list |
 
+### `weave card archive.list`
+
+List a board's archived or trashed cards with filters, stable cursor paging, board-visible labels and visible active placements  
+`GET /boards/{boardId}/archive` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--boardId` | path | string | yes | board whose archive or trash to list |
+| `--kind` | query | string |  | archived (default) or trash |
+| `--q` | query | string |  | escaped substring match on card name or description |
+| `--labelId` | query | string |  | only cards with this label, when the label belongs to this board or its project |
+| `--memberId` | query | string |  | only cards this user is a member of; accepts a user id, me (the signed-in user), or none (unassigned) |
+| `--fromListId` | query | string |  | only cards whose previous column on this board is this list |
+| `--since` | query | string |  | inclusive lower archive-time bound (RFC3339 or YYYY-MM-DD, normalized to UTC) |
+| `--until` | query | string |  | inclusive upper archive-time bound (RFC3339 or YYYY-MM-DD); a date includes the whole day |
+| `--sort` | query | string |  | archived (default), name, or from |
+| `--dir` | query | string |  | asc or desc (default desc) |
+| `--limit` | query | number |  | page size (default 50, max 200) |
+| `--cursor` | query | string |  | opaque nextCursor from the previous page; bound to this board, filters, sort and direction |
+
 ### `weave card calendar`
 
 Cards of a board by due date for a month grid  
@@ -684,6 +704,24 @@ Delete a card permanently, from every board (it must be in the trash on every bo
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | card id |
+
+### `weave card delete.bulk`
+
+Permanently delete selected or all matching trashed cards that are in trash on every board, quietly, with one board activity summary  
+`POST /boards/{boardId}/archive/delete` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--boardId` | path | string | yes | board whose trashed cards are deleted permanently |
+| `--cardIds` | body | array<string> |  | card ids to delete (max 500); exclusive with all |
+| `--all` | body | bool |  | delete every card matching the content and date filters |
+| `--confirmCount` | body | number |  | with all, required: the exact matching count observed by the client (missing is 400, a mismatch 409) |
+| `--q` | body | string |  | with all, escaped substring match on card name or description |
+| `--labelId` | body | string |  | with all, only cards with this board-visible label |
+| `--memberId` | body | string |  | with all, only cards this user is a member of; accepts a user id, me (the signed-in user), or none (unassigned) |
+| `--fromListId` | body | string |  | with all, only cards whose previous column on this board is this list |
+| `--since` | body | string |  | with all, inclusive lower archive-time bound (RFC3339 or YYYY-MM-DD, UTC) |
+| `--until` | body | string |  | with all, inclusive upper archive-time bound (RFC3339 or YYYY-MM-DD); a date includes the whole day |
 
 ### `weave card draft.create`
 
@@ -1006,6 +1044,25 @@ Restore an archived/trashed card: on every board it is on, it returns to its pre
 | flag | in | type | required | description |
 |---|---|---|---|---|
 | `--id` | path | string | yes | card id |
+
+### `weave card restore.bulk`
+
+Restore selected or all matching archived/trashed cards on a board, quietly, with one board activity summary  
+`POST /boards/{boardId}/archive/restore` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--boardId` | path | string | yes | board whose archived/trashed cards are restored |
+| `--cardIds` | body | array<string> |  | card ids to restore (max 500); exclusive with all |
+| `--all` | body | bool |  | restore every card matching the content and date filters |
+| `--kind` | body | string |  | with all, restrict to archived or trash; empty restores both kinds |
+| `--confirmCount` | body | number |  | with all, required: the exact matching count observed by the client (missing is 400, a mismatch 409) |
+| `--q` | body | string |  | with all, escaped substring match on card name or description |
+| `--labelId` | body | string |  | with all, only cards with this board-visible label |
+| `--memberId` | body | string |  | with all, only cards this user is a member of; accepts a user id, me (the signed-in user), or none (unassigned) |
+| `--fromListId` | body | string |  | with all, only cards whose previous column on this board is this list |
+| `--since` | body | string |  | with all, inclusive lower archive-time bound (RFC3339 or YYYY-MM-DD, UTC) |
+| `--until` | body | string |  | with all, inclusive upper archive-time bound (RFC3339 or YYYY-MM-DD); a date includes the whole day |
 
 ### `weave card share.create`
 

@@ -99,6 +99,17 @@ func (w *capWorld) trashedCard() capTarget {
 	return t
 }
 
+// archivedCard is a new card on board B moved to the archive. W is a member of it, so the archive restore row also
+// proves that card.restore.bulk's board-Edit rule does not inherit the card worker rule.
+func (w *capWorld) archivedCard() capTarget {
+	P := w.keys["P"]
+	t := w.main
+	t.card = id(w.must(P, "POST", "/lists/"+w.main.list+"/cards", map[string]any{"name": "Archived for matrix"}))
+	w.must(P, "POST", "/cards/"+t.card+"/members", map[string]any{"userId": w.uid["W"]})
+	w.must(P, "POST", "/cards/"+t.card+"/archive", map[string]any{})
+	return t
+}
+
 // twoBoards is a new card on board B (W is a member of it: the worker rule) that P also placed on board B3.
 func (w *capWorld) twoBoards() capTarget {
 	P := w.keys["P"]
@@ -249,6 +260,10 @@ func mainT(w *capWorld) capTarget  { return w.main }
 func pubT(w *capWorld) capTarget   { return w.pub }
 func memT(w *capWorld) capTarget   { return w.mem }
 func boardPage(t capTarget) string { return "/boards/" + t.board }
+func boardArchive(t capTarget) string {
+	// The board shell lazy-loads #archive-view; request its fragment directly because the matrix does not run htmx.
+	return "/ui/boards/" + t.board + "/archive?kind=archived"
+}
 func boardSettings(t capTarget) string {
 	return "/boards/" + t.board + "/settings"
 }
@@ -340,6 +355,12 @@ var capRows = []capRow{
 		cap: func(c capSet) bool { return c.board.CanConnectAgent },
 		op: func(w *capWorld, t capTarget) (string, string, any) {
 			return "GET", "/agent/prompt?scope=board&id=" + t.board, nil
+		}},
+	{name: "board: restore archived", target: func(w *capWorld) capTarget { return w.archivedCard() }, page: boardArchive,
+		hook: "restoreArchived", hidden: boardSeen,
+		cap: func(c capSet) bool { return c.board.CanRestoreArchived },
+		op: func(w *capWorld, t capTarget) (string, string, any) {
+			return "POST", "/boards/" + t.board + "/archive/restore", map[string]any{"cardIds": []string{t.card}}
 		}},
 
 	// ---- board settings

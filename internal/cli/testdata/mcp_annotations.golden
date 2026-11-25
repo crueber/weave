@@ -57,12 +57,14 @@ weave_board_tree GET readOnly,idempotent
 weave_board_unsubscribe DELETE destructive,idempotent
 weave_board_update PATCH idempotent
 weave_card_archive POST destructive
+weave_card_archive_list GET readOnly,idempotent
 weave_card_calendar GET readOnly,idempotent
 weave_card_claim POST 
 weave_card_close POST 
 weave_card_cover_set PUT idempotent
 weave_card_create POST 
 weave_card_delete DELETE destructive,idempotent
+weave_card_delete_bulk POST destructive
 weave_card_draft_create POST 
 weave_card_draft_publish POST 
 weave_card_due_complete POST 
@@ -93,6 +95,7 @@ weave_card_recurrence_set PUT idempotent
 weave_card_release POST 
 weave_card_renew POST 
 weave_card_restore POST 
+weave_card_restore_bulk POST 
 weave_card_share_create POST 
 weave_card_share_revoke DELETE destructive,idempotent
 weave_card_share_view GET readOnly,idempotent

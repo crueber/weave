@@ -96,6 +96,16 @@ func ActionText(a ActionItem) string {
 	if auto, _ := d["auto"].(string); auto == "applyTemplate" && a.Type == "cardMove" {
 		return "moved the card into the first column of an applied board template"
 	}
+	if auto, _ := d["auto"].(string); auto == "bulkRestore" && a.Type == "boardUpdate" {
+		restored, _ := d["restored"].(float64)
+		skipped, _ := d["skipped"].(float64)
+		return "bulk-restored " + countOf(int(restored), "card") + "; skipped " + strconv.Itoa(int(skipped))
+	}
+	if auto, _ := d["auto"].(string); auto == "bulkDelete" && a.Type == "boardUpdate" {
+		deleted, _ := d["deleted"].(float64)
+		skipped, _ := d["skipped"].(float64)
+		return "permanently deleted " + countOf(int(deleted), "card") + "; skipped " + strconv.Itoa(int(skipped))
+	}
 	if tn, _ := d["appliedTemplate"].(string); tn != "" && a.Type == "boardUpdate" {
 		cols, _ := d["columnsAdded"].(float64)
 		moved, _ := d["cardsMoved"].(float64)

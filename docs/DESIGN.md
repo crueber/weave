@@ -296,6 +296,61 @@ One card (not a mirror, not a copy) may sit on several boards so different teams
   export/import (`exportList.archiveAfter`, out-of-range values dropped), published templates (`TemplateColumn.archiveAfter`), built-in
   manifests may set it (none do), the gallery preview.
 
+## Archive view
+- **UI and URL state**: the board filter row's **Show** control chooses **Active** (the default), **Archived** or **Trash**.
+  `?show=archived|trash` is shareable, reload-safe URL state and bypasses the board's default-view redirect, including on
+  Calendar/Map-default boards. Either choice replaces `#board-body` with the Archive table; returning to Active restores
+  the board's normal view. Viewers can browse the table; mutations require Edit.
+- **Table**: Label and Member are single-select controls that map directly to the op's singular `labelId`/`memberId`
+  filters; Member offers Any member, Me, Unassigned or one concrete member. Text uses `q`; **From** (`fromListId`) and
+  **Since / Until** (`since`/`until`) are additional facets. Sort is archived date (newest first by default), name or From.
+  It shows 50 rows per cursor page and **Load more** appends the next page. Month heading rows appear only for
+  archived-date sorting and use local time. Rows show the card name (opening its sheet), From column (`(removed)` when the
+  previous column is gone), archived date (relative text with an absolute title), labels, members, a closed mark, and
+  "also active on <board>" only for other viewable boards where the card still has an active/closing placement. Hidden
+  boards are never named or counted. The header carries the filtered total; empty states distinguish an empty
+  archive/trash from filters with no matches.
+- **Row and bulk actions**: editors get **Restore** on each row and **Delete forever** in Trash where the row's
+  `canDelete` is true (every placement of the card is in trash). Checkboxes and the bulk toolbar restore or delete the
+  selected rows; **Select all N matching** applies to the whole current filter, not only loaded rows, and asks for
+  confirmation with the exact count before submitting `all=true` and `confirmCount`. A changed count is a 409, so a stale
+  selection cannot silently act on a different set. A local card-sheet restore/delete refreshes an idle Archive table;
+  SSE and other-tab changes do not auto-refresh it, protecting selection and typed filters. Viewers have no selection or
+  mutation controls. The phone layout keeps filters and row actions usable; all behavior stays in server-rendered HTMX
+  and static delegated JavaScript under the normal CSP (no inline scripts or handlers).
+- **List contract**: `GET /boards/{boardId}/archive` needs View on the board. It lists that board's `archive` placements
+  (`kind=archived`, the default) or `trash` placements, excluding drafts and card templates. Filters are `q`, `labelId`,
+  `memberId`, `fromListId`, `since` and `until`; `q` is escaped substring matching on name or description, and `labelId`
+  matches only labels visible on the acting board. Dates accept RFC3339 or `YYYY-MM-DD`, normalized to UTC: `since` is
+  inclusive, RFC3339 `until` is inclusive, and a date-only `until` includes the whole day. Sort is `archived|name|from`
+  (`archived desc` by default), with `dir=asc|desc`; limit defaults to 50 and is capped at 200. Rows carry the card id/name,
+  `archivedAt` (the placement's `list_changed_at`), previous-column id/name, card-level `closed`, board-visible labels,
+  members, `alsoActiveOn`, `canRestore` and `canDelete`. `canRestore` reflects Edit on this board. `canDelete` is true only
+  for a Trash row with Edit and every placement in trash; hidden placements take part in that safety check but their
+  boards are never returned. `alsoActiveOn` names only other viewable boards with an active/closing placement; hidden
+  boards are never named.
+- **Paging and performance**: filtering, sorting and counting run in SQL over the board's placements. `cp_board(board_id)`
+  keeps the starting set board-local and `lists_board(board_id, position)` resolves that board's system lists; normal tile
+  and board-tree queries are unchanged. `total` counts the whole current filter. The opaque `nextCursor` is bound to the
+  board, filters and sort and carries a keyset position with a stable card-id tie-breaker, not an OFFSET; an empty cursor
+  ends the pages. Row decorations are batched rather than fetched per card. The 10,000-archived-card benchmark is the
+  scale guard for a page.
+- **Bulk contract**: both writes need Edit on the board and accept either `cardIds` (maximum 500) or `all=true` plus the
+  archive filters and `confirmCount`. Both the API and UI POST bulk restore/delete routes use the server's heavy rate-limit
+  class: `all=true` is unbounded and fans out per-card events/webhooks. For `all`, `confirmCount` is required (missing is a 400
+  validation error) and must equal the current matching total or the op returns 409. With `all=true`, `card.restore.bulk` also accepts `kind=archived|trash`; the
+  matching set and `confirmCount` are then scoped to that kind. Omitting `kind` keeps the backward-compatible
+  restore-both behavior. Transactions are chunked in batches of 500, so earlier chunks stay committed if a later one fails, and `Delete forever` availability and the `skipped` count consider every placement of a card, including placements on boards the viewer cannot see (only a boolean is reported, never a name). `card.restore.bulk` uses exactly `card.restore`
+  semantics for every selected card: every archived/trashed placement returns to its previous column only when it is still
+  an active or closed column on that same board (a valid previous closed column closes the card), otherwise that board's
+  first `active` column by position; if no active fallback exists, restore fails. Closing plus archive-after rules apply.
+  `card.delete.bulk` is trash-only and skips cards that are not in trash on every placement. Results are
+  `{restored, skipped}` / `{deleted, skipped}`.
+- **Events and privacy**: each changed card emits its normal card-level restore/delete event with `quiet:true` and
+  `auto:"bulkRestore"` or `"bulkDelete"`. These events are still durable and reach SSE/webhooks, but notify no watchers;
+  the initiating board gets one activity summary. Card-level effects still include hidden placements, while response
+  fields, activity and event copies never name a board the caller cannot view.
+
 ## Colours: board, columns, cards
 - Storage: `boards.color` and `lists.color` hold a lowercase `#rrggbb` (migration 0301). Presets (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate) and legacy Planka names are accepted by the ops and resolved to hex on write; `""` clears. Labels keep a name or hex. Everything is validated server-side against `^#[0-9a-fA-F]{6}$` / known names (`boards.NormalizeColor`); templates only ever emit a validated hex (`boardsListAttr`, `boardsBoardAttr`, `boardsTileFill`), never the stored string.
 - Board colour tints the board canvas (`--tint-board`, 8% light / 6% dark over `--bg`) and draws a 4px full-colour bar under the board header; the project page shows it as a flat stripe on the board tile.
@@ -326,6 +381,7 @@ One card (not a mirror, not a copy) may sit on several boards so different teams
   per-card `card.updated` (`auto: "listType"`). Ordinary single-card moves are never quiet (moving one card into a closing column still sends
   one `closeCard` per watcher). Auto-archive (`auto: "archiveAfter"`, see Archive after N) is quiet too: its per-card `card.archived` events never
   notify, while the card whose landing triggered it notifies as usual. Applying a template (`auto: "applyTemplate"`) marks its per-card moves the same way.
+  Archive-view bulk restore/delete (`auto: "bulkRestore"` / `"bulkDelete"`) mark every per-card event quiet too, then write one board activity summary.
 - **De-duplication**: per event ONE query collects card, column(s) and board watchers; at most one notification per (user, event), reason in
   `data.via` (`card` > `list` > `board`; `data.viaList` names the column, the destination when both are watched). The actor is skipped, a mention
   beats a watch, a muted card silences every watch (not a direct mention or being added), drafts/templates never notify, and one

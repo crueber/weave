@@ -1,0 +1,111 @@
+{{/* Archive / Trash browser view. The common q, label and member controls remain in the board filter row;
+     this fragment mirrors their current values as hidden fields and owns the From/date/sort facets. */}}
+{{define "cards_archive"}}{{$d := .Data}}
+<section id="archive-view" class="archive-view" data-kind="{{$d.Kind}}" data-board-id="{{$d.Board.ID}}" data-total="{{$d.Out.Total}}" data-can-restore="{{if $d.Caps.CanRestoreArchived}}true{{else}}false{{end}}">
+  <header class="archive-head">
+    <div><h2>{{if eq $d.Kind "trash"}}Trash{{else}}Archive{{end}}</h2><p>{{if eq $d.Kind "trash"}}Cards in this board's trash.{{else}}Archived cards on this board.{{end}}</p></div>
+    <p class="archive-total"><strong id="archive-total">{{$d.Out.Total}}</strong> card{{if ne $d.Out.Total 1}}s{{end}}</p>
+  </header>
+
+  {{template "cards_archive_filters" $d}}
+  {{if $d.Caps.CanRestoreArchived}}{{template "cards_archive_bulk" $d}}{{end}}
+
+  <div class="archive-tablewrap">
+    <table class="archive-table">
+      <colgroup class="archive-columns">
+        {{if $d.Caps.CanRestoreArchived}}<col class="archive-col-select">{{end}}
+        <col class="archive-col-card"><col class="archive-col-from"><col class="archive-col-date"><col class="archive-col-labels"><col class="archive-col-members">
+        {{if $d.Caps.CanRestoreArchived}}<col class="archive-col-actions">{{end}}
+      </colgroup>
+      <thead><tr>
+        {{if $d.Caps.CanRestoreArchived}}<th class="archive-select"><input type="checkbox" form="archive-bulk" data-archive-check="page" data-cap="restoreArchived" aria-label="Select all cards on this page"></th>{{end}}
+        <th>Card</th><th>From</th><th>{{if eq $d.Kind "trash"}}Trashed{{else}}Archived{{end}}</th><th>Labels</th><th>Members</th>
+        {{if $d.Caps.CanRestoreArchived}}<th>Actions</th>{{end}}
+      </tr></thead>
+      <tbody id="archive-rows">{{template "cards_archive_rows" $d}}</tbody>
+    </table>
+  </div>
+  {{template "cards_archive_pager" (dict "NextURL" $d.NextURL)}}
+</section>{{end}}
+
+{{define "cards_archive_filters"}}
+<form id="archive-filters" class="archive-filters" role="search" hx-get="/ui/boards/{{.Board.ID}}/archive" hx-target="#board-body" hx-swap="innerHTML" hx-trigger="input delay:250ms, change, submit">
+  <input type="hidden" name="q" value="{{.Q}}">
+  <input type="hidden" name="labelId" value="{{.LabelID}}">
+  <input type="hidden" name="memberId" value="{{.MemberID}}">
+  <input type="hidden" name="show" value="{{.Kind}}">
+  <input type="hidden" name="kind" value="{{.Kind}}">
+  <input type="hidden" name="view" value="{{.View}}">
+  <label class="archive-facet">From
+    <select id="archive-from" name="fromListId" aria-label="Filter by previous column">
+      <option value="">Any column</option>
+      {{range .Lists}}<option value="{{.ID}}"{{if eq $.FromListID .ID}} selected{{end}}>{{deref .Name}}</option>{{end}}
+    </select>
+  </label>
+  <label class="archive-facet">Since <input id="archive-since" type="date" name="since" value="{{archiveDateInput .Since}}"></label>
+  <label class="archive-facet">Until <input id="archive-until" type="date" name="until" value="{{archiveDateInput .Until}}"></label>
+  <label class="archive-facet">Sort
+    <select id="archive-sort" name="sort" aria-label="Sort archived cards">
+      <option value="archived"{{if eq .Sort "archived"}} selected{{end}}>Archived date</option>
+      <option value="name"{{if eq .Sort "name"}} selected{{end}}>Name</option>
+      <option value="from"{{if eq .Sort "from"}} selected{{end}}>From</option>
+    </select>
+  </label>
+  <label class="archive-facet">Direction
+    <select id="archive-dir" name="dir" aria-label="Sort direction">
+      <option value="desc"{{if eq .Dir "desc"}} selected{{end}}>Descending</option>
+      <option value="asc"{{if eq .Dir "asc"}} selected{{end}}>Ascending</option>
+    </select>
+  </label>
+  <noscript><button class="btn">Apply filters</button></noscript>
+</form>{{end}}
+
+{{define "cards_archive_bulk"}}
+<form id="archive-bulk" class="archive-bulk" data-cap="restoreArchived" hx-post="{{.RestoreURL}}" hx-target="#board-body" hx-swap="innerHTML">
+  <input type="hidden" name="all" value="false">
+  <input type="hidden" name="confirmCount" value="{{.Out.Total}}">
+  <input type="hidden" name="kind" value="{{.Kind}}">
+  <input type="hidden" name="q" value="{{.Q}}">
+  <input type="hidden" name="labelId" value="{{.LabelID}}">
+  <input type="hidden" name="memberId" value="{{.MemberID}}">
+  <input type="hidden" name="fromListId" value="{{.FromListID}}">
+  <input type="hidden" name="since" value="{{.Since}}">
+  <input type="hidden" name="until" value="{{.Until}}">
+  <div id="archive-bulk-bar" class="archive-bulk-bar" data-cap="restoreArchived" hidden>
+    <span id="archive-selection-count" role="status">0 selected</span>
+    <button type="button" class="btn btn-sm" data-archive-select-all data-cap="restoreArchived">Select all {{.Out.Total}} matching this filter</button>
+    <button type="button" class="btn btn-sm btn-primary" data-archive-bulk="restore" data-archive-restore-url="{{.RestoreURL}}" data-cap="restoreArchived">Restore selected</button>
+    {{if eq .Kind "trash"}}<button type="button" class="btn btn-sm btn-danger" data-archive-bulk="delete" data-archive-delete-url="{{.DeleteURL}}" data-cap="restoreArchived">Delete forever</button>{{end}}
+  </div>
+  {{if eq .Kind "trash"}}<p class="archive-safety">Delete forever skips cards that are still active or archived on another board.</p>{{end}}
+</form>{{end}}
+
+{{define "cards_archive_rows"}}
+{{if not .Out.Items}}<tr class="archive-empty"><td colspan="{{if .Caps.CanRestoreArchived}}7{{else}}5{{end}}">
+  {{if .Filtered}}<strong>No {{if eq .Kind "trash"}}trashed{{else}}archived{{end}} cards match these filters.</strong><p>Try a different search or clear the filters.</p>
+  {{else if eq .Kind "trash"}}<strong>Nothing in Trash yet.</strong><p>Cards you move to trash appear here until you restore or delete them.</p>
+  {{else}}<strong>Nothing archived yet.</strong><p>Cards you archive appear here so you can restore them later.</p>{{end}}
+</td></tr>{{else}}{{$d := .}}{{range .Rows}}
+  {{if .NewMonth}}<tr class="archive-month"><th scope="row" colspan="{{if $d.Caps.CanRestoreArchived}}7{{else}}5{{end}}">{{.Month}}</th></tr>{{end}}
+  <tr class="archive-row" data-card-id="{{.Item.ID}}">
+    {{if $d.Caps.CanRestoreArchived}}<td class="archive-select"><input type="checkbox" form="archive-bulk" data-archive-check="card" data-cap="restoreArchived" value="{{.Item.ID}}" aria-label="Select {{.Item.Name}}"></td>{{end}}
+    <td class="archive-card">
+      <div class="archive-card-name">{{if .Item.Closed}}{{template "closed_mark" true}}{{end}}<a class="archive-card-link" href="/cards/{{.Item.ID}}?board={{$d.Board.ID}}" title="{{.Item.Name}}" data-open-card="{{.Item.ID}}">{{.Item.Name}}</a></div>
+      {{if .Item.AlsoActiveOn}}<div class="archive-also" title="Also active on {{range $i, $b := .Item.AlsoActiveOn}}{{if $i}}, {{end}}{{$b.BoardName}}{{end}}.">Also active on {{range $i, $b := .Item.AlsoActiveOn}}{{if $i}}, {{end}}<a href="/boards/{{$b.BoardID}}">{{$b.BoardName}}</a>{{end}}.</div>{{end}}
+    </td>
+    <td class="archive-from" title="{{if .Item.FromListName}}{{.Item.FromListName}}{{else}}—{{end}}">{{if .Item.FromListName}}{{.Item.FromListName}}{{else}}&mdash;{{end}}</td>
+    <td class="archive-date" data-label="{{if eq $d.Kind "trash"}}Trashed{{else}}Archived{{end}}"><time datetime="{{.Item.ArchivedAt}}" title="{{archiveDate .Item.ArchivedAt}}">{{archiveAgo .Item.ArchivedAt}}</time></td>
+    <td class="archive-labels"><div class="archive-cell">{{range .Item.Labels}}<span class="boards-label" style="background:{{boardsColor .Color}}" title="{{.Name}}"><span class="boards-label-text">{{if .Name}}{{.Name}}{{else}}(label){{end}}</span></span>{{end}}</div></td>
+    <td class="archive-members"><div class="archive-cell">{{if .Item.Members}}<span class="avatar-stack">{{range .Item.Members}}<span class="boards-avatar avatar{{if .IsAgent}} is-agent{{end}}" title="{{.Name}}{{if .IsAgent}} (agent){{end}}">{{if .IsAgent}}<svg class="ico" aria-hidden="true"><use href="#i-robot"/></svg>{{else}}{{boardsInitials .Name}}{{end}}</span>{{end}}</span>{{end}}</div></td>
+    {{if $d.Caps.CanRestoreArchived}}<td class="archive-actions"><div class="archive-cell archive-cell-actions">
+      {{if .Item.CanRestore}}<form class="archive-row-action" data-cap="restoreArchived" hx-post="{{$d.RestoreURL}}" hx-target="#board-body" hx-swap="innerHTML"><input type="hidden" name="cardIds" value="{{archiveCardIDs .Item.ID}}"><button type="submit" class="btn btn-sm" data-cap="restoreArchived">Restore</button></form>{{end}}
+      {{if and (eq $d.Kind "trash") .Item.CanDelete}}<form class="archive-row-action" data-cap="restoreArchived" hx-post="{{$d.DeleteURL}}" hx-target="#board-body" hx-swap="innerHTML" hx-confirm="Delete this card forever? This cannot be undone." data-confirm-title="Delete forever?" data-confirm-ok="Delete forever"><input type="hidden" name="cardIds" value="{{archiveCardIDs .Item.ID}}"><button type="submit" class="btn btn-sm btn-danger" data-cap="restoreArchived">Delete forever</button></form>{{end}}
+    </div></td>{{end}}
+  </tr>{{end}}{{end}}{{end}}
+
+{{define "cards_archive_pager"}}<div id="archive-pager" class="archive-pager"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}{{if not .NextURL}} hidden{{end}}>
+  {{if .NextURL}}<button id="archive-load-more" type="button" class="btn" hx-get="{{.NextURL}}" hx-target="#archive-rows" hx-swap="beforeend" hx-trigger="click">Load more</button>{{end}}
+</div>{{end}}
+
+{{/* Cursor responses contain only new rows/month headings plus an out-of-band pager replacement. */}}
+{{define "cards_archive_page"}}{{$d := .Data}}{{template "cards_archive_rows" $d}}{{template "cards_archive_pager" (dict "NextURL" $d.NextURL "OOB" true)}}{{end}}

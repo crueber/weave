@@ -435,11 +435,20 @@ func (a *App) readValueMaybe(src string) (string, error) {
 	return a.readValue(src)
 }
 
+// firstVerb returns the leading action of a compound CLI verb: "delete.bulk" -> "delete".
+func firstVerb(o *Op) string {
+	verb, _, _ := strings.Cut(o.Verb(), ".")
+	return verb
+}
+
 func isDestructive(o *Op) bool {
+	if o.Method == "GET" {
+		return false
+	}
 	if o.Method == "DELETE" {
 		return true
 	}
-	switch o.Verb() {
+	switch firstVerb(o) {
 	case "clear", "reset", "revoke", "rotateKey", "purge", "delete", "revoke_others":
 		return true
 	}

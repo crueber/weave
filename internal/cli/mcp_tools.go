@@ -62,14 +62,13 @@ type mcpAnnotations struct {
 // prompt) widened by archive and trash, which also remove things from view. It gates weave_call's
 // confirm:true and sets destructiveHint; the CLI's TTY prompt keeps using isDestructive.
 func mcpDestructive(o *Op) bool {
+	if o.Method == "GET" {
+		return false
+	}
 	if isDestructive(o) {
 		return true
 	}
-	v := o.Verb()
-	if i := strings.LastIndex(v, "."); i >= 0 {
-		v = v[i+1:]
-	}
-	switch v {
+	switch firstVerb(o) {
 	case "archive", "trash", "delete", "clear", "revoke", "purge", "reset":
 		return true
 	}

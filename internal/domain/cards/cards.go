@@ -188,7 +188,15 @@ func emitScoped(e *ops.Env, kind, typ, name, boardID, cardID string, data map[st
 	if data == nil {
 		data = map[string]any{}
 	}
-	data["id"], data["cardId"], data["boardId"] = cardID, cardID, boardID
+	data["boardId"] = boardID
+	if cardID != "" {
+		data["id"], data["cardId"] = cardID, cardID
+	} else {
+		data["cardId"] = ""
+		if _, ok := data["id"]; !ok {
+			data["id"] = ""
+		}
+	}
 	if c, ok := data["card"].(Card); ok {
 		// isSubscribed is the acting user's own watch state: never ship it to the board room, the activity log or webhooks;
 		// the placement list is per viewer too (hidden placements are never named). notify.Record replaces the card by

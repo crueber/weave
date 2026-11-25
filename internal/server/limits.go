@@ -22,7 +22,7 @@ import (
 //
 //	WEAVE_RATE_LIMIT          sustained requests/second per principal (default 20; burst WEAVE_RATE_BURST, default 200)
 //	WEAVE_RATE_LIMIT_SEARCH   search requests per minute (default 300, burst 30)
-//	WEAVE_RATE_LIMIT_HEAVY    exports, board import, notification-service and webhook tests/redeliveries per minute (default 60, burst 15)
+//	WEAVE_RATE_LIMIT_HEAVY    exports, board import, bulk archive restore/delete, notification-service and webhook tests/redeliveries per minute (default 60, burst 15)
 //	WEAVE_RATE_LIMIT_IP       optional per-IP ceiling (requests/second) on top of the per-principal buckets (default off: offices share one IP)
 //	WEAVE_RATE_LIMIT_LOGIN    sign-in starts per minute per client IP (default 20, burst 20)
 //	WEAVE_MAX_STREAMS_PER_USER  concurrent /events streams per user (default 20)
@@ -153,6 +153,18 @@ const (
 	classLogin
 )
 
+// isArchiveBulk matches only the board archive's restore/delete routes. Explicit card ids are
+// capped, but all=true is unbounded and emits per-card events/webhooks, so both need the heavy bucket.
+func isArchiveBulk(path string) bool {
+	path = strings.TrimPrefix(path, "/ui")
+	rest, ok := strings.CutPrefix(path, "/boards/")
+	if !ok {
+		return false
+	}
+	boardID, action, ok := strings.Cut(rest, "/archive/")
+	return ok && boardID != "" && !strings.Contains(boardID, "/") && (action == "restore" || action == "delete")
+}
+
 func classify(r *http.Request) routeClass {
 	p := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
@@ -161,6 +173,8 @@ func classify(r *http.Request) routeClass {
 	case r.Method == http.MethodGet && (p == "/search" || p == "/ui/search"):
 		return classSearch
 	case r.Method == http.MethodGet && (strings.HasPrefix(p, "/export/") || (strings.HasPrefix(p, "/boards/") && strings.HasSuffix(p, "/export"))):
+		return classHeavy
+	case r.Method == http.MethodPost && isArchiveBulk(p):
 		return classHeavy
 	case r.Method == http.MethodPost && (strings.HasSuffix(p, "/boards/import") || (strings.HasPrefix(p, "/notification-services/") || strings.HasPrefix(p, "/ui/notification-services/")) && strings.HasSuffix(p, "/test")):
 		return classHeavy

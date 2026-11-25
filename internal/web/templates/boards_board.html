@@ -1,7 +1,7 @@
 {{define "title"}}{{.Data.Board.Name}} - Weave{{end}}
 {{define "page"}}{{template "boards_page_in" .Data}}{{end}}
 {{/* breadcrumbs + view switcher live in the top bar (layout slot), so the columns start right under it */}}
-{{define "topbar-page"}}{{with .Data}}{{template "boards_crumbs" dict "Board" .Board "ProjectName" .ProjectName}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query}}{{end}}{{end}}
+{{define "topbar-page"}}{{with .Data}}{{template "boards_crumbs" dict "Board" .Board "ProjectName" .ProjectName}}{{if eq .Show "active"}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query}}{{end}}{{end}}{{end}}
 
 {{define "boards_page_in"}}
 <link rel="stylesheet" href="/static/boards_board.css">
@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/static/boards_listsheet.css">
 <link rel="stylesheet" href="/static/boards_inbox.css">
 {{template "boards_sprite"}}
-<div class="boards-shell boards-shell-{{.View}}" id="board-shell"{{boardsBoardAttr .Board}}>
+<div class="boards-shell boards-shell-{{.View}}" id="board-shell" data-show="{{.Show}}"{{boardsBoardAttr .Board}}>
   {{template "boards_filterbar" .}}
   {{template "boards_body_in" .}}
   <div id="board-live" data-board="{{.LiveBoardID}}" hidden></div>
@@ -23,6 +23,7 @@
 {{template "boards_help"}}
 <script src="/static/cards_ui.js" defer></script>
 <script src="/static/boards_board.js" defer></script>
+<script src="/static/boards_archive.js" defer></script>
 <script src="/static/boards_compose.js" defer></script>
 <script src="/static/boards_dnd.js" defer></script>
 <script src="/static/thin_scroll.js" defer></script>

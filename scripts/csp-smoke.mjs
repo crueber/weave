@@ -294,6 +294,17 @@ await run('board: filter dropdowns', async () => {
   await clickEach('.boards-filterbar summary', { max: 25 });
   await esc(p);
 });
+await run('board: archive and trash views (table or empty state, CSP)', async () => {
+  const before = violations.length;
+  for (const show of ['archived', 'trash']) {
+    await go(`/boards/${board.id}?show=${show}`);
+    const view = p.locator('#archive-view');
+    await view.waitFor();
+    await view.locator('table:visible, .archive-empty:visible, .empty-state:visible').first().waitFor();
+  }
+  const seen = violations.slice(before);
+  if (seen.length) throw new Error(seen.join('; '));
+});
 await run('board: view icons in the top bar, 1-5 keys, switcher stays on calendar/map/settings', async () => {
   await go(`/boards/${board.id}`);
   const cur = sel => p.locator(`.topbar .view-switch a[aria-current=page]${sel || ''}`).count();

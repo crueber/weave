@@ -144,6 +144,13 @@ weave card move CARD --to-list Review [--position N] [--board B] [--boardId FROM
 weave card place CARD_ID --board B2 --listId Ready   # put the same card on board B2 too (any project; Edit on the card and on B2)
 weave card unplace CARD B2                        # "Remove from board": off B2 only (never its last board)
 weave card placements CARD                        # the boards it is on (only those you can see), home first
+weave card archive.list --board B [--kind archived|trash] [--q TEXT] [--labelId L] [--memberId U] \
+  [--fromListId L] [--since DATE|RFC3339] [--until DATE|RFC3339] [--sort archived|name|from] [--dir asc|desc] \
+  [--limit 50] [--cursor C]
+weave card restore.bulk --board B --cardIds ID [ID...]
+weave card restore.bulk --board B --all [filters] [--kind archived|trash] --confirmCount N
+weave card delete.bulk --board B --cardIds ID [ID...]
+weave card delete.bulk --board B --all [filters] --confirmCount N   # trash only; add --yes in scripts
 weave card comment CARD "text"                    # or --stdin / text "-" / "@file"
 weave card attach CARD ./file [./file2]
 weave card claim CARD [--ttl 15m] [--note T]      # exit 7 if someone else holds it
@@ -173,6 +180,40 @@ labels are per board (`card label.add CARD --labelId L --boardId B` when it is o
 card's, including closed (a closing column on any board closes it everywhere). `card archive` / `card archive --trash` /
 `card restore` / `card delete` act on every board the card is on; a column's auto-archive archives that board's
 placement only. `card close CARD --boardId B` closes it into board B's closing column (closed itself is per card). `card show CARD --boardId B` shows it on board B (`placements[]`, `homeBoardId`).
+
+**Archive and trash.** The board filter row's **Show** control opens **Archived** or **Trash** (`?show=archived|trash`,
+including on Calendar/Map-default boards), with single-select Label/Member controls (Member: Me, Unassigned or one member),
+text, From/since/until, sorting and 50-row cursor pages. Month headings use local time only for archived-date sorting.
+Viewers browse read-only; editors restore or permanently delete fully trashed cards. `card.archive.list`,
+`card.restore.bulk` and `card.delete.bulk` power that view and are available through the CLI, REST API and MCP. Listing
+needs **View** on `--board`; bulk restore and delete need **Edit** there. Archive rows exclude drafts and card templates
+and represent only the card's placement on that board. `kind` defaults to `archived`; `archivedAt` is the placement's
+`list_changed_at`, `fromListId`/`fromListName` describe
+its previous column, and `closed` is the card-level flag. `q` is escaped substring matching on the card name or description
+(the same semantics as `card.list`); `labelId` matches only labels visible on the acting board, `memberId` matches card
+members, and `fromListId` filters by the previous column. `since`/`until` accept RFC3339 or `YYYY-MM-DD`, normalized to UTC;
+`since` is inclusive, an RFC3339 `until` is inclusive, and a date-only `until` includes that whole day.
+
+The list defaults to `--sort archived --dir desc` (newest first) and `--limit 50` (maximum 200). It returns `items`, `total`
+for the current filter (not just the page), and an opaque `nextCursor` (empty on the last page). The cursor is bound to the
+board, filters and sort: reuse them unchanged when following it. On `archive.list`, the CLI's global `--all` follows those
+pages. Each row includes `alsoActiveOn`, naming only other **viewable** boards where the card has an active/closing
+placement; hidden boards are never named. `canRestore` and `canDelete` reflect Edit on `--board`; `canDelete` additionally
+requires a Trash row and every placement in trash. Hidden placements take part in that safety check but are never named.
+
+For bulk ops, `--cardIds ID...` and `--all` are mutually exclusive. An explicit list is capped at 500 ids; `--all` uses the
+archive filters and requires `--confirmCount N` to equal the current matching total (a missing count is a 400 validation error; a stale count is
+**409 conflict**, CLI exit 7). With restore `--all`, optional `--kind archived|trash` scopes both the matching set and `--confirmCount` to one
+Archive mode; omit it to restore both kinds. Work is committed in chunks of 500. Restore has exactly `card.restore`
+semantics: every archived/trashed placement of each selected card returns to its previous column only when that is still an
+active or closed column on the same board
+(a valid previous closed column closes the card), otherwise that board's first `active` column by position; if no active
+fallback exists, restore fails. Closing and archive-after rules still apply. Delete is trash-only and skips any card that is not
+in trash on **every** board. Results report `{restored, skipped}` or `{deleted, skipped}`.
+
+Bulk per-card events carry `quiet:true` and `auto:"bulkRestore"` or `auto:"bulkDelete"`: they remain durable and reach SSE and
+webhooks, but create no watcher notifications. The initiating board gets one activity summary for the operation.
+
 `weave next` prints `{"item": card}` and exits 0, or exits **10** with no output when every list is empty, so
 `while card=$(weave next ... --claim); do ...; done` is a complete worker loop. All shortcuts call ops through the generic
 client, so `--dry-run`, `--profile`, `--output`, ... apply to them too.

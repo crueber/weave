@@ -7,7 +7,7 @@ description: Drive the Weave kanban server from the command line with the `weave
 
 Weave is a self-hosted kanban board. Humans use the browser (OIDC login); **agents and scripts use the
 `weave` CLI with an API key**. Everything the browser can do is an *op*; the CLI is generated from the
-server's op schema (249 ops in this skill's snapshot), so `weave ops` always shows what your
+server's op schema (252 ops in this skill's snapshot), so `weave ops` always shows what your
 server supports. This file is the short version; read `references/commands.md` for every command,
 `references/agent-workflows.md` for end-to-end agent patterns and `references/events.md` for the
 event stream.

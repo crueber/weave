@@ -157,6 +157,34 @@ agents listening on columns of two boards that both hold the card never both get
 means it was removed from that board (it stays on its others). `weave card move CARD --to-list L --board B` moves the
 placement on board B; closing, archiving, trashing and deleting act on the card everywhere.
 
+**Archive recovery.** In the browser, use the board filter row's **Show** control: **Archived** or **Trash** opens the
+Archive table (`?show=archived|trash`, so the view is linkable, survives reload and works on Calendar/Map-default boards).
+Label and Member are single-select controls matching the op's singular filters; Member offers Me, Unassigned or one
+concrete member. Text, From and since/until filters remain available, and sorting is by archived date, name or From.
+Results arrive 50 at a time with **Load more**; local-time month headings appear only for archived-date sorting. Rows show
+labels, members, the closed mark and any other visible board where the card is still active. Anyone with View can browse;
+viewers are read-only. Editors can restore one row, or select rows and use the bulk toolbar. **Select all N matching** covers
+the entire current filter and confirms the exact count first. In Trash, **Delete forever** is offered only when every
+placement of the card is in trash. A local card-sheet restore/delete refreshes an idle table; SSE and other-tab changes
+leave it untouched to protect selection and typing.
+
+Agents and scripts use the same registered ops:
+```sh
+weave card archive.list --board B --kind archived --limit 50
+weave card archive.list --board B --kind trash --since 2026-01-01 --until 2026-01-31
+weave card restore.bulk --board B --cardIds CARD [CARD...]
+weave card restore.bulk --board B --all --kind archived --labelId LABEL --confirmCount N
+weave card delete.bulk --board B --cardIds CARD [CARD...] --yes
+```
+Use the list's `total` as `confirmCount` and re-list if it may have changed (a mismatch is 409). For restore-all from one
+Archive view, pass `--kind archived` or `--kind trash` so both the selection and the confirmed count are scoped to that
+mode; omit `--kind` for the backward-compatible restore-both behavior. Restore is card-level: it returns every
+archived/trashed placement, not only the one on B. `weave card delete.bulk` is permanent, trash-only, skips
+cards not fully in trash, and should be used only when asked (add `--yes` in scripts). Bulk per-card events have
+`quiet:true` and `auto:"bulkRestore"` or `"bulkDelete"`: agents still receive them through `weave listen`, and they remain
+durable and reach webhooks, but watchers get no per-card notification. The board gets one activity summary. Hidden boards
+are never named in archive results.
+
 ## 3. Listening
 
 ```sh

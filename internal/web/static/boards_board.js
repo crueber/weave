@@ -157,7 +157,9 @@
     else if (nchips) cur.prepend(document.importNode(nchips, true));
     if (!curLists || !newLists) { // list/grid view (or a view switch): plain swap
       if (B.dragging) return true;
-      var imp = document.importNode(nb, true); cur.replaceWith(imp); B.process(imp); setup(); sweepPops(); return true;
+      var imp = document.importNode(nb, true); cur.replaceWith(imp); B.process(imp); setup(); sweepPops();
+      document.dispatchEvent(new CustomEvent('boards:body-swap'));
+      return true;
     }
     var scrollX = curLists.scrollLeft;
     var oldCols = {}; colsOf(curLists).forEach(function (c) { oldCols[c.dataset.id] = c; });
@@ -182,16 +184,110 @@
   };
 
   var es = null, esBoard = null, timer = null;
+  function archiveView() { return document.querySelector('#archive-view[data-kind="archived"], #archive-view[data-kind="trash"]'); }
+  function archiveMode() {
+    var root = document.getElementById('board-shell');
+    var show = new URL(location.href).searchParams.get('show');
+    return !!archiveView() || show === 'archived' || show === 'trash' ||
+      !!(root && (root.dataset.show === 'archived' || root.dataset.show === 'trash'));
+  }
+  function archiveBusy() {
+    var a = archiveView();
+    if (!a || B.dragging || document.querySelector('.htmx-request')) return true;
+    var bar = a.querySelector('#archive-bulk-bar');
+    if ((bar && !bar.hidden) || a.querySelector('input[data-archive-check="card"]:checked')) return true;
+    var active = document.activeElement;
+    if (active && (active.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName))) return true;
+    if (active && active.closest && active.closest('.boards-composer')) return true;
+    return Array.prototype.some.call(document.querySelectorAll('.boards-composer'), function (c) {
+      var input = c.querySelector('textarea');
+      return c.classList.contains('is-open') || !!(input && input.value);
+    });
+  }
+  function archiveQuery(a) {
+    var form = a && a.querySelector('#archive-filters'), params = new URLSearchParams(location.search);
+    // A card sheet owns location while it is open; its archive form still holds the board's current query.
+    if (form) {
+      var data = new FormData(form);
+      params = new URLSearchParams();
+      ['q', 'labelId', 'memberId', 'fromListId', 'since', 'until', 'sort', 'dir', 'view'].forEach(function (key) {
+        var value = data.get(key);
+        if (value) params.set(key, value);
+      });
+      params.set('show', a.dataset.kind);
+    } else if (a) params.set('show', a.dataset.kind);
+    params.delete('cursor');
+    return params.toString();
+  }
+  function archiveRefreshValid(id, query, kind) {
+    var current = archiveView(), body = B.body();
+    return !!current && current.dataset.kind === kind && B.boardId() === id && !!body && body.contains(current) &&
+      archiveQuery(current) === query && !archiveBusy();
+  }
+  function fetchArchive(url) {
+    return fetch(url, { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(); });
+  }
+  function archiveCursorDoc(html) {
+    // Cursor responses are bare table rows; the table context keeps DOMParser from discarding their tags.
+    return new DOMParser().parseFromString('<table><tbody id="archive-cursor-rows">' + html + '</tbody></table>', 'text/html');
+  }
+  function archivePages(html, loaded, id, query, kind) {
+    var doc = new DOMParser().parseFromString(html, 'text/html'), rows = doc.getElementById('archive-rows');
+    if (!rows) return Promise.reject(new Error('archive refresh returned no rows'));
+    function next() {
+      if (rows.querySelectorAll('tr.archive-row[data-card-id]').length >= loaded) return Promise.resolve(doc);
+      var more = doc.getElementById('archive-load-more'), url = more && more.getAttribute('hx-get');
+      if (!url || url === 'false') return Promise.resolve(doc);
+      return fetchArchive(url).then(function (cursorHTML) {
+        if (!archiveRefreshValid(id, query, kind)) return null;
+        var cursor = archiveCursorDoc(cursorHTML), source = cursor.getElementById('archive-cursor-rows');
+        if (!source) return Promise.reject(new Error('archive cursor returned no rows'));
+        source.querySelectorAll('tr').forEach(function (row) { rows.appendChild(doc.importNode(row, true)); });
+        var pager = cursor.getElementById('archive-pager'), oldPager = doc.getElementById('archive-pager');
+        if (pager && oldPager) oldPager.replaceWith(doc.importNode(pager, true));
+        else if (oldPager) oldPager.remove();
+        return next();
+      });
+    }
+    return next().then(function (finalDoc) { return finalDoc ? finalDoc.body.innerHTML : null; });
+  }
   B.refresh = function (force) {
+    // Archive / Trash owns its table: SSE and scheduled refreshes must not replace rows or a selection.
+    if (archiveMode() && !force) return;
     var id = B.boardId(); if (!id || !B.body()) return;
+    if (archiveMode()) {
+      var a = archiveView();
+      if (!a || archiveBusy()) return;
+      var kind = a.dataset.kind, query = archiveQuery(a);
+      var loaded = a.querySelectorAll('#archive-rows tr.archive-row[data-card-id]').length;
+      return fetchArchive('/ui/boards/' + id + '/archive' + (query ? '?' + query : ''))
+        .then(function (html) {
+          if (!archiveRefreshValid(id, query, kind)) return null;
+          return archivePages(html, loaded, id, query, kind);
+        })
+        .then(function (html) {
+          // A Show/filter request or new selection/typing may have won while the pages were in flight.
+          if (!html || !archiveRefreshValid(id, query, kind)) return;
+          var body = B.body();
+          body.innerHTML = html;
+          B.process(body); setup(); sweepPops();
+          document.dispatchEvent(new CustomEvent('boards:body-swap'));
+        })
+        .catch(function (err) { if (err && window.console) console.error('boards archive refresh failed', err); /* offline: the next explicit refresh retries */ });
+    }
     if (B.dragging) { B.schedule(1200); return; }
     if (force) document.querySelectorAll('.boards-col').forEach(function (c) { c.__sig = null; });
     return fetch('/ui/boards/' + id + '/body' + location.search, { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
       .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
-      .then(function (html) { if (B.dragging) { B.schedule(1200); return; } if (B.applyBody(html) === 'dirty') B.schedule(2500); })
+      .then(function (html) {
+        if (archiveMode()) return; // the Show request won the race while this refresh was in flight
+        if (B.dragging) { B.schedule(1200); return; }
+        if (B.applyBody(html) === 'dirty') B.schedule(2500);
+      })
       .catch(function (err) { if (err && window.console) console.error('boards refresh failed', err); /* offline: the next event retries */ });
   };
-  B.schedule = function (ms) { clearTimeout(timer); timer = setTimeout(B.refresh, ms || 300); };
+  B.schedule = function (ms) { if (archiveMode()) return; clearTimeout(timer); timer = setTimeout(B.refresh, ms || 300); };
 
   var verbs = ['created', 'updated', 'deleted', 'moved', 'claimed', 'released'];
   var nouns = ['board', 'list', 'card', 'label', 'boardMembership', 'cardMembership', 'cardLabel', 'task', 'taskList', 'comment', 'attachment', 'customFieldValue'];
@@ -244,7 +340,17 @@
     if (B.applyBody(e.detail.serverResponse)) {
       e.detail.shouldSwap = false;
       var p = e.detail.pathInfo && (e.detail.pathInfo.finalRequestPath || e.detail.pathInfo.requestPath);
-      if (p) try { history.replaceState(history.state, '', p); } catch (x) { /* */ }
+      var el = e.detail.elt, push = el && el.closest && el.closest('[hx-push-url]');
+      var pushURL = push && push.getAttribute('hx-push-url');
+      try {
+        if (pushURL && pushURL !== 'false') {
+          var target = pushURL === 'true' ? p : pushURL;
+          if (target) {
+            var absolute = new URL(target, location.href).href;
+            if (absolute !== location.href) history.pushState(history.state, '', target);
+          }
+        } else if (p) history.replaceState(history.state, '', p);
+      } catch (x) { /* history can be unavailable in embedded views */ }
     }
   });
   // other mutations answered with 4xx: show the message as a toast (htmx would swap by default)

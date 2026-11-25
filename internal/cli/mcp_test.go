@@ -195,6 +195,34 @@ func TestMCPAnnotationsGolden(t *testing.T) {
 	}
 }
 
+func TestMCPCompoundVerbSafety(t *testing.T) {
+	for _, tc := range []struct {
+		name, method string
+		destructive  bool
+		ann          mcpAnnotations
+	}{
+		{"card.delete.bulk", "POST", true, mcpAnnotations{Destructive: true}},
+		{"card.restore.bulk", "POST", false, mcpAnnotations{}},
+		{"card.archive.list", "GET", false, mcpAnnotations{ReadOnly: true, Idempotent: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := &Op{Name: tc.name, Method: tc.method}
+			if got := mcpDestructive(o); got != tc.destructive {
+				t.Errorf("mcpDestructive(%s) = %v, want %v", tc.name, got, tc.destructive)
+			}
+			if got := mcpAnnotate(o); got != tc.ann {
+				t.Errorf("mcpAnnotate(%s) = %+v, want %+v", tc.name, got, tc.ann)
+			}
+			if got := mcpOpSummary(o, nil)["destructive"] == true; got != tc.destructive {
+				t.Errorf("mcpOpSummary(%s) destructive = %v, want %v", tc.name, got, tc.destructive)
+			}
+			if got := strings.Contains(mcpDescription(o), "Destructive:"); got != tc.destructive {
+				t.Errorf("mcpDescription(%s) destructive warning = %v, want %v", tc.name, got, tc.destructive)
+			}
+		})
+	}
+}
+
 func TestMCPToolsList(t *testing.T) {
 	f := newFake(t)
 	e := newMCPEnv(t, f, mcpConfig{})
@@ -336,6 +364,33 @@ func TestMCPWeaveCallParityAndConfirm(t *testing.T) {
 	r = e.call(mcpOpsTool, map[string]any{"query": "due date"})
 	if !strings.Contains(resultText(r), "card.due.set") {
 		t.Fatalf("search: %s", resultText(r))
+	}
+}
+
+func TestMCPWeaveCallBulkArchiveSafety(t *testing.T) {
+	f := newFake(t)
+	f.json("POST /api/v1/boards/{boardId}/archive/delete", map[string]any{"item": map[string]any{"deleted": 1}})
+	f.json("POST /api/v1/boards/{boardId}/archive/restore", map[string]any{"item": map[string]any{"restored": 1}})
+	f.json("GET /api/v1/boards/{boardId}/archive", map[string]any{"items": []any{}, "total": 0})
+	e := newMCPEnv(t, f, mcpConfig{})
+
+	args := map[string]any{"boardId": "b1", "cardIds": []any{"c1"}}
+	r := e.call(mcpCallTool, map[string]any{"op": "card.delete.bulk", "args": args})
+	if errCode(t, r) != "confirm_required" || f.called("POST /api/v1/boards/b1/archive/delete") != 0 {
+		t.Fatalf("bulk delete without confirm: %s", resultText(r))
+	}
+	r = e.call(mcpCallTool, map[string]any{"op": "card.delete.bulk", "args": args, "confirm": true})
+	if r.IsError || f.called("POST /api/v1/boards/b1/archive/delete") != 1 {
+		t.Fatalf("confirmed bulk delete: %s", resultText(r))
+	}
+
+	r = e.call(mcpCallTool, map[string]any{"op": "card.restore.bulk", "args": args})
+	if r.IsError || f.called("POST /api/v1/boards/b1/archive/restore") != 1 {
+		t.Fatalf("bulk restore must not need confirm: %s", resultText(r))
+	}
+	r = e.call(mcpCallTool, map[string]any{"op": "card.archive.list", "args": map[string]any{"boardId": "b1", "kind": "trash"}})
+	if r.IsError || f.called("GET /api/v1/boards/b1/archive?kind=trash") != 1 {
+		t.Fatalf("archive list must not need confirm: %s", resultText(r))
 	}
 }
 

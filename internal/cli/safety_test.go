@@ -290,4 +290,27 @@ func TestNoWorldWritableCacheFallback(t *testing.T) {
 	}
 }
 
+func TestIsDestructiveCompoundVerbs(t *testing.T) {
+	for _, tc := range []struct {
+		name, method string
+		want         bool
+	}{
+		{"card.delete.bulk", "POST", true},
+		{"card.restore.bulk", "POST", false},
+		{"card.archive.list", "GET", false},
+		{"customfieldvalue.clear", "POST", true},
+		{"session.revoke_others", "POST", true},
+		{"card.delete", "DELETE", true},
+		{"card.archive", "POST", false}, // archive is MCP-only widening; the CLI keeps its existing prompt rule
+		{"card.get", "GET", false},
+	} {
+		t.Run(tc.name+"/"+tc.method, func(t *testing.T) {
+			o := &Op{Name: tc.name, Method: tc.method}
+			if got := isDestructive(o); got != tc.want {
+				t.Errorf("isDestructive(%s %s) = %v, want %v", tc.method, tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 var _ = url.PathEscape

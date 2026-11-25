@@ -129,6 +129,7 @@ type BoardCaps struct {
 	CanComment         bool // comment.create
 	CanEdit            bool // board.update (except agentPrompt), list.*, card.* (see CardCaps for the worker rule)
 	CanManage          bool // the Manage-only board ops listed below
+	CanRestoreArchived bool // card.restore.bulk (RequireBoard Edit; no worker rule)
 	// IsMember: a real member (project manager, direct or group membership), not someone who merely sees a
 	// public board. The settings page, the Inbox and draft cards are for members only.
 	IsMember bool
@@ -165,6 +166,7 @@ func Board(e *ops.Env, boardID string) BoardCaps {
 	l := BoardLevel(e, boardID)
 	bc.Level = l
 	bc.CanView, bc.CanComment, bc.CanEdit, bc.CanManage = l >= View, l >= Comment, l >= Edit, l >= Manage
+	bc.CanRestoreArchived = l >= Edit
 	if !bc.CanView {
 		return bc
 	}

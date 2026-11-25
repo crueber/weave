@@ -1,7 +1,9 @@
-{{define "boards_body_in"}}<div id="board-body" class="boards-body boards-view-{{.View}}" data-board="{{.Board.ID}}">
+{{define "boards_body_in"}}<div id="board-body" class="boards-body boards-view-{{.View}}" data-board="{{.Board.ID}}" data-body-url="{{.BodyURL}}"{{if ne .Show "active"}} hx-get="{{.BodyURL}}" hx-trigger="load" hx-swap="innerHTML"{{end}}>
+{{if eq .Show "active"}}
 {{template "boards_chips" .}}
 {{if and .HasInbox .Drafts (ne .View "kanban")}}{{template "boards_inbox_link" .}}{{end}}
 {{if eq .View "list"}}{{template "boards_table" .}}{{else if eq .View "grid"}}{{template "boards_grid" .}}{{else}}{{template "boards_kanban" .}}{{end}}
+{{end}}
 </div>{{end}}
 
 {{define "boards_kanban"}}<div class="boards-lists" id="board-lists" data-board="{{.Board.ID}}" data-card-drop="/ui/boards/{{.Board.ID}}/cards/drop" data-list-drop="/ui/boards/{{.Board.ID}}/lists/drop"{{if .CanEdit}} data-can-edit="1"{{end}} role="list" aria-label="Lists">
@@ -109,10 +111,18 @@
 </div>{{end}}{{end}}
 
 {{define "boards_filterbar"}}<div class="boards-filterbar"><div class="boards-filterscroll">
-{{- if not .ReadOnly}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query "Picker" true}}{{end}}
-<form id="board-filter" class="boards-filter" role="search" hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML" hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
+{{- if and (not .ReadOnly) (eq .Show "active")}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query "Picker" true}}{{end}}
+{{if not .ReadOnly}}<nav class="boards-show" aria-label="Show cards">
+  <span class="boards-show-label">Show</span>
+  <a href="{{.ShowHref "active"}}" data-show="active" data-show-link="active"{{if eq .Show "active"}} aria-current="page"{{end}}>Active <span class="boards-show-count" title="Active cards matching the current filters">{{.NoCards}}</span></a>
+  <a href="{{.ShowHref "archived"}}" hx-get="{{.ShowBodyHref "archived"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "archived"}}" data-show="archived" data-show-link="archived"{{if eq .Show "archived"}} aria-current="page"{{end}}>Archived</a>
+  <a href="{{.ShowHref "trash"}}" hx-get="{{.ShowBodyHref "trash"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "trash"}}" data-show="trash" data-show-link="trash"{{if eq .Show "trash"}} aria-current="page"{{end}}>Trash</a>
+</nav>{{end}}
+<form id="board-filter" class="boards-filter" role="search"{{if eq .Show "active"}} hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML"{{else}} hx-get="/ui/boards/{{.Board.ID}}/archive" hx-include="#archive-filters select, #archive-filters input[type=date]" hx-target="#board-body" hx-swap="innerHTML"{{end}} hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
   <input type="hidden" name="view" value="{{.View}}">
+  {{if ne .Show "active"}}<input type="hidden" name="show" value="{{.Show}}">{{end}}
   <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Filter cards  ( / )" aria-label="Filter cards by text" autocomplete="off" data-filter-input>
+  {{if eq .Show "active"}}
   <details class="boards-dd"><summary>Labels{{if .Filter.Labels}} ({{len .Filter.Labels}}){{end}}</summary><div class="boards-dd-pop">
     {{range .Labels}}<label><input type="checkbox" name="label" value="{{.ID}}"{{if $.Filter.HasLabel .ID}} checked{{end}}> <span class="boards-label" style="background:{{boardsColor .Color}}"><span class="boards-label-text" style="display:inline">{{deref .Name}}{{if not .Name}}&nbsp;{{end}}</span></span></label>{{else}}<em>No labels</em>{{end}}
   </div></details>
@@ -121,14 +131,30 @@
     <label><input type="checkbox" name="member" value="none"{{if .Filter.HasMember "none"}} checked{{end}}> Unassigned</label>
     {{range .Members}}{{if .UserID}}<label><input type="checkbox" name="member" value="{{deref .UserID}}"{{if $.Filter.HasMember (deref .UserID)}} checked{{end}}> {{.Name}}</label>{{end}}{{end}}
   </div></details>
-  <select name="due" aria-label="Due date filter">
+  {{else}}
+  <details class="boards-dd"><summary>Labels{{if .LabelID}} (1){{end}}</summary><div class="boards-dd-pop">
+    <select name="labelId" aria-label="Filter by label">
+      <option value="">Any label</option>
+      {{range .Labels}}<option value="{{.ID}}"{{if eq $.LabelID .ID}} selected{{end}}>{{if .Name}}{{deref .Name}}{{else}}(label){{end}}</option>{{end}}
+    </select>
+  </div></details>
+  <details class="boards-dd"><summary>Members{{if .MemberID}} (1){{end}}</summary><div class="boards-dd-pop">
+    <select name="memberId" aria-label="Filter by member">
+      <option value="">Any member</option>
+      {{if .UserID}}<option value="me"{{if eq $.MemberID "me"}} selected{{end}}>Me</option>{{end}}
+      <option value="none"{{if eq $.MemberID "none"}} selected{{end}}>Unassigned</option>
+      {{range .Members}}{{if .UserID}}<option value="{{deref .UserID}}"{{if eq $.MemberID (deref .UserID)}} selected{{end}}>{{.Name}}</option>{{end}}{{end}}
+    </select>
+  </div></details>
+  {{end}}
+  {{if eq .Show "active"}}<select name="due" aria-label="Due date filter">
     <option value="">Any due date</option>
     <option value="overdue"{{if eq .Filter.Due "overdue"}} selected{{end}}>Overdue</option>
     <option value="today"{{if eq .Filter.Due "today"}} selected{{end}}>Due today</option>
     <option value="week"{{if eq .Filter.Due "week"}} selected{{end}}>Due this week</option>
     <option value="done"{{if eq .Filter.Due "done"}} selected{{end}}>Completed</option>
     <option value="none"{{if eq .Filter.Due "none"}} selected{{end}}>No due date</option>
-  </select>
+  </select>{{end}}
   <noscript><button class="boards-btn">Apply</button></noscript>
 </form>
   {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}

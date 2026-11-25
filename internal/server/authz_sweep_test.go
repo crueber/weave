@@ -181,6 +181,10 @@ func newWorld(t *testing.T) *world {
 	I["list2"] = id(e.mk(A, "POST", "/boards/"+I["board"]+"/lists", map[string]any{"name": "L2 CANARY"}))
 	I["card"] = id(e.mk(A, "POST", "/lists/"+I["list"]+"/cards", map[string]any{"name": "CardCANARY", "description": "DescCANARY"}))
 	I["card2"] = id(e.mk(A, "POST", "/lists/"+I["list2"]+"/cards", map[string]any{"name": "Card2CANARY"}))
+	I["archivecard"] = id(e.mk(A, "POST", "/lists/"+I["list"]+"/cards", map[string]any{"name": "ArchivedCANARY"}))
+	e.mk(A, "POST", "/cards/"+I["archivecard"]+"/archive", nil)
+	I["trashcard"] = id(e.mk(A, "POST", "/lists/"+I["list"]+"/cards", map[string]any{"name": "TrashedCANARY"}))
+	e.mk(A, "POST", "/cards/"+I["trashcard"]+"/archive", map[string]any{"trash": true})
 	I["comment"] = id(e.mk(A, "POST", "/cards/"+I["card"]+"/comments", map[string]any{"text": "CommentCANARY"}))
 	I["tasklist"] = id(e.mk(A, "POST", "/cards/"+I["card"]+"/task-lists", map[string]any{"name": "TL CANARY"}))
 	I["task"] = id(e.mk(A, "POST", "/task-lists/"+I["tasklist"]+"/tasks", map[string]any{"name": "TaskCANARY"}))
@@ -413,6 +417,10 @@ func (w *world) call(o *ops.Op, caller string) result {
 	switch o.Name {
 	case "card.create", "card.update":
 		body["type"] = "project"
+	case "card.restore.bulk":
+		body = map[string]any{"cardIds": []string{w.ids["archivecard"]}, "confirmCount": 1}
+	case "card.delete.bulk":
+		body = map[string]any{"cardIds": []string{w.ids["trashcard"]}, "confirmCount": 1}
 	case "customfieldgroup.create":
 		body["boardId"] = w.ids["board"]
 	case "board.import":
@@ -428,6 +436,9 @@ func (w *world) call(o *ops.Op, caller string) result {
 		body["url"] = "https://" + sweepHookHost + "/x"
 		delete(body, "projectId") // admin-only scopes and filters
 		delete(body, "userId")
+	}
+	if o.Name == "card.archive.list" {
+		q = nil // no filters: the response must include the seeded archive/trash cards
 	}
 	if len(q) > 0 {
 		path += "?" + strings.Join(q, "&")
@@ -682,5 +693,48 @@ func TestAuthzSweepWebRoutes(t *testing.T) {
 				t.Errorf("%s GET /ui/cards/<id>/%s -> %d leaked seeded data", caller, sec, code)
 			}
 		}
+	}
+}
+
+// The archive UI routes use normal web authentication (anonymous requests redirect to login), then the
+// same board levels as their ops: View for the archive listing, Edit for restore/delete. JSON bulk clients
+// receive JSON; browser forms receive the refreshed HTML fragment. No route is allowlisted.
+func TestAuthzSweepArchiveUI(t *testing.T) {
+	w := newWorld(t)
+	base := "/ui/boards/" + w.ids["board"] + "/archive"
+	for _, tc := range []struct {
+		name, method, suffix string
+		body                 any
+	}{
+		{"list", "GET", "", nil},
+		{"restore", "POST", "/restore", map[string]any{"cardIds": []string{w.ids["archivecard"]}, "confirmCount": 1}},
+		{"delete", "POST", "/delete", map[string]any{"cardIds": []string{w.ids["trashcard"]}, "confirmCount": 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := base + tc.suffix
+			for _, caller := range []string{"anon", "B", "W", "G", "admin", "V", "CM", "WV", "GV", "A"} {
+				code, b := w.e.rawPatient(w.keys[caller], tc.method, p, tc.body)
+				if caller == "anon" {
+					if code != http.StatusSeeOther {
+						t.Errorf("anon %s %s -> %d (want login redirect)", tc.method, p, code)
+					}
+					continue
+				}
+				allowed := caller == "A" || (tc.method == "GET" && (caller == "V" || caller == "CM" || caller == "WV" || caller == "GV"))
+				if allowed {
+					if code < 200 || code >= 300 {
+						t.Errorf("%s %s %s -> %d (want success): %.100s", caller, tc.method, p, code, b)
+					}
+					continue
+				}
+				want := http.StatusNotFound
+				if tc.method == "POST" && (caller == "V" || caller == "CM" || caller == "WV" || caller == "GV") {
+					want = http.StatusForbidden
+				}
+				if code != want || strings.Contains(string(b), canary) {
+					t.Errorf("%s %s %s -> %d (want %d without seeded data): %.100s", caller, tc.method, p, code, want, b)
+				}
+			}
+		})
 	}
 }

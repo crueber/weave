@@ -176,6 +176,83 @@ func TestRateLimitOff(t *testing.T) {
 	}
 }
 
+func TestClassifyArchiveBulkHeavy(t *testing.T) {
+	t.Setenv("WEAVE_RATE_LIMIT", "0")
+	t.Setenv("WEAVE_RATE_LIMIT_HEAVY", "0.000001") // keep the burst deterministic: effectively no refill
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{"api restore", "/api/v1/boards/nope/archive/restore"},
+		{"api delete", "/api/v1/boards/nope/archive/delete"},
+		{"ui restore", "/ui/boards/nope/archive/restore"},
+		{"ui delete", "/ui/boards/nope/archive/delete"},
+		{"unprefixed restore", "/boards/nope/archive/restore"},
+		{"unprefixed delete", "/boards/nope/archive/delete"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			bearer := map[string]string{"Authorization": "Bearer " + e.admin}
+			for i := 1; i <= 16; i++ {
+				code, _ := e.status(http.MethodPost, tt.path, bearer)
+				if i < 16 && code == http.StatusTooManyRequests {
+					t.Fatalf("request %d hit the heavy burst of 15 early", i)
+				}
+				if i == 16 && code != http.StatusTooManyRequests {
+					t.Fatalf("request %d: %d, want the heavy bucket to throttle at 16", i, code)
+				}
+			}
+		})
+	}
+}
+
+func TestClassifyArchiveBulkNonHeavy(t *testing.T) {
+	t.Setenv("WEAVE_RATE_LIMIT", "0")
+	t.Setenv("WEAVE_RATE_LIMIT_HEAVY", "0.000001")
+	e := newEnv(t)
+	bearer := map[string]string{"Authorization": "Bearer " + e.admin}
+	// Drain the heavy bucket once; every route below must still reach its handler.
+	for i := 0; i < 15; i++ {
+		if code, _ := e.status(http.MethodPost, "/api/v1/boards/nope/archive/restore", bearer); code == http.StatusTooManyRequests {
+			t.Fatalf("heavy bucket drained early at request %d", i+1)
+		}
+	}
+	if code, _ := e.status(http.MethodPost, "/api/v1/boards/nope/archive/restore", bearer); code != http.StatusTooManyRequests {
+		t.Fatalf("heavy bucket not exhausted: %d", code)
+	}
+	for _, tt := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"api archive list", http.MethodGet, "/api/v1/boards/nope/archive"},
+		{"ui archive list", http.MethodGet, "/ui/boards/nope/archive"},
+		{"unprefixed archive list", http.MethodGet, "/boards/nope/archive"},
+		{"ordinary api read", http.MethodGet, "/api/v1/auth/me"},
+		{"ordinary ui read", http.MethodGet, "/ui/notifications/badge"},
+		{"single card archive", http.MethodPost, "/api/v1/cards/nope/archive"},
+		{"single card restore", http.MethodPost, "/api/v1/cards/nope/restore"},
+		{"archive list wrong method", http.MethodPost, "/api/v1/boards/nope/archive"},
+		{"restore wrong method", http.MethodGet, "/api/v1/boards/nope/archive/restore"},
+		{"delete wrong method", http.MethodGet, "/ui/boards/nope/archive/delete"},
+		{"restore extra segment", http.MethodPost, "/api/v1/boards/nope/archive/restore/extra"},
+		{"delete extra segment", http.MethodPost, "/ui/boards/nope/archive/delete/extra"},
+		{"restore suffix", http.MethodPost, "/api/v1/boards/nope/archive/restore-extra"},
+		{"delete suffix", http.MethodPost, "/ui/boards/nope/archive/delete-extra"},
+		{"extra board segment", http.MethodPost, "/api/v1/boards/nope/extra/archive/restore"},
+		{"missing board id", http.MethodPost, "/api/v1/boards//archive/delete"},
+		{"unrelated prefix", http.MethodPost, "/api/v1/other/boards/nope/archive/restore"},
+		{"unrelated action", http.MethodPost, "/api/v1/boards/nope/archive/purge"},
+		{"trailing slash", http.MethodPost, "/ui/boards/nope/archive/restore/"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if code, _ := e.status(tt.method, tt.path, bearer); code == http.StatusTooManyRequests {
+				t.Errorf("%s %s used the exhausted heavy bucket", tt.method, tt.path)
+			}
+		})
+	}
+}
+
 func TestStrictBuckets(t *testing.T) {
 	e := newEnv(t)
 	bearer := map[string]string{"Authorization": "Bearer " + e.admin}

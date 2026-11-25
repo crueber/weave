@@ -12,7 +12,7 @@ feature list from planka.app/pro). Single binary, one data directory, **one repl
 Humans sign in with **OIDC only** (no local passwords). Machines (the `weave` CLI, AI agents) use **API keys**.
 Every capability is one registered *op*, so the browser UI, REST API (`/api/v1`) and CLI always have the same features.
 
-- Repo: `https://github.com/crueber/weave.git` (GitHub mirror - development happens upstream), branch `main`. Releases: `v0.2.1` is the latest tag; `main` is ahead of it (header consolidation, board template library, agent prompt family with admin/project/board-editable texts and blocks, admin/project/user settings redesign, new demo).
+- Repo: `https://github.com/crueber/weave.git` (GitHub mirror - development happens upstream), branch `main`. Releases: the GitHub mirror's latest release is `v0.7.1` (cut with the Forgejo publish workflow; the Forgejo repo's own tags stop at `v0.2.1`). `main` carries everything since: ownership-based permissions (admin = system administration only), one card on several boards, MCP connector, live notification bell, project website, and the Archive view below.
 - Planka licensing: this is **clean-room**. Never copy code, templates, CSS or assets from Planka. Behaviour/field names only.
 - Avatars: DiceBear "Landscape" (CC0), generated in-process in `internal/domain/auth/identicon.go`. Never call the DiceBear API.
 
@@ -156,6 +156,8 @@ blocks rendered with `c.RenderBlock(page, block, data)`. Mutations post to a UI 
 `hx-get ... hx-trigger="load"`. Put CSS in a domain stylesheet that uses the **design tokens** (`docs/DESIGN-SYSTEM.md`); never hardcode
 colours, never use gradients. Put JS in a static file (no inline), keep it small and vanilla; prefer event delegation.
 
+**Explain a control**: use the reusable help tip (`{{template "help_tip" dict "ID" ... "Text" ...}}`, `docs/DESIGN-SYSTEM.md`) instead of permanent hint text.
+
 **Change the schema**: new migration file in the right range; keep migrations additive; provide defaults; update export/import and
 board templates if the data should travel; add tests that run through `db.Open` (migrations apply on every test DB).
 
@@ -270,6 +272,7 @@ Isolated test packages that render templates must link every domain (`linkall_te
   the maintainer decisions and the UI). The UI maps its context board (`board`, never `boardId`) onto the op's `boardId` only for the
   placement-scoped ops (`cards.doOn`/`contextOps`). Open: "Remove from this board" is offered only when another placement is VISIBLE
   (the op counts hidden ones too; maintainer to confirm); live refresh of an open sheet swaps the Boards row, crumb and menu only.
+- **Archive view** (board filter row **Show: Active | Archived | Trash**, `?show=archived|trash`): ops `card.archive.list`, `card.restore.bulk`, `card.delete.bulk` in `internal/domain/cards/archive_ops.go` (+ `archive_ui.go`, template `cards_archive.html`, `boards_archive.js`); keyset paging (50/page), quiet bulk events (chunks of 500, one summary row), capability `BoardCaps.CanRestoreArchived`; docs/DESIGN.md "Archive view". Not built (maintainer decides first): retention/auto-purge of trash and archive, archived cards in global search.
 - **Card duplicate does not copy tasks/attachments/custom fields**: `cards.DuplicateHooks` exists (`cards/ops_clone.go`) but cardextras never registers a hook. Highest-value gap.
 - Drag-and-drop, the card sheet and settings interactions were verified in headless Chromium by scripts, not on touch devices or other browsers.
 - OIDC and SMTP verified only against fakes; `install.ps1` never executed on Windows; macOS/Windows binaries built but not run.

@@ -182,6 +182,7 @@ built on the design tokens in `internal/web/static/weave.css` (see `docs/DESIGN-
   Esc closes it, `j`/`k` or the arrows step through the list's cards. Titles and descriptions
   edit in place and autosave.
 - **Forgiving:** archiving, closing or trashing a card shows an Undo toast. Live updates never overwrite what you are typing.
+- **Find what you archived:** the board filter row's **Show** control switches between **Active**, **Archived** and **Trash**. The archive table filters and sorts cards, pages through large histories, and restores one or many; editors can permanently delete cards only when every placement is in Trash. Viewers browse read-only.
 - **Drag and drop** works with mouse, touch (long press) and keyboard (Space to grab, arrows to move).
 - **One card, several boards:** put the same card on another team's board (Boards row > "Add to board...", or `b`);
   each board keeps its own column, labels and column rules, closing, archiving and deleting act on the card everywhere,
@@ -331,7 +332,7 @@ Environment variables (secrets in env override values stored in the admin UI):
 | `WEAVE_CSP` | `enforce` | Content-Security-Policy mode: `enforce`, `report-only` (browser console only, for debugging a custom proxy/extension) or `off` (only `frame-ancestors`). Scripts run from `/static` only |
 | `WEAVE_RATE_LIMIT` / `WEAVE_RATE_BURST` | `20` / `200` | sustained requests per second and burst per principal (API key / session; per IP when anonymous); `0` turns the throttle off. Static files, `/events` and `/healthz` are exempt. Answers `429` with `Retry-After` |
 | `WEAVE_RATE_LIMIT_SEARCH` | `300` | search requests per minute per principal (burst 30), `0` = off |
-| `WEAVE_RATE_LIMIT_HEAVY` | `60` | exports, board import and notification-service tests per minute per principal (burst 15), `0` = off |
+| `WEAVE_RATE_LIMIT_HEAVY` | `60` | exports, board import, bulk archive restore/delete and notification-service tests per minute per principal (burst 15), `0` = off |
 | `WEAVE_RATE_LIMIT_LOGIN` | `20` | sign-in starts per minute per client IP (burst 20), `0` = off. Honours `WEAVE_TRUST_PROXY` for the client IP |
 | `WEAVE_RATE_LIMIT_IP` | `0` (off) | optional per-IP ceiling in requests/second for signed-in traffic as well (burst 10x); leave off when many users share one IP (office NAT, proxy without `WEAVE_TRUST_PROXY`) |
 | `WEAVE_MAX_STREAMS_PER_USER` | `20` | concurrent live-update (`/events`) streams per user, `0` = unlimited; extra ones get `429` |

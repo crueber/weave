@@ -139,6 +139,10 @@ type PageData struct {
 	ReadOnly    bool
 	Public      bool
 	View        string
+	Show        string // active (default) | archived | trash; the archive/trash bodies are loaded from BodyURL
+	UserID      string // signed-in caller, for the archive member filter's Me option
+	LabelID     string // selected singular archive label filter
+	MemberID    string // selected singular archive member filter
 	Columns     []Column
 	Filter      Filter
 	Labels      []Label
@@ -153,6 +157,94 @@ type PageData struct {
 	Watching    bool    // the viewer watches the whole board (header bell); never set on public pages
 	HasInbox    bool    // the caller sees this board's Inbox (inbox.go: showInbox)
 	Drafts      []Draft // the Inbox, oldest first (never filtered, never counted in NoCards)
+
+	showValues url.Values // original query, used by the Show links without losing archive facets
+}
+
+const (
+	boardShowActive   = "active"
+	boardShowArchived = "archived"
+	boardShowTrash    = "trash"
+)
+
+func boardShow(v url.Values) string {
+	switch strings.ToLower(strings.TrimSpace(v.Get("show"))) {
+	case boardShowArchived:
+		return boardShowArchived
+	case boardShowTrash:
+		return boardShowTrash
+	default:
+		return boardShowActive
+	}
+}
+
+func cloneQuery(v url.Values) url.Values {
+	out := make(url.Values, len(v))
+	for k, values := range v {
+		out[k] = append([]string(nil), values...)
+	}
+	return out
+}
+
+func firstQueryValue(v url.Values, key string) string {
+	for _, value := range v[key] {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// boardLinkQuery keeps the board's current filters across Show changes. The archive UI uses singular
+// labelId/memberId fields; normal board filters use repeated label/member values, so links normalize
+// between the two instead of leaking stale singular values alongside a changed checkbox selection.
+func boardLinkQuery(v url.Values) url.Values {
+	out := url.Values{}
+	for _, key := range []string{"q", "label", "member", "due", "labelId", "memberId", "fromListId", "since", "until", "sort", "dir"} {
+		if values, ok := v[key]; ok {
+			out[key] = append([]string(nil), values...)
+		}
+	}
+	if firstQueryValue(out, "label") == "" {
+		if id := firstQueryValue(out, "labelId"); id != "" {
+			out.Set("label", id)
+		}
+	}
+	if firstQueryValue(out, "member") == "" {
+		if id := firstQueryValue(out, "memberId"); id != "" {
+			out.Set("member", id)
+		}
+	}
+	out.Del("labelId")
+	out.Del("memberId")
+	return out
+}
+
+// ShowHref is the shareable board-page URL for one Show segment. Active omits show; archive modes
+// carry it in the URL. The user's kanban/list/grid choice and all current filters survive the switch.
+func (p *PageData) ShowHref(show string) string {
+	q := boardLinkQuery(p.showValues)
+	q.Set("view", p.View)
+	if show != boardShowActive {
+		q.Set("show", show)
+	}
+	return p.PageURL + "?" + q.Encode()
+}
+
+// ShowBodyHref is the fragment URL for one Show segment. Archive modes use card.archive.list's UI
+// route; Active uses the normal board body. BodyURL is the current mode's URL and is also exposed on
+// #board-body so realtime clients can refresh the archive without replacing it with a kanban body.
+func (p *PageData) ShowBodyHref(show string) string {
+	path := "/ui/boards/" + p.Board.ID + "/body"
+	if show == boardShowArchived || show == boardShowTrash {
+		path = "/ui/boards/" + p.Board.ID + "/archive"
+	}
+	q := boardLinkQuery(p.showValues)
+	q.Set("view", p.View)
+	if show != boardShowActive {
+		q.Set("show", show)
+	}
+	return path + "?" + q.Encode()
 }
 
 func addCardPattern() string {
@@ -173,8 +265,27 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		caps = authz.BoardCaps{BoardID: caps.BoardID, ProjectID: caps.ProjectID, Level: caps.Level, Public: caps.Public, CanView: caps.CanView,
 			CanConnectAgent: caps.CanConnectAgent}
 	}
+	filterValues := boardLinkQuery(v)
+	userID := ""
+	if e.User != nil {
+		userID = e.User.UserID
+	}
 	pd := &PageData{Board: b, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, ReadOnly: readOnly,
-		Public: readOnly && e.User == nil, Filter: parseFilter(v)}
+		Public: readOnly && e.User == nil, Filter: parseFilter(filterValues), Show: boardShow(v), showValues: cloneQuery(v),
+		UserID: userID, LabelID: firstQueryValue(v, "labelId"), MemberID: firstQueryValue(v, "memberId")}
+	if pd.Show != boardShowActive {
+		// Archive controls submit singular IDs. Accept the old repeated names too so existing links
+		// still select the same option; an explicit singular value takes precedence.
+		if pd.LabelID == "" {
+			pd.LabelID = firstQueryValue(filterValues, "label")
+		}
+		if pd.MemberID == "" {
+			pd.MemberID = firstQueryValue(filterValues, "member")
+		}
+	}
+	if readOnly {
+		pd.Show = boardShowActive // public pages have no signed-in Archive route
+	}
 	pd.Query = pd.Filter.Query()
 	pd.PageURL = "/boards/" + b.ID
 	pd.View = v.Get("view")
@@ -184,6 +295,7 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 			pd.View = b.DefaultView
 		}
 	}
+	pd.BodyURL = pd.ShowBodyHref(pd.Show)
 	if !readOnly {
 		pd.LiveBoardID = b.ID
 		_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM projects WHERE id=?`, b.ProjectID).Scan(&pd.ProjectName)
