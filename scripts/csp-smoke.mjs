@@ -305,6 +305,39 @@ await run('board: archive and trash views (table or empty state, CSP)', async ()
   const seen = violations.slice(before);
   if (seen.length) throw new Error(seen.join('; '));
 });
+// Regression: switch Show (Archived / Trash) in place (htmx pushes a history entry), open a card sheet from a row and
+// close it (X, Esc, backdrop). Going back to the pushed entry must not let htmx "restore" the page from a bare
+// fragment: the app header vanished and the board header was left unstyled. Same walk on the normal kanban view.
+await run('board: card sheet opened from Archive / Trash / kanban closes without losing the page header', async () => {
+  const a = await api('POST', `/lists/${lists[1].id}/cards`, { name: 'Sheet walk archived' });
+  const t = await api('POST', `/lists/${lists[1].id}/cards`, { name: 'Sheet walk trashed' });
+  await api('POST', `/cards/${a.id}/archive`, {});
+  await api('POST', `/cards/${t.id}/archive`, { trash: true });
+  const intact = async (label) => {
+    const s = await p.evaluate(() => ({
+      topbar: !!document.querySelector('header.topbar'), headers: document.querySelectorAll('header.topbar').length,
+      shells: document.querySelectorAll('#board-shell').length, bodies: document.querySelectorAll('#board-body').length,
+      top: document.querySelector('header.topbar')?.getBoundingClientRect().top,
+    }));
+    if (!s.topbar || s.headers !== 1 || s.shells !== 1 || s.bodies !== 1 || Math.abs(s.top) > 1) throw new Error(label + ': page header lost or duplicated ' + JSON.stringify(s));
+  };
+  const cases = [['archived', 'a.archive-card-link'], ['trash', 'a.archive-card-link'], [null, '.boards-tile .boards-tile-name, .boards-tile']];
+  for (const [show, link] of cases) {
+    for (const how of ['x', 'esc', 'backdrop']) {
+      await go(`/boards/${board.id}`);
+      if (show) {
+        await p.locator(`a[data-show="${show}"], a[data-show-link="${show}"]`).first().click();   // in-place switch, pushes a history entry
+        await p.locator('#archive-view').waitFor(); await settle(p);
+      }
+      await p.locator(link).first().click(); await p.locator('#card-modal').waitFor(); await settle(p);
+      if (how === 'x') await p.locator('#modal [data-close], #modal .card-close, #modal button[aria-label*=lose]').first().click();
+      else if (how === 'esc') await p.keyboard.press('Escape');
+      else await p.mouse.click(4, 4);
+      await p.waitForFunction(() => !document.getElementById('modal').open); await p.waitForTimeout(1200);
+      await intact(`${show || 'kanban'}/${how}`);
+    }
+  }
+});
 await run('board: view icons in the top bar, 1-5 keys, switcher stays on calendar/map/settings', async () => {
   await go(`/boards/${board.id}`);
   const cur = sel => p.locator(`.topbar .view-switch a[aria-current=page]${sel || ''}`).count();

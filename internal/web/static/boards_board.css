@@ -35,7 +35,7 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 
 /* filter bar + chips */
 /* ONE row: filters on the left (they wrap on narrow desktops), "?" and Settings pinned at the right end */
-.boards-filterbar{display:flex;gap:.5rem;align-items:flex-start}
+.boards-filterbar{display:flex;gap:.5rem;align-items:center}
 .boards-filterscroll{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;flex:1 1 auto;min-width:0}
 .boards-filter{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .boards-actions{display:flex;gap:.5rem;align-items:center;flex:none;margin-left:auto}
@@ -45,6 +45,11 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 .boards-filter input[type=search]{min-width:14rem}
 .boards-filter input,.boards-filter select,.boards-saved-save input,.boards-menu-pop input,.boards-menu-pop select{background:var(--surface,#fff);color:var(--fg,#111);border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);padding:.3rem .5rem;font:inherit}
 .boards-filter input:focus,.boards-filter select:focus{border-color:var(--accent,#4f46e5)}
+/* ONE control height for the whole filter row (Show, search, Labels/Members/due date, Saved filters, view switch and the
+   action buttons), so every control is the same box, centred on one line at every width. The Show pill fills this height. */
+:root{--filter-h:2.125rem}
+.boards-filterbar :is(.boards-show,.boards-filter input,.boards-filter select,.boards-dd>summary,#saved-filters summary,.view-pick>summary,.boards-actions .boards-btn){box-sizing:border-box;height:var(--filter-h);min-height:var(--filter-h);max-height:var(--filter-h)}
+.boards-filterbar :is(.boards-dd>summary,#saved-filters summary,.boards-actions .boards-btn){display:inline-flex;align-items:center;justify-content:center;padding-top:0;padding-bottom:0;line-height:1.2}
 .boards-dd{position:relative}
 .boards-dd>summary{cursor:pointer;list-style:none;padding:.35rem .6rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);background:var(--surface,#fff)}
 .boards-dd[open]>summary{border-color:var(--accent,#4f46e5)}
@@ -61,8 +66,8 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 @keyframes boards-shimmer{50%{opacity:.55}}
 .boards-nomatch{padding:2.5rem 1rem;text-align:center;color:var(--muted,#6b7280)}.boards-nomatch strong{display:block;color:var(--fg,#111);font-size:var(--text-lg,1.1rem)}
 
-/* narrow screens: the filters stay on one line and scroll sideways inside .boards-filterscroll (the public page only does so on phones) */
-@media(max-width:900px){
+/* below ~1280px the filters stay on ONE line and scroll sideways inside .boards-filterscroll instead of wrapping onto several rows (the public page only does so on phones) */
+@media(max-width:1279px){
   .boards-shell:not(.boards-public) .boards-filter input[type=search]{min-width:10rem}
   .boards-shell:not(.boards-public) .boards-filterbar{align-items:center}
   .boards-shell:not(.boards-public) :is(.boards-filterscroll,.boards-filter){flex-wrap:nowrap}
@@ -487,12 +492,11 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-also-home{margin-left:auto;padding:0 .45rem;border:1px solid var(--border-strong,#a1a1aa);border-radius:var(--radius-pill,999px);color:var(--fg-2,#3f3f46);font-size:var(--text-xs,.75rem);line-height:1.5}
 
 /* ---- Archive / Trash: a quiet list view, with the shared board filters kept outside the fragment ---- */
-.boards-show{display:inline-flex;align-items:center;gap:var(--space-1);flex-wrap:wrap;flex:none;padding:3px;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-pill)}
-.boards-show-label{padding:0 var(--space-2);color:var(--muted);font-size:var(--text-xs);font-weight:600}
-.boards-show a{display:inline-flex;align-items:center;gap:var(--space-1);min-height:2.25rem;padding:var(--space-1) var(--space-3);border-radius:var(--radius-pill);color:var(--fg-2);font-size:var(--text-sm);font-weight:600;text-decoration:none}
+.boards-show{display:inline-flex;align-items:center;gap:2px;flex:none;padding:2px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.boards-show-label{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.boards-show a{display:inline-flex;align-items:center;gap:var(--space-1);align-self:stretch;flex:none;min-height:0;padding:0 .5rem;border-radius:calc(var(--radius-sm) - 1px);color:var(--muted);font-size:var(--text-xs);font-weight:600;line-height:1;white-space:nowrap;text-decoration:none}
 .boards-show a:hover{color:var(--fg)}
-.boards-show a[aria-current=page]{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-1)}
-.boards-show-count{color:var(--muted);font-size:var(--text-xs);font-variant-numeric:tabular-nums}
+.boards-show a[aria-current=page]{background:var(--surface);color:var(--fg)}
 .archive-view{display:flex;flex-direction:column;gap:var(--space-4);min-width:0;max-width:100%;color:var(--fg)}
 .archive-head,.archive-summary{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap}
 .archive-head h2,.archive-summary h2{margin:0;font-size:var(--text-xl);letter-spacing:-.02em}
@@ -575,9 +579,14 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
   #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-filter input[type=search]{flex:1 1 100%;width:100%}
   #board-shell:is([data-show="archived"],[data-show="trash"]) :is(.boards-filterscroll>.boards-dd,#saved-filters){flex:1 1 0;min-width:0}
   #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-filterscroll>.boards-dd summary,#board-shell:is([data-show="archived"],[data-show="trash"]) #saved-filters summary{width:100%;justify-content:center;white-space:nowrap}
-  .boards-show{width:100%;flex-wrap:nowrap;gap:var(--space-1);padding:var(--space-1);border-radius:var(--radius)}
+  .boards-show{flex-wrap:nowrap;gap:2px;padding:2px;border-radius:var(--radius-sm)}
+  #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-show{width:100%}
   .boards-show-label{flex:none;padding:0 var(--space-1)}
-  .boards-show a{flex:1 1 0;justify-content:center;min-width:0;min-height:2rem;padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);font-size:var(--text-xs);white-space:nowrap}  #archive-filters{align-items:stretch;padding:var(--space-3);gap:var(--space-2)}
+  /* the board's own filter row keeps the Show control at its natural width (Trash must not hide behind the actions) */
+  #board-shell:not(:is([data-show="archived"],[data-show="trash"])) .boards-filterscroll>.boards-show{width:auto;flex:none}
+  .boards-show a{flex:none;min-width:0;min-height:0;padding:0 .5rem;border-radius:var(--radius-sm);font-size:var(--text-xs);white-space:nowrap}
+  #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-show a{flex:1 1 0;justify-content:center}
+  #archive-filters{align-items:stretch;padding:var(--space-3);gap:var(--space-2)}
   #archive-filters :is(.field,.archive-facet){flex:1 1 8.5rem}
   #archive-filters :is(button,.btn){flex:1 1 auto}
   :is(.archive-table,.archive-view table),:is(.archive-table,.archive-view table) tbody{display:block;width:100%;max-width:100%}

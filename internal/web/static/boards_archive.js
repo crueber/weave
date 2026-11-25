@@ -137,6 +137,12 @@
     });
   }
   function sync() { syncShow(); syncSelection(); }
+  function plainState(state) {
+    if (!state || typeof state !== 'object' || !state.htmx) return state;
+    var out = {};
+    Object.keys(state).forEach(function (k) { if (k !== 'htmx') out[k] = state[k]; });
+    return out;
+  }
   function syncArchiveURL() {
     var a = archive(), form = a && a.querySelector('#archive-filters');
     if (!a || !form || !a.dataset.boardId) return;
@@ -171,7 +177,9 @@
       }
       if (window.htmx) window.htmx.process(link);
     });
-    try { history.replaceState(history.state, '', url); } catch (e) { /* history can be unavailable in embedded views */ }
+    // Drop htmx's marker from this entry: otherwise going back to it (closing a card sheet, or Back) makes htmx
+    // "restore" the page by swapping a bare fragment (no app header) into <body>. The popstate handler below owns it.
+    try { history.replaceState(plainState(history.state), '', url); } catch (e) { /* history can be unavailable in embedded views */ }
   }
 
   // Cache both endpoints once; preparation may then safely change the form's hx-post.

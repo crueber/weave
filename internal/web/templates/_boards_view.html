@@ -112,12 +112,6 @@
 
 {{define "boards_filterbar"}}<div class="boards-filterbar"><div class="boards-filterscroll">
 {{- if and (not .ReadOnly) (eq .Show "active")}}{{template "boards_views" dict "Board" .Board "View" .View "PageURL" .PageURL "Query" .Query "Picker" true}}{{end}}
-{{if not .ReadOnly}}<nav class="boards-show" aria-label="Show cards">
-  <span class="boards-show-label">Show</span>
-  <a href="{{.ShowHref "active"}}" data-show="active" data-show-link="active"{{if eq .Show "active"}} aria-current="page"{{end}}>Active <span class="boards-show-count" title="Active cards matching the current filters">{{.NoCards}}</span></a>
-  <a href="{{.ShowHref "archived"}}" hx-get="{{.ShowBodyHref "archived"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "archived"}}" data-show="archived" data-show-link="archived"{{if eq .Show "archived"}} aria-current="page"{{end}}>Archived</a>
-  <a href="{{.ShowHref "trash"}}" hx-get="{{.ShowBodyHref "trash"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "trash"}}" data-show="trash" data-show-link="trash"{{if eq .Show "trash"}} aria-current="page"{{end}}>Trash</a>
-</nav>{{end}}
 <form id="board-filter" class="boards-filter" role="search"{{if eq .Show "active"}} hx-get="{{.PageURL}}" hx-target="#board-body" hx-select="#board-body" hx-swap="outerHTML"{{else}} hx-get="/ui/boards/{{.Board.ID}}/archive" hx-include="#archive-filters select, #archive-filters input[type=date]" hx-target="#board-body" hx-swap="innerHTML"{{end}} hx-indicator="#board-body" hx-trigger="input delay:250ms, change, submit">
   <input type="hidden" name="view" value="{{.View}}">
   {{if ne .Show "active"}}<input type="hidden" name="show" value="{{.Show}}">{{end}}
@@ -158,6 +152,12 @@
   <noscript><button class="boards-btn">Apply</button></noscript>
 </form>
   {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}
+{{if not .ReadOnly}}<nav class="boards-show" aria-label="Show cards">
+  <span class="boards-show-label">Show</span>
+  <a href="{{.ShowHref "active"}}" data-show="active" data-show-link="active"{{if eq .Show "active"}} aria-current="page"{{end}}>Active</a>
+  <a href="{{.ShowHref "archived"}}" hx-get="{{.ShowBodyHref "archived"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "archived"}}" data-show="archived" data-show-link="archived"{{if eq .Show "archived"}} aria-current="page"{{end}}>Archived</a>
+  <a href="{{.ShowHref "trash"}}" hx-get="{{.ShowBodyHref "trash"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "trash"}}" data-show="trash" data-show-link="trash"{{if eq .Show "trash"}} aria-current="page"{{end}}>Trash</a>
+</nav>{{end}}
 </div>
 {{- /* Header actions: each one is shown iff its op allows the caller (PageData.Caps = authz.Board). */}}
 {{- if or (not .ReadOnly) .Caps.CanConnectAgent}}
