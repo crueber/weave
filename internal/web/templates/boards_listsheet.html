@@ -19,15 +19,9 @@
       {{else}}<span class="cm-list-ro" data-ls-crumb>{{$d.Name}}</span>{{end}}
     </nav>
     <span class="cards-saved cm-saved" data-ls-saved role="status" aria-live="polite"></span>
-    <span class="cards-nav cm-nav" role="group" aria-label="Column navigation"><button type="button" class="cards-navbtn" data-ls-nav="{{$d.PrevID}}" aria-label="Previous column" title="Previous column"{{if not $d.PrevID}} disabled{{end}}>&#8249;</button><button type="button" class="cards-navbtn" data-ls-nav="{{$d.NextID}}" aria-label="Next column" title="Next column"{{if not $d.NextID}} disabled{{end}}>&#8250;</button></span>
     {{template "boards_watch_list_btn" (dict "ID" $l.ID "Name" $d.Name "On" $d.Watching)}}
-    {{if $edit}}<details class="cm-menu cards-pop" data-pop="menu"><summary class="cm-iconbtn" aria-label="Column actions" title="Column actions" aria-haspopup="true">&hellip;</summary>
-      <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Column actions">
-        <button type="button" class="cm-mi cm-warn" hx-post="/ui/lists/{{$l.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive." data-ls-archive>Archive column</button>
-        <hr class="cm-sepline">
-        <button type="button" class="cm-mi cards-danger" hx-delete="/ui/lists/{{$l.ID}}" hx-swap="none" hx-confirm="Delete this list? Its cards go to the trash." data-ls-delete>Delete column</button>
-      </div></details>{{end}}
-    <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+    <span class="cards-nav cm-nav" role="group" aria-label="Column navigation"><button type="button" class="cards-navbtn" data-ls-nav="{{$d.PrevID}}" aria-label="Previous column" title="Previous column"{{if not $d.PrevID}} disabled{{end}}>&#8249;</button><button type="button" class="cards-navbtn" data-ls-nav="{{$d.NextID}}" aria-label="Next column" title="Next column"{{if not $d.NextID}} disabled{{end}}>&#8250;</button></span>
+    <form method="dialog" class="cards-close"><button class="cards-navbtn" aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
   </div>
 
   <header class="cm-head">
@@ -130,6 +124,12 @@
             </form>
           </div>
         </section>
+        <details class="cm-pv cards-pop ls-destructive" data-pop="menu"><summary class="ls-destr-btn" aria-haspopup="true" data-cap="column-destructive">Destructive actions</summary>
+              <div class="cm-popbody cards-popbody cm-menu-panel" role="group" aria-label="Destructive actions">
+                <button type="button" class="cm-mi cm-warn" hx-post="/ui/lists/{{$l.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive." data-ls-archive>Archive column</button>
+                <hr class="cm-sepline">
+                <button type="button" class="cm-mi cards-danger" hx-delete="/ui/lists/{{$l.ID}}" hx-swap="none" hx-confirm="Delete this list? Its cards go to the trash." data-ls-delete>Delete column</button>
+              </div></details>
       </aside>{{end}}
     </div>
   </div>

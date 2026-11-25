@@ -500,11 +500,13 @@ func TestArchiveAfterUI(t *testing.T) {
 		t.Fatalf("PATCH confirmed: %d, %d cards", c, countIn(t, e, l.ID))
 	}
 	_, board := get(t, m, "/boards/"+b.ID, false)
-	for _, want := range []string{`class="boards-col-archive" role="img" aria-label="Auto-archive: keeps the newest 30 cards"`,
-		`hx-get="/ui/lists/` + l.ID + `/archive-preview" hx-target="#lac-` + l.ID + `"`, `value="30" placeholder="Off"`, "Turn auto-archive off"} {
+	for _, want := range []string{`class="boards-col-archive" role="img" aria-label="Auto-archive: keeps the newest 30 cards"`} {
 		if !strings.Contains(board, want) {
 			t.Errorf("board lacks %q", want)
 		}
+	}
+	if strings.Contains(board, "boards-menu-archive") || strings.Contains(board, "Turn auto-archive off") {
+		t.Error("auto-archive is no longer in the column menu (it lives in the column sheet)")
 	}
 	mustGet("/ui/lists/"+l.ID, `Keeps newest 30</span>`, `Keep 30</span>`, `data-ls-keep-clear>`)
 	// "Turn off" posts an empty value: that clears it

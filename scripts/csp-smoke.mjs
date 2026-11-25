@@ -405,11 +405,20 @@ await run('board @390px: one-row top bar, view picker, account menu theme, no si
   } finally { await mctx.close(); }
 });
 
+// the column sheet opens from the column "..." menu (first item "Column settings"); the menu closes behind it
+const openColSheet = async id => {
+  await p.click(`#col-${id} details.boards-menu > summary`);
+  await p.click(`.boards-menu-pop[data-list="${id}"] [data-list-sheet]`);
+  await p.waitForSelector('#modal[open] #list-sheet');
+  if (await p.locator('details.boards-menu[open]').count()) throw new Error('the column menu stayed open after Column settings');
+};
+
 // ---- column sheet --------------------------------------------------------------------------
 await run('column sheet: open from header, WIP popover, description editor, sort, menu, prev/next, close', async () => {
   await api('PATCH', `/lists/${lists[0].id}`, { description: 'Column brief', wipLimit: 1 });
   await go(`/boards/${board.id}`);
-  await p.locator(`#col-${lists[0].id} button.boards-col-settings`).click(); await p.locator('#list-sheet').waitFor(); await settle(p);
+  if (await p.locator(`#col-${lists[0].id} .boards-col-settings`).count()) throw new Error('column header still has the settings icon');
+  await openColSheet(lists[0].id); await settle(p);
   if (!/\/lists\//.test(p.url())) throw new Error('sheet did not push /lists/{id}');
   await p.locator('#list-sheet details[data-pop=wip] > summary').click();
   await p.locator('#list-sheet [data-ls-wip-input]').fill('2');
@@ -621,7 +630,7 @@ await run('watching: board bell, column menu and sheet, card sheet watch/mute, s
   await p.locator('#popover-root .boards-watch-item, .boards-menu[open] .boards-watch-item').first().click(); await settle(p); await settle(p);
   if (!(await p.locator(`#col-${lists[1].id} .boards-col-watch`).count())) throw new Error('column header bell missing after Watch column');
   // column sheet button toggles in place
-  await p.locator(`#col-${lists[1].id} button.boards-col-settings`).click(); await p.locator('#list-sheet').waitFor(); await settle(p);
+  await openColSheet(lists[1].id); await settle(p);
   if ((await p.locator('#ls-watch').getAttribute('aria-pressed')) !== 'true') throw new Error('column sheet should show Watching');
   await p.locator('#ls-watch').click(); await settle(p);
   if ((await p.locator('#ls-watch').getAttribute('aria-pressed')) !== 'false') throw new Error('column sheet watch did not toggle off');
@@ -1055,8 +1064,7 @@ await run('board: column setting "Close cards that land here" (sheet confirm, fl
   };
   await go(`/boards/${cb.id}`);
   expect(!(await p.$('.boards-col-closes')), 'no column closes cards yet');
-  await p.click(`[data-list-sheet="${rev.id}"]`);
-  await p.waitForSelector('#modal[open] #list-sheet');
+  await openColSheet(rev.id);
   expect(/Off/.test(await p.textContent('#list-sheet [data-ls-type-val]')), 'the setting starts Off');
 
   at = 'switch on: the confirm states the count, the default flips the cards';
@@ -1104,26 +1112,13 @@ await run('board: column setting "Close cards that land here" (sheet confirm, fl
   // the second Esc must come after the sheet's 80 ms Esc-layer guard (boards_listsheet.js), like a person pressing twice
   await esc(p); await p.waitForTimeout(250); await esc(p); await p.waitForFunction(() => !document.getElementById('modal').open);
 
-  at = 'column menu: the same toggle asks with the count and flips';
+  at = 'column menu: Column settings first, then Watch; no closing / auto-archive / archive items';
   await p.click(`#col-${todo.id} details.boards-menu > summary`);
-  const item = `.boards-menu-pop[data-list="${todo.id}"] .boards-closes-item`;
-  await p.waitForSelector(item);
-  expect((await p.getAttribute(item, 'aria-checked')) === 'false', 'menu item should be unchecked');
-  await p.click(item);
-  await p.waitForSelector(`#lcc-${todo.id} .closes-confirm`);
-  expect(/Close 3 cards now\?/.test(await p.textContent(`#lcc-${todo.id}`)), 'menu confirm lacks the count');
-  const box = await p.locator(`#lcc-${todo.id} .closes-confirm`).boundingBox();
-  const vp = p.viewportSize();
-  expect(box && box.y >= 0 && box.y + box.height <= vp.height + 1, 'the menu confirm runs off screen');
-  await p.click(`#lcc-${todo.id} [data-closes-default]`);
-  await p.waitForSelector(`#col-${todo.id} .boards-col-closes`, { timeout: 4000 });
-  expect((await closedOf(tc)).every(Boolean), 'menu flip did not close the cards');
-
-  at = 'column menu on an empty column: switches at once';
-  await p.click(`#col-${empty.id} details.boards-menu > summary`);
-  await p.click(`.boards-menu-pop[data-list="${empty.id}"] .boards-closes-item`);
-  await p.waitForSelector(`#col-${empty.id} .boards-col-closes`, { timeout: 4000 });
-  expect((await typeOf(empty)) === 'closed', 'empty column did not switch');
+  const mp = `.boards-menu-pop[data-list="${todo.id}"]`;
+  await p.waitForSelector(mp);
+  expect(/^Column settings/.test((await p.locator(`${mp} [role=menuitem], ${mp} [role=menuitemcheckbox]`).first().textContent()).trim()), 'Column settings is not the first menu item');
+  expect(!(await p.locator(`${mp} .boards-closes-item, ${mp} .boards-menu-archive, ${mp} .boards-menu-foot`).count()), 'the menu still has closing / auto-archive / archive');
+  await esc(p);
   } catch (e) { throw new Error(`${at}: ${e.message}`); }
 });
 
@@ -1141,8 +1136,7 @@ await run('board: column auto-archive (sheet confirm, archive, hold on a new car
   const listOf = async c => (await api('GET', `/cards/${c.id}`)).listId;
   await go(`/boards/${ab.id}`);
   expect(!(await p.$('.boards-col-archive')), 'no column auto-archives yet');
-  await p.click(`[data-list-sheet="${done.id}"]`);
-  await p.waitForSelector('#modal[open] #list-sheet');
+  await openColSheet(done.id);
   expect(/Off/.test(await p.textContent('#list-sheet [data-ls-keep-val]')), 'the setting starts Off');
 
   at = 'set 10 on 12 cards: the confirm states the count and archives the 2 oldest';
@@ -1173,29 +1167,16 @@ await run('board: column auto-archive (sheet confirm, archive, hold on a new car
   await api('POST', `/cards/${cs[0].id}/restore`);
   expect((await listOf(cs[0])) === done.id && (await listOf(cs[3])) === arch.id, 'restore did not hold the column at 10');
 
-  at = 'column menu: lower to 8 asks with the count, then turn it off';
-  await p.click(`#col-${done.id} details.boards-menu > summary`);
-  const menu = `.boards-menu-pop[data-list="${done.id}"]`;
-  await p.waitForSelector(`${menu} .boards-menu-archive input[name=archiveAfter]`);
-  const url0 = p.url();
-  await p.click(`${menu} .boards-menu-archive input[name=archiveAfter]`);
+  at = 'sheet: lower to 8 asks with the count';
+  await openColSheet(done.id);
+  await p.click('#list-sheet details[data-pop=archive] > summary');
+  await p.click('#list-sheet [data-ls-keep-input]');
   await p.keyboard.press('Control+A'); await p.keyboard.type('8'); await p.keyboard.press('Enter');
-  await p.waitForSelector(`#lac-${done.id} .closes-confirm`);
-  expect(p.url() === url0 && await p.$(`#col-${done.id}`), 'typing digits in the menu switched the view');
-  expect(await p.evaluate(() => document.activeElement && document.activeElement.hasAttribute('data-closes-default')), 'the menu confirm default is not focused');
-  expect(/Archive 2 cards now\?/.test(await p.textContent(`#lac-${done.id}`)), 'menu confirm lacks the count');
-  const box = await p.locator(`#lac-${done.id} .closes-confirm`).boundingBox();
-  const vp = p.viewportSize();
-  expect(box && box.y >= 0 && box.y + box.height <= vp.height + 1, 'the menu confirm runs off screen');
-  await p.click(`#lac-${done.id} [data-closes-default]`);
+  await p.waitForSelector('#ls-archive-confirm .closes-confirm');
+  expect(/Archive 2 cards now\?/.test(await p.textContent('#ls-archive-confirm')), 'confirm lacks the count');
+  await p.click('#ls-archive-confirm [data-closes-default]');
   for (let i = 0; i < 40 && (await api('GET', `/lists/${done.id}`)).archiveAfter !== 8; i++) await p.waitForTimeout(100);
-  expect((await api('GET', `/lists/${done.id}`)).archiveAfter === 8, 'menu did not set 8');
-  await p.waitForTimeout(600);
-  await p.click(`#col-${done.id} details.boards-menu > summary`);
-  await p.click(`${menu} .boards-archive-off`);
-  for (let i = 0; i < 40 && (await api('GET', `/lists/${done.id}`)).archiveAfter; i++) await p.waitForTimeout(100);
-  expect(!(await api('GET', `/lists/${done.id}`)).archiveAfter, 'turn off did not clear the setting');
-  await p.waitForFunction(id => !document.querySelector('#col-' + id + ' .boards-col-archive'), done.id, { timeout: 4000 });
+  expect((await api('GET', `/lists/${done.id}`)).archiveAfter === 8, 'sheet did not set 8');
   } catch (e) { throw new Error(`${at}: ${e.message}`); }
 });
 

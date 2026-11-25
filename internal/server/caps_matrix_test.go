@@ -441,8 +441,13 @@ var capRows = []capRow{
 		cap: func(c capSet) bool { return c.board.CanDelete },
 		op:  func(w *capWorld, t capTarget) (string, string, any) { return "DELETE", "/boards/" + t.board, nil }},
 
-	// ---- column header (board page)
-	{name: "column: settings gear", target: mainT, page: boardPage, hook: "column-settings", hidden: boardSeen,
+	// ---- column "..." menu (board page) and the column sheet's right rail
+	{name: "column menu: Column settings", target: mainT, page: boardPage, hook: "column-settings", hidden: boardSeen,
+		cap: func(c capSet) bool { return c.board.CanEdit },
+		op: func(w *capWorld, t capTarget) (string, string, any) {
+			return "PATCH", "/lists/" + t.list, map[string]any{}
+		}},
+	{name: "column sheet: Destructive actions", target: mainT, page: func(t capTarget) string { return "/ui/lists/" + t.list }, hook: "column-destructive", hidden: boardSeen,
 		cap: func(c capSet) bool { return c.board.CanEdit },
 		op: func(w *capWorld, t capTarget) (string, string, any) {
 			return "PATCH", "/lists/" + t.list, map[string]any{}

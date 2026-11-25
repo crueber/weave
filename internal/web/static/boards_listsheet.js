@@ -61,6 +61,8 @@
     var b = e.target.closest && e.target.closest('[data-list-sheet]');
     if (!b || e.button !== 0) return;
     e.preventDefault();
+    var menu = window.WeavePop && WeavePop.menuOf(b); // opened from a column "..." menu: close it first
+    if (menu) menu.removeAttribute('open');
     LS.open(b.dataset.listSheet);
   });
   function autoOpen() {
@@ -268,7 +270,7 @@
   // Cancel drops it and returns focus to the control that asked; a fresh confirm focuses its default action.
   document.addEventListener('click', function (e) {
     var c = e.target.closest && e.target.closest('[data-closes-cancel]'); if (!c) return;
-    var slot = c.closest('.ls-closes-confirm, .boards-menu-confirm'); if (!slot) return;
+    var slot = c.closest('.ls-closes-confirm'); if (!slot) return;
     var back = slot.id === 'ls-closes-confirm' ? slot.parentNode.querySelector('[data-closes-opt].is-on')
       : slot.id === 'ls-archive-confirm' ? slot.parentNode.querySelector('[data-ls-keep-input]') : slot.previousElementSibling;
     slot.textContent = '';
@@ -276,7 +278,7 @@
     if (back) back.focus({ preventScroll: true });
   });
   document.body.addEventListener('htmx:afterSwap', function (e) {
-    var t = e.detail.target; if (!t || !t.matches || !t.matches('.ls-closes-confirm, .boards-menu-confirm')) return;
+    var t = e.detail.target; if (!t || !t.matches || !t.matches('.ls-closes-confirm')) return;
     var f = t.querySelector('[data-closes-default]'); if (f) f.focus({ preventScroll: true });
     var cf = t.querySelector('.closes-confirm'); if (cf && cf.scrollIntoView) cf.scrollIntoView({ block: 'nearest' });
   });

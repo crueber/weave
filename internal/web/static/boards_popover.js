@@ -120,8 +120,6 @@
         openOnes().forEach(function (o) { if (o !== d) o.removeAttribute('open'); });
         if (d.matches('.boards-menu')) {
           if (!portal(d)) return; // move BEFORE focusing: moving a node drops focus
-          // a confirm left from the last time the menu was open is dropped (not on close: its request may be in flight)
-          [].forEach.call(popOf(d).querySelectorAll('.boards-menu-confirm'), function (c) { c.textContent = ''; });
         }
         placeDetails(d);
         if (d.matches('.boards-menu')) { var f = items(popOf(d))[0]; f && f.focus({ preventScroll: true }); }

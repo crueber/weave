@@ -63,3 +63,14 @@
 .ls-keep-val{display:inline-flex;align-items:center;gap:.3em}
 .ls-archive form{display:flex;flex-direction:column;gap:.4rem;margin:0;padding:0 .5rem}
 .ls-archive:has(.closes-confirm) [data-ls-keep-ask] button{display:none}
+
+/* rail: the "Destructive actions" disclosure (Archive / Delete column) below the Cards section (outside its box): a warning-toned
+   button (--warning on --warning-soft, the pair .chip-warn uses) that opens a cards-pop with the two actions */
+.ls-destructive{margin-top:var(--space-3)}
+.ls-destr-btn{display:inline-flex;align-items:center;gap:.35rem;list-style:none;cursor:pointer;padding:.3rem .75rem;border:1px solid var(--warning);border-radius:var(--radius-sm);background:var(--warning-soft);color:var(--warning);font-size:var(--text-sm);font-weight:600}
+.ls-destr-btn::-webkit-details-marker{display:none}
+.ls-destr-btn::after{content:"";width:.4rem;height:.4rem;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translateY(-1px);margin-left:.15rem}
+.ls-destr-btn:hover,.ls-destructive[open]>.ls-destr-btn{border-color:var(--fg-2)}
+.ls-destr-btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+/* opens upward: the button ends the rail and the sheet would clip a popover below it (phones keep the bottom sheet) */
+@media (min-width:761px){.cm .ls-destructive .cards-popbody{left:0;right:auto;width:15.5rem;top:auto;bottom:calc(100% + 4px)}}

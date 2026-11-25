@@ -170,10 +170,13 @@ func TestListSheetRoutes(t *testing.T) {
 	}
 	// board header: settings icon is a real button, WIP badge flags the column
 	_, board := get(t, m, "/boards/"+b.ID, false)
-	for _, want := range []string{`<button type="button" class="boards-iconbtn boards-col-settings" data-list-sheet="` + l.ID + `"`, `aria-label="Column settings for `, `boards-wip is-over`} {
+	for _, want := range []string{`<button type="button" class="boards-menuitem boards-settings-item" role="menuitem" data-list-sheet="` + l.ID + `" data-cap="column-settings">`, `boards-wip is-over`} {
 		if !strings.Contains(board, want) {
 			t.Errorf("board lacks %q", want)
 		}
+	}
+	if strings.Contains(board, "boards-col-settings") {
+		t.Error("the column header has no settings icon any more (it moved into the menu)")
 	}
 	for _, gone := range []string{"Collapse list</button>", "data-collapse-btn", "List settings", `>Sort cards<`, "data-add-top", "boards-col-add", "data-rename-btn", "Rename list", "Add card to top", "boards-col-desc", ">Column settings&hellip;<"} {
 		if strings.Contains(board, gone) {

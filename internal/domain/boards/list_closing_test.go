@@ -214,13 +214,13 @@ func TestListClosingSettingUI(t *testing.T) {
 		t.Fatal("keep from the UI left the cards open")
 	}
 	_, board := get(t, m, "/boards/"+b.ID, false)
-	for _, want := range []string{`class="boards-col-closes" role="img" aria-label="Closes cards that land here"`,
-		`class="boards-menuitem boards-closes-item is-on" role="menuitemcheckbox" aria-checked="true"`,
-		`/ui/lists/` + l.ID + `/type-preview?type=active&amp;ctx=menu`, `id="lcc-` + l.ID + `"`,
-		`class="boards-menuitem boards-closes-item" role="menuitemcheckbox" aria-checked="false"`} {
+	for _, want := range []string{`class="boards-col-closes" role="img" aria-label="Closes cards that land here"`} {
 		if !strings.Contains(board, want) {
 			t.Errorf("board lacks %q", want)
 		}
+	}
+	if strings.Contains(board, "boards-closes-item") || strings.Contains(board, "ctx=menu") {
+		t.Error("the closing setting is no longer in the column menu (it lives in the column sheet)")
 	}
 	if strings.Contains(board, `<small class="boards-badge">closed</small>`) {
 		t.Error("the plain text badge is gone")

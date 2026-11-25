@@ -29,7 +29,7 @@ main:has(>.boards-shell:not(.boards-public)){--shell-pt:var(--space-3,.75rem);pa
 .boards-x:hover{color:var(--fg,#111)}
 .boards-linkbtn{border:0;background:none;padding:0;font:inherit;cursor:pointer;color:var(--accent,#4f46e5)}
 .boards-danger-link{color:var(--danger,#c9372c);white-space:nowrap}
-html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.js) .boards-tile-edit{display:none}
+html:not(.js) .boards-col-collapse,html:not(.js) .boards-tile-edit{display:none}
 @media (pointer:coarse){.boards-tile{-webkit-user-select:none;user-select:none}}
 :where(.boards-shell,.boards-pop,.boards-help,.boards-menu-pop) :where(button,a,summary,textarea,input,select,[tabindex]):focus-visible{outline:2px solid var(--focus-ring,#6366f1);outline-offset:2px}
 
@@ -138,9 +138,8 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 .boards-wip.is-over{border-color:var(--danger);background:var(--danger-soft);color:var(--danger);font-weight:700}
 .boards-wip-flag{display:inline-grid;place-items:center;width:.95rem;height:.95rem;border-radius:var(--radius-pill);background:var(--danger);color:var(--surface);font-size:.7rem;line-height:1}
 .boards-col-collapse .ico{transition:transform var(--dur-fast,.12s)}
-.boards-col-settings{opacity:0}.boards-col:hover .boards-col-settings,.boards-col:focus-within .boards-col-settings{opacity:1}
 .boards-col.is-collapsed{flex-basis:3rem}
-.boards-col.is-collapsed .boards-cards,.boards-col.is-collapsed .boards-composer,.boards-col.is-collapsed .boards-menu,.boards-col.is-collapsed .boards-col-settings{display:none}
+.boards-col.is-collapsed .boards-cards,.boards-col.is-collapsed .boards-composer,.boards-col.is-collapsed .boards-menu{display:none}
 .boards-col.is-collapsed .boards-col-head{flex-direction:column;padding:.4rem 0;border-radius:var(--radius-lg,10px)}
 .boards-col.is-collapsed .boards-col-title{writing-mode:vertical-rl;max-height:14rem;flex:0 1 auto}
 .boards-col.is-collapsed .boards-col-collapse .ico{transform:rotate(180deg)}
@@ -183,7 +182,7 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-col-settings,html:not(.
 .boards-tile-edit{position:absolute;top:.3rem;right:.3rem;width:1.55rem;height:1.55rem;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--radius-sm,4px);background:var(--surface-2,#f1f1f4);color:var(--muted,#6b7280);cursor:pointer;opacity:0;transition:opacity var(--dur-fast,.12s)}
 .boards-tile:hover .boards-tile-edit,.boards-tile:focus-within .boards-tile-edit,.boards-tile-edit:focus-visible{opacity:1}
 .boards-tile-edit:hover{background:var(--surface-3,#e4e4e7);color:var(--fg,#111)}
-@media (hover:none){.boards-tile-edit{opacity:.8}.boards-col-settings{opacity:1}}
+@media (hover:none){.boards-tile-edit{opacity:.8}}
 
 /* composers: JS adds .js and opens one on demand; without JS the form is always shown */
 .boards-composer{padding:.35rem .45rem .5rem}
@@ -405,29 +404,11 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 /* a column that closes cards that land here (lists.type closed): the closed mark in the header, named for screen readers */
 .boards-col-closes{display:inline-flex;align-items:center;flex:none;color:var(--success)}
 .boards-col-closes .closed-mark-ico{width:.9rem;height:.9rem}
-/* the same setting in the column "..." menu (menuitemcheckbox), and the confirm that swaps in below it */
-.boards-menu-pop .boards-closes-item{display:flex;align-items:center;gap:.5rem}
-.boards-closes-item .closed-mark-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
-.boards-closes-item.is-on .closed-mark-ico{color:var(--success)}
-.boards-closes-item small{margin-left:auto;padding-left:.5rem;color:var(--muted);font-size:var(--text-xs)}
-.boards-closes-item.is-on small{color:var(--success);font-weight:600}
-.boards-menu-confirm:empty{display:none}
-.boards-menu-confirm .closes-confirm{margin:.3rem .3rem .35rem}
-.boards-menu-confirm+.boards-menu-colour{margin-top:.35rem;padding-top:.45rem;border-top:1px solid var(--border)}
-/* auto-archive (lists.archive_after): the header glyph, named for screen readers, and the "..." menu row */
+/* auto-archive (lists.archive_after): the header glyph, named for screen readers */
 .boards-col-archive{display:inline-flex;align-items:center;flex:none;color:var(--fg-2)}
 .boards-col-archive .archive-after-ico{width:.9rem;height:.9rem}
-.boards-menu-archive{display:flex;flex-direction:column;gap:.4rem;margin:.25rem 0 0;padding:.5rem .55rem;border-top:1px solid var(--border)}
-.boards-menu-archive .boards-menu-h{display:flex;align-items:center;gap:.4rem}
-.boards-menu-archive .boards-menu-h small{margin-left:auto;color:var(--fg-2);font-weight:600;letter-spacing:0;text-transform:none}
-.boards-menu-archive .archive-after-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
-.boards-menu-archive-row{display:flex;align-items:center;gap:.4rem}
-.boards-menu-archive-l{font-size:var(--text-sm);color:var(--fg-2);white-space:nowrap}
-.boards-menu-archive-row input{width:5.5rem;min-width:0;flex:1 1 auto}
-.boards-menu-archive-row button{flex:none}
-.boards-menu-pop .boards-archive-off{font-size:var(--text-sm);color:var(--fg-2)}
-.boards-menu-pop .boards-watch-item{display:flex;align-items:center;gap:.5rem}
-.boards-watch-item .watch-ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
+.boards-menu-pop .boards-watch-item,.boards-menu-pop .boards-settings-item{display:flex;align-items:center;gap:.5rem}
+.boards-watch-item .watch-ico,.boards-settings-item .ico{width:1rem;height:1rem;flex:none;color:var(--fg-2)}
 .boards-watch-item.is-on .watch-ico{color:var(--accent)}
 .boards-watch-item small{margin-left:auto;color:var(--muted);font-size:var(--text-xs)}
 

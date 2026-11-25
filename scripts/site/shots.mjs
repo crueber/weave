@@ -44,7 +44,7 @@ const gallery = async p => { await p.locator('.projects-board-new, .boards-new')
 const inProgress = async p => { await p.evaluate(id => document.getElementById('col-' + id)?.scrollIntoView({inline: 'start', block: 'nearest'}), S.platformLists['In progress']); await wait(400); };
 const blur = p => p.evaluate(() => document.activeElement && document.activeElement.blur());
 const multi = async p => { await p.locator('.boards-tile', {hasText: 'Apollo 2.0 launch checklist'}).first().click(); await p.waitForSelector('#card-modal'); await wait(1200); await blur(p); await p.locator('.cm-board-add').first().click(); await p.waitForSelector('.cm-place'); await wait(800); };
-const rules = async p => { await p.locator(`[data-list-sheet="${S.platformLists['Done']}"]`).click(); await p.waitForSelector('#list-sheet'); await wait(1000); await blur(p); };
+const rules = async p => { const id = S.platformLists['Done']; await p.locator(`#col-${id} details.boards-menu > summary`).click(); await p.locator(`.boards-menu-pop[data-list="${id}"] [data-list-sheet]`).click(); await p.waitForSelector('#list-sheet'); await wait(1000); await blur(p); };
 const sheet = async p => { await p.locator('.boards-tile', {hasText: 'Triage new crash reports'}).first().click(); await p.waitForSelector('#card-modal'); await wait(1200); await p.evaluate(() => document.activeElement && document.activeElement.blur()); };
 
 for (const theme of ['light', 'dark']) {

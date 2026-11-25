@@ -42,7 +42,7 @@ async function api(method, path, body, multipart, user = 'avery') {
 const board = `/boards/${S.board}`;
 const L = S.lists;
 const openCard = name => async p => { await p.locator('.boards-tile', {hasText: name}).first().click(); await p.waitForSelector('#card-modal'); await wait(1200); await blur(p); };
-const openSheet = id => async p => { await p.locator(`[data-list-sheet="${id}"]`).click(); await p.waitForSelector('#list-sheet'); await wait(900); await blur(p); };
+const openSheet = id => async p => { await p.locator(`#col-${id} details.boards-menu > summary`).click(); await p.locator(`.boards-menu-pop[data-list="${id}"] [data-list-sheet]`).click(); await p.waitForSelector('#list-sheet'); await wait(900); await blur(p); };
 const gallery = async p => { await p.locator('.projects-board-new, .boards-new').first().click(); await p.waitForSelector('#tg .tg-tile'); await wait(800); };
 
 // ---- the main board pair (wide enough for the pinned Inbox and all four columns)

@@ -28,7 +28,7 @@ the same guidance ships to agents as an Agent Skill / instructions block for eve
    detected and installed; `--scope project` writes into the current repo so the whole team gets it. See `docs/CLI.md`.
 6. **Wire it to columns**: `weave listen` (just events) or `weave agent run` (the whole loop).
 
-**The column is the brief.** A column can carry a description (the settings icon in the column header → Description). The agent skill tells an agent to read a column's **name and
+**The column is the brief.** A column can carry a description (column `...` menu → Column settings → Description). The agent skill tells an agent to read a column's **name and
 description** and infer from them what to do with a card that lands there, so "Ready — implement the card,
 comment what changed, then move it to Review" is a complete instruction. To hand work to an agent use **Connect an agent** (the robot button next to the board filters, the board's Settings → Agents, a column's sheet, the
 project page, your user settings, or `weave agent prompt` in a terminal). It copies a ready-made prompt: *About Weave* (concepts, connecting, etiquette),

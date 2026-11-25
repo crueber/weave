@@ -90,7 +90,6 @@
 /* ---- list menu: a floating popover (see boards_popover.js), never clipped by columns or the scroller ---- */
 .boards-menu-pop{position:fixed;z-index:70;width:17rem;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);padding:0;gap:0;overflow:hidden;box-shadow:var(--shadow-3)}
 .boards-menu-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:.35rem;display:flex;flex-direction:column;gap:.1rem}
-.boards-menu-foot{flex:none;display:flex;flex-direction:column;border-top:1px solid var(--border);padding:.35rem;background:var(--surface)}
 .boards-menuitem{font-size:var(--text-sm);text-align:left;justify-content:flex-start;border:0;background:none}
 .boards-menu-pop .boards-menuitem{text-align:left;justify-content:flex-start;border:0;background:none;box-shadow:none}
 .boards-menuitem:hover{background:var(--surface-2)}

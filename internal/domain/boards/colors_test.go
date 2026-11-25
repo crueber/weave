@@ -218,10 +218,18 @@ func TestColorRendering(t *testing.T) {
 	m := mux(e)
 
 	// list menu is a floating popover: role=menu, scrollable middle, pinned footer, one colour field
-	for _, want := range []string{`class="boards-menu-pop" data-sheet="1" role="menu"`, `boards-menu-scroll`, `boards-menu-foot`, `data-colorpick`, `Archive list`} {
+	for _, want := range []string{`class="boards-menu-pop" data-sheet="1" role="menu"`, `boards-menu-scroll`, `data-colorpick`, `data-cap="column-settings"`, `boards-watch-item`} {
 		if !strings.Contains(body0(t, m, b.ID), want) {
 			t.Errorf("list menu missing %q", want)
 		}
+	}
+	for _, gone := range []string{`boards-menu-foot`, `Archive list`, `boards-closes-item`, `boards-menu-archive`, `Close cards that land here</span>`, `Turn auto-archive off`} {
+		if strings.Contains(body0(t, m, b.ID), gone) {
+			t.Errorf("list menu still has %q", gone)
+		}
+	}
+	if bd := body0(t, m, b.ID); strings.Index(bd, `boards-settings-item`) > strings.Index(bd, `boards-watch-item`) {
+		t.Error("Column settings comes before Watch column in the menu")
 	}
 	if strings.Contains(body0(t, m, b.ID), `<select name="color"`) {
 		t.Error("old colour select must be gone")

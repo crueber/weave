@@ -39,8 +39,6 @@ button.cards-label:hover{filter:brightness(.94)}
 .cards-navbtn:hover:not(:disabled){background:var(--surface-3);color:var(--fg)}
 .cards-navbtn:disabled{opacity:.35;cursor:default}
 .cards-close{margin:0}
-.cards-close button{display:grid;place-items:center;width:2rem;height:2rem;padding:0;border:1px solid transparent;border-radius:var(--radius-sm);background:none;color:var(--fg-2);font-size:1.5rem;line-height:1;box-shadow:none}
-.cards-close button:hover{background:var(--surface-3);color:var(--fg)}
 .cards-toolbar{display:flex;flex-wrap:wrap;gap:.2rem}
 .cards-actions{display:flex;gap:var(--space-2);align-items:center;margin-top:var(--space-2);flex-wrap:wrap}
 .cards-wd{display:inline-block;margin-right:.3rem}.cards-wd input{width:auto}
@@ -72,7 +70,6 @@ dialog#modal::backdrop{background:var(--overlay)}
 .cm-list>summary:hover{background:var(--surface-3)}
 .cm-chev,.x-chev{display:inline-block;width:.45rem;height:.45rem;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translate(-1px,-1px);flex:none;opacity:.7}
 .cm-saved{order:0}
-.cm-nav{order:1}
 .cm-top summary::-webkit-details-marker{display:none}
 .cm-iconbtn{display:grid;place-items:center;width:2rem;height:2rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--fg-2);cursor:pointer;list-style:none;font-size:1.15rem;line-height:1;letter-spacing:.05em}
 .cm-iconbtn:hover{background:var(--surface-3);color:var(--fg)}

@@ -86,7 +86,7 @@ strict Content-Security-Policy, CSRF protection, rate limits, signed releases an
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/colors-list-menu-dark.png" alt="The column menu with watch, close cards, auto-archive and the colour picker" width="49%">
+  <img src="docs/screenshots/colors-list-menu-dark.png" alt="The column menu with the colour picker" width="49%">
   <img src="docs/screenshots/board-settings-dark.png" alt="Board settings: name, board colour, project and your access" width="49%">
 </p>
 

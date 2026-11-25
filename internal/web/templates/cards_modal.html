@@ -22,10 +22,10 @@
       {{else}}<span class="cm-list-ro">{{$o.ListName}}</span>{{end}}
     </nav>
     <span id="cards-saved" class="cards-saved cm-saved" role="status" aria-live="polite"></span>
-    <span class="cards-nav cm-nav" role="group" aria-label="Card navigation"><button type="button" class="cards-navbtn" data-card-nav="prev" aria-label="Previous card (k)" title="Previous card (k)" disabled>&#8249;</button><button type="button" class="cards-navbtn" data-card-nav="next" aria-label="Next card (j)" title="Next card (j)" disabled>&#8250;</button></span>
     {{if .User}}{{template "cards_watch" .}}{{end}}
     {{template "cards_menu" .}}
-    <form method="dialog" class="cards-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
+    <span class="cards-nav cm-nav" role="group" aria-label="Card navigation"><button type="button" class="cards-navbtn" data-card-nav="prev" aria-label="Previous card (k)" title="Previous card (k)" disabled>&#8249;</button><button type="button" class="cards-navbtn" data-card-nav="next" aria-label="Next card (j)" title="Next card (j)" disabled>&#8250;</button></span>
+    <form method="dialog" class="cards-close"><button class="cards-navbtn" aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
   </div>
 
   <header class="cm-head">

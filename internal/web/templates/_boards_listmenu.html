@@ -1,34 +1,19 @@
 {{/* Body of the list "..." menu (a floating popover, positioned by boards_popover.js; a bottom sheet on phones).
-   Args: C (Column), P (PageData), Name. Watch (everyone who can view the board), then "Close cards that land here" (the
-   column's closing setting, list type closed/active; it asks first when cards already sit in the column: the confirm from
-   GET /ui/lists/{id}/type-preview swaps into #lcc-{id}), Colour + Archive (editors; Archive is the pinned footer);
-   everything else (sort, move all, WIP limit, agent prompt, delete, description) lives in the column sheet (the header
-   settings icon, boards_listsheet.html). */}}
+   Args: C (Column), P (PageData), Name. In order: "Column settings" (editors; opens the column sheet, boards_listsheet.html,
+   where the closing and auto-archive settings and the destructive actions live), Watch (everyone who can view the board),
+   Colour (editors). Nothing else: sort, move all, WIP limit, agent prompt, closing, auto-archive, archive and delete are
+   all in the column sheet. */}}
 {{define "boards_list_menu"}}{{$c := .C}}{{$p := .P}}{{$name := .Name}}<div class="boards-menu-pop" data-sheet="1" role="menu" aria-label="Actions for {{$name}}">
   <div class="boards-menu-scroll">
+    {{if $p.CanEdit}}<button type="button" class="boards-menuitem boards-settings-item" role="menuitem" data-list-sheet="{{$c.List.ID}}" data-cap="column-settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span>Column settings</span></button>{{end}}
     <button type="button" class="boards-menuitem boards-watch-item{{if $c.Watching}} is-on{{end}}" role="menuitemcheckbox" aria-checked="{{if $c.Watching}}true{{else}}false{{end}}"
       hx-post="/ui/lists/{{$c.List.ID}}/{{if $c.Watching}}unsubscribe{{else}}subscribe{{end}}" hx-swap="none"
       title="{{if $c.Watching}}Stop notifications about this column{{else}}Get notified about cards created in, moved into or out of this column, and comments, closing and due dates on its cards{{end}}">{{template "watch_bell" $c.Watching}}<span>{{if $c.Watching}}Stop watching{{else}}Watch column{{end}}</span>{{if $c.Watching}}<small>Watching</small>{{end}}</button>
-    {{if $p.CanEdit}}{{$on := eq $c.List.Type "closed"}}<button type="button" class="boards-menuitem boards-closes-item{{if $on}} is-on{{end}}" role="menuitemcheckbox" aria-checked="{{if $on}}true{{else}}false{{end}}"
-      hx-get="/ui/lists/{{$c.List.ID}}/type-preview?type={{if $on}}active{{else}}closed{{end}}&amp;ctx=menu" hx-target="#lcc-{{$c.List.ID}}" hx-swap="innerHTML"
-      title="Cards moved or added to this column are marked closed (with a check mark); moving them to another column re-opens them">{{template "closed_mark_ico"}}<span>Close cards that land here</span><small>{{if $on}}On{{else}}Off{{end}}</small></button>
-    <div class="boards-menu-confirm" id="lcc-{{$c.List.ID}}" aria-live="polite"></div>
-    {{$keep := boardsInt $c.List.ArchiveAfter}}<form class="boards-menu-archive" hx-get="/ui/lists/{{$c.List.ID}}/archive-preview" hx-target="#lac-{{$c.List.ID}}" hx-swap="innerHTML"
-      title="Keep the newest N cards; older cards are archived automatically when more land here">
-      <input type="hidden" name="ctx" value="menu">
-      <label class="boards-menu-h" for="lak-{{$c.List.ID}}">{{template "archive_after_ico"}}Auto-archive{{if $keep}}<small>On</small>{{end}}</label>
-      <span class="boards-menu-archive-row"><span class="boards-menu-archive-l">Keep newest</span><input id="lak-{{$c.List.ID}}" type="number" name="archiveAfter" min="1" max="10000" step="1" inputmode="numeric" required value="{{if $keep}}{{$keep}}{{end}}" placeholder="Off" aria-label="Cards to keep (older ones are archived)"><button>Set</button></span>
-    </form>
-    {{if $keep}}<button type="button" class="boards-menuitem boards-archive-off" role="menuitem" hx-patch="/ui/lists/{{$c.List.ID}}" hx-vals='{"archiveAfter":"0"}' hx-swap="none">Turn auto-archive off</button>{{end}}
-    <div class="boards-menu-confirm" id="lac-{{$c.List.ID}}" aria-live="polite"></div>
-    <form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
+    {{if $p.CanEdit}}<form hx-patch="/ui/lists/{{$c.List.ID}}" hx-trigger="change" hx-swap="none" class="boards-menu-colour">
       <span class="boards-menu-h" id="lc-{{$c.List.ID}}">Colour</span>
       {{template "boards_color_picker" dict "Name" "color" "Current" $c.List.Color "Label" "List colour"}}
     </form>{{end}}
   </div>
-  {{if $p.CanEdit}}<div class="boards-menu-foot">
-    <button type="button" class="boards-menuitem" role="menuitem" hx-post="/ui/lists/{{$c.List.ID}}/archive" hx-swap="none" hx-confirm="Archive this list? Its cards go to the archive.">Archive list</button>
-  </div>{{end}}
 </div>{{end}}
 
 {{/* Column watch toggle in the column sheet's top bar; swaps itself (the route answers with this fragment, adds a toast and

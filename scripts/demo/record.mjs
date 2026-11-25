@@ -85,7 +85,7 @@ let T0 = Date.now(), n = 0; const META = {beats: []};
   });
 
   await beat('column', 'Column rules: WIP limit, auto-close, keep the newest N', async () => {
-    await d.click(`[data-list-sheet="${S.lists['Done']}"]`); await p.waitForSelector('#list-sheet'); await d.sleep(700);
+    await d.click(`#col-${S.lists['Done']} details.boards-menu > summary`); await d.sleep(300); await d.click(`.boards-menu-pop[data-list="${S.lists['Done']}"] [data-list-sheet]`); await p.waitForSelector('#list-sheet'); await d.sleep(700);
     await d.hover('[data-prop=closes]'); await d.sleep(250);
     await d.click('details[data-pop=archive] > summary'); await d.sleep(1050);
     await p.keyboard.press('Escape'); await d.sleep(150);
