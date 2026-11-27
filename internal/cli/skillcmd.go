@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
+	"sync"
 
 	"github.com/crueber/weave/skills"
 )
@@ -25,8 +26,7 @@ func init() {
 	registerSpec("skill", skillFlags, cmdSkill)
 }
 
-// skillFiles returns the embedded skill: relative path (e.g. "SKILL.md", "references/commands.md") -> content.
-func skillFiles() map[string][]byte {
+var loadSkillFiles = sync.OnceValue(func() map[string][]byte {
 	out := map[string][]byte{}
 	_ = fs.WalkDir(skills.FS, "weave", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -37,7 +37,10 @@ func skillFiles() map[string][]byte {
 		return nil
 	})
 	return out
-}
+})
+
+// skillFiles returns a fresh map of the embedded skill: relative path -> content.
+func skillFiles() map[string][]byte { return maps.Clone(loadSkillFiles()) }
 
 // instructionsBody is the compact rendering used for tools that only read instruction files.
 func instructionsBody() string {
@@ -294,8 +297,10 @@ func (a *App) selectTargets(p *Parsed, e *skillEnv, scope string, mode string) (
 }
 
 func absPath(e *skillEnv, p string) string {
-	if strings.HasPrefix(p, "~") {
-		p = filepath.Join(e.Home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
+	if p == "~" {
+		p = e.Home
+	} else if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		p = filepath.Join(e.Home, p[2:])
 	}
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(e.Cwd, p)
@@ -344,7 +349,7 @@ func (a *App) emitRows(rows []skillRow, cols ...string) int {
 		_ = json.Unmarshal(b, &m)
 		items = append(items, m)
 	}
-	if a.Out.Format == "" && a.stdoutTTY() {
+	if !a.Out.FormatSet && a.stdoutTTY() {
 		a.Out.Format = "table"
 	}
 	if a.Out.Format == "table" && len(a.Out.Fields) == 0 {
@@ -461,7 +466,6 @@ func (a *App) skillInstall(p *Parsed) int {
 	}
 	force := p.Bool("force")
 	want, body := skillFiles(), instructionsBody()
-	bundle := skillBundleHash(want)
 	ver := Version()
 	var rows []skillRow
 	exit := 0
@@ -489,7 +493,7 @@ func (a *App) skillInstall(p *Parsed) int {
 			rows = append(rows, row)
 			continue
 		}
-		act, files, werr := a.installOne(r, want, body, bundle, ver, force)
+		act, files, werr := a.installOne(r, want, body, ver, force)
 		row.Action, row.Files = act, files
 		if r.T.Note != "" {
 			row.Note = r.T.Note
@@ -524,7 +528,7 @@ func (a *App) skillInstall(p *Parsed) int {
 	return exit
 }
 
-func (a *App) installOne(r resolved, want map[string][]byte, body, bundle, ver string, force bool) (string, []string, error) {
+func (a *App) installOne(r resolved, want map[string][]byte, body, ver string, force bool) (string, []string, error) {
 	pl := r.Place
 	dry := a.DryRun
 	if pl.Fmt == fmtSkillDir {
@@ -615,6 +619,7 @@ func (a *App) skillUninstall(p *Parsed) int {
 	if err != nil {
 		return a.fail(err)
 	}
+	mcpSel := sel
 	if !explicit && len(sel) == 1 && sel[0].State() == stMissing {
 		sel = nil
 	}
@@ -665,7 +670,7 @@ func (a *App) skillUninstall(p *Parsed) int {
 		rows = append(rows, row)
 	}
 	if p.Bool("mcp") {
-		mrows, mexit := a.mcpRows(sel, e, scope, explicit, force, true)
+		mrows, mexit := a.mcpRows(mcpSel, e, scope, explicit, force, true)
 		rows = append(rows, mrows...)
 		if exit == 0 {
 			exit = mexit
@@ -683,5 +688,3 @@ func (r resolved) State() string {
 	}
 	return r.state(skillFiles(), instructionsBody())
 }
-
-var _ = sort.Strings

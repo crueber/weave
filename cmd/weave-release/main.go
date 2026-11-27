@@ -107,7 +107,7 @@ func split(s string) []string {
 }
 
 func goBuild(version, goos, goarch, pkg, dest string) error {
-	ld := fmt.Sprintf("-s -w -X %s/internal/version.Version=%s -X %s/internal/domain/admin.Version=%s", mod, version, mod, version)
+	ld := fmt.Sprintf("-s -w -X %s/internal/version.Version=%s", mod, version)
 	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ld, "-o", dest, pkg)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)
 	cmd.Stderr = os.Stderr
@@ -121,7 +121,10 @@ func run(out, version string, targets, server []string, scriptsDir string) error
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	comps := completions()
+	comps, err := completions()
+	if err != nil {
+		return err
+	}
 	skillFiles, err := readSkill()
 	if err != nil {
 		return err
@@ -168,7 +171,10 @@ func run(out, version string, targets, server []string, scriptsDir string) error
 		}
 	}
 	for _, t := range server {
-		goos, goarch, _ := strings.Cut(t, "/")
+		goos, goarch, ok := strings.Cut(t, "/")
+		if !ok {
+			return fmt.Errorf("bad server target %q", t)
+		}
 		dest := filepath.Join(out, fmt.Sprintf("weave-server-%s-%s", goos, goarch))
 		fmt.Println("building", filepath.Base(dest))
 		if err := goBuild(version, goos, goarch, "./cmd/weave", dest); err != nil {
@@ -231,15 +237,16 @@ func sortedKeys(m map[string][]byte) []string {
 	return k
 }
 
-func completions() map[string][]byte {
+func completions() (map[string][]byte, error) {
 	m := map[string][]byte{}
 	for sh, name := range map[string]string{"bash": "weave.bash", "zsh": "_weave", "fish": "weave.fish", "powershell": "weave.ps1"} {
-		var b bytes.Buffer
-		if cli.Run([]string{"completion", sh}, strings.NewReader(""), &b, io.Discard) == 0 {
-			m[name] = b.Bytes()
+		var b, errBuf bytes.Buffer
+		if code := cli.Run([]string{"completion", sh}, strings.NewReader(""), &b, &errBuf); code != 0 {
+			return nil, fmt.Errorf("completion %s failed (exit %d): %s", sh, code, strings.TrimSpace(errBuf.String()))
 		}
+		m[name] = b.Bytes()
 	}
-	return m
+	return m, nil
 }
 
 func readSkill() (map[string][]byte, error) {
@@ -277,13 +284,20 @@ Docs: docs/CLI.md and docs/AGENTS.md in the repository.
 
 var epoch = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // deterministic archives
 
-func writeTarGz(path string, files []entry) error {
+func writeTarGz(path string, files []entry) (err error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, _ := gzip.NewWriterLevel(f, gzip.BestCompression)
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	gz, err := gzip.NewWriterLevel(f, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
 	tw := tar.NewWriter(gz)
 	for _, e := range files {
 		if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: int64(e.mode), Size: int64(len(e.data)), ModTime: epoch, Typeflag: tar.TypeReg}); err != nil {
@@ -299,12 +313,16 @@ func writeTarGz(path string, files []entry) error {
 	return gz.Close()
 }
 
-func writeZip(path string, files []entry) error {
+func writeZip(path string, files []entry) (err error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	zw := zip.NewWriter(f)
 	for _, e := range files {
 		h := &zip.FileHeader{Name: e.name, Method: zip.Deflate, Modified: epoch}
@@ -327,15 +345,20 @@ func writeSums(dir string) error {
 	}
 	var sb strings.Builder
 	for _, e := range ents {
-		if e.IsDir() || e.Name() == "SHA256SUMS.txt" {
+		if e.IsDir() || e.Name() == "SHA256SUMS.txt" || e.Name() == "SHA256SUMS.txt.sig" {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		f, err := os.Open(filepath.Join(dir, e.Name()))
 		if err != nil {
 			return err
 		}
-		h := sha256.Sum256(b)
-		fmt.Fprintf(&sb, "%s  %s\n", hex.EncodeToString(h[:]), e.Name())
+		h := sha256.New()
+		_, cerr := io.Copy(h, f)
+		_ = f.Close()
+		if cerr != nil {
+			return cerr
+		}
+		fmt.Fprintf(&sb, "%s  %s\n", hex.EncodeToString(h.Sum(nil)), e.Name())
 	}
 	return os.WriteFile(filepath.Join(dir, "SHA256SUMS.txt"), []byte(sb.String()), 0o644)
 }

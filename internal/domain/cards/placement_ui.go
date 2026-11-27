@@ -3,7 +3,6 @@ package cards
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/ops"
@@ -131,7 +130,7 @@ func renderPlacePicker(c *web.Ctx) error {
 	d := pickerData{CardID: id, CardName: name, Board: a.BoardID}
 	targets := authz.PlaceTargets(c.Env, id)
 	if len(targets) > 0 {
-		ph := strings.TrimSuffix(strings.Repeat("?,", len(targets)), ",")
+		ph := inPlaceholders(len(targets))
 		args := make([]any, len(targets))
 		for i, t := range targets {
 			args[i] = t

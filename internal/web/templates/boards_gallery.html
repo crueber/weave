@@ -7,7 +7,7 @@
 <div class="tg" id="tg" data-project="{{.ProjectID}}"{{if .BoardID}} data-board="{{.BoardID}}"{{end}}>
   <div class="tg-top">
     {{if .BoardID}}<h2 class="tg-h">Apply a template <span class="tg-hsub">to {{.BoardName}}</span></h2>{{else}}<h2 class="tg-h">New board</h2>{{end}}
-    <input id="tg-q" class="tg-search" type="search" form="tg-form" name="q" value="{{.Query}}" placeholder="Search templates: kanban, hiring, recipes..." aria-label="Search templates" autocomplete="off"
+    <input id="tg-q" class="tg-search" type="search" form="tg-form" name="q" value="{{.Query}}" placeholder="Search templates: sprint, hiring, recipes..." aria-label="Search templates" autocomplete="off"
       hx-get="/ui/board-templates" hx-trigger="keyup changed delay:200ms, input changed delay:200ms, search" hx-target="#tg-main" hx-swap="innerHTML scroll:top" hx-include="#tg-form" hx-sync="this:replace">
     <form method="dialog" class="tg-close"><button aria-label="Close (Esc)" title="Close (Esc)">&times;</button></form>
   </div>
@@ -25,18 +25,18 @@
 
 {{define "boards_tpl_grid"}}{{with .Data}}{{template "boards_tpl_grid_in" .}}{{end}}{{end}}
 {{define "boards_tpl_grid_in"}}{{if .Empty}}<div class="tg-empty"><h3>No templates match</h3><p>Try a different word, or pick another category.{{if .Query}} Searching for <b>{{.Query}}</b>.{{end}}</p></div>{{else}}
-  {{if or .Blank .Builtins}}<div class="tg-grid" role="list">
-    {{if .Blank}}<button type="button" role="listitem" class="tg-tile tg-tile-blank" hx-get="/ui/projects/{{.ProjectID}}/boards/new/blank" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
+  {{if or .Blank .Builtins}}<div class="tg-grid">
+    {{if .Blank}}<button type="button" class="tg-tile tg-tile-blank" hx-get="/ui/projects/{{.ProjectID}}/boards/new/blank" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
       <span class="tg-strip tg-strip-blank" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="tg-name">Blank board</span><span class="tg-sum">Start empty and add your own columns.</span>
       <span class="tg-meta"><span class="tg-chip">Start here</span></span></button>{{end}}
     {{range .Builtins}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID "B" $.BoardID}}{{end}}
   </div>{{end}}
   {{if .Published}}<h3 class="tg-sec">From your team</h3>
-  <div class="tg-grid" role="list">{{range .Published}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID "B" $.BoardID}}{{end}}</div>{{end}}
+  <div class="tg-grid">{{range .Published}}{{template "boards_tpl_tile" dict "T" . "P" $.ProjectID "B" $.BoardID}}{{end}}</div>{{end}}
 {{end}}{{end}}
 
-{{define "boards_tpl_tile"}}{{$t := .T}}<button type="button" role="listitem" class="tg-tile" hx-get="/ui/board-templates/{{$t.ID}}?{{if .B}}boardId={{.B}}{{else}}projectId={{.P}}{{end}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
+{{define "boards_tpl_tile"}}{{$t := .T}}<button type="button" class="tg-tile" hx-get="/ui/board-templates/{{$t.ID}}?{{if .B}}boardId={{.B}}{{else}}projectId={{.P}}{{end}}" hx-target="#tg-main" hx-swap="innerHTML scroll:top">
   <span class="tg-strip" aria-hidden="true">{{range $t.Columns}}<i{{boardsListAttr .Color}}></i>{{end}}</span>
   <span class="tg-name">{{$t.Name}}</span>
   <span class="tg-sum">{{if $t.Summary}}{{$t.Summary}}{{else}}{{len $t.Columns}} columns{{if $t.IncludesSampleCards}}, with cards{{end}}.{{end}}</span>
@@ -79,7 +79,7 @@
   </form>{{else}}<form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards/from-template" hx-disabled-elt="find button.primary">
     <input type="hidden" name="templateId" value="{{$t.ID}}">
     <label class="tg-f tg-f-name"><span>Board name</span><input name="name" required maxlength="128" autocomplete="off" placeholder="Name your board (not &ldquo;{{$t.Name}}&rdquo;)"></label>
-    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}"{{if eq . $t.DefaultView}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}"{{if eq . $t.DefaultView}} selected{{end}}>{{viewLabel .}}</option>{{end}}</select></label>
     <label class="tg-check"><input type="checkbox" name="sampleCards" value="true"{{if $t.SampleCardsDefault}} checked{{end}}{{if not $t.IncludesSampleCards}} disabled{{end}}><input type="hidden" name="sampleCards" value="false"><span class="tg-checktext"><b>Include sample cards</b><small>{{if $t.IncludesSampleCards}}{{len $t.Cards}} to show how it works{{else}}none in this template{{end}}</small></span></label>
     <button class="primary tg-go">Create board</button>
   </form>{{end}}
@@ -119,7 +119,7 @@
   <header class="tg-pvhead"><h3>Blank board</h3><p class="tg-pvsum">An empty board. Add columns and cards as you go.</p></header>
   <form class="tg-create" hx-post="/ui/projects/{{.ProjectID}}/boards" hx-disabled-elt="find button.primary">
     <label class="tg-f tg-f-name"><span>Board name</span><input name="name" required maxlength="128" autofocus autocomplete="off"></label>
-    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label class="tg-f"><span>Opens as</span><select name="defaultView">{{range .Views}}<option value="{{.}}">{{viewLabel .}}</option>{{end}}</select></label>
     <button class="primary tg-go">Create board</button>
   </form>
 </div>{{end}}{{end}}

@@ -2,6 +2,7 @@ package cards
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
@@ -68,7 +69,9 @@ func cloneCard(e *ops.Env, tx *sql.Tx, src Card, o cloneOpts) (string, boards.La
 		onBoards = append(onBoards, b)
 	}
 	if len(o.Also) > 0 { // the source's labels of every board (src.LabelIDs is one board's)
-		labelIDs = strs(e, tx, `SELECT label_id FROM card_labels WHERE card_id=? ORDER BY label_id`, src.ID)
+		if labelIDs, err = strs(e, tx, `SELECT label_id FROM card_labels WHERE card_id=? ORDER BY label_id`, src.ID); err != nil {
+			return "", landed, err
+		}
 	}
 	// duplicate, from-template and recurrence land a card in a column (drafts and templates are skipped by Landed);
 	// with several placements the closing columns land last (one closes the card)
@@ -131,9 +134,12 @@ func cardDuplicate(e *ops.Env, in DuplicateIn) (Card, error) {
 	if src.IsTemplate {
 		return src, ops.Invalid("use card.fromTemplate for templates")
 	}
-	name := in.Name
+	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		name = src.Name + " (copy)"
+		const suffix = " (copy)"
+		name = clipStr(src.Name, ops.MaxCardNameLen-len(suffix)) + suffix
+	} else if err := ops.CheckLen("name", name, ops.MaxCardNameLen); err != nil {
+		return Card{}, err
 	}
 	var newID string
 	var landed boards.LandResult
@@ -203,9 +209,12 @@ func templateSave(e *ops.Env, in TemplateSaveIn) (Card, error) {
 	if src.IsTemplate {
 		return src, ops.Invalid("card is already a template")
 	}
-	name := in.Name
+	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		name = src.Name
+	}
+	if err := ops.CheckLen("name", name, ops.MaxCardNameLen); err != nil {
+		return Card{}, err
 	}
 	proj := boardProject(e.Ctx, e.DB, boardID)
 	var newID string
@@ -224,14 +233,18 @@ func templateList(e *ops.Env, in TemplatesIn) (TemplatesOut, error) {
 	if err := authz.RequireProject(e, in.ProjectID, authz.View); err != nil {
 		return TemplatesOut{}, err
 	}
-	out := TemplatesOut{Items: []Card{}}
-	for _, id := range strs(e, e.DB, `SELECT id FROM cards WHERE is_template=1 AND template_project_id=? ORDER BY name`, in.ProjectID) {
-		if c, err := loadCard(e, e.DB, id); err == nil {
-			c.ShareToken = nil
-			out.Items = append(out.Items, c)
-		}
+	ids, err := strs(e, e.DB, `SELECT id FROM cards WHERE is_template=1 AND template_project_id=? ORDER BY name`, in.ProjectID)
+	if err != nil {
+		return TemplatesOut{}, err
 	}
-	return out, nil
+	items, err := loadCardsOn(e, e.DB, "", ids)
+	if err != nil {
+		return TemplatesOut{}, err
+	}
+	for i := range items {
+		items[i].ShareToken = nil
+	}
+	return TemplatesOut{Items: items}, nil
 }
 
 func fromTemplate(e *ops.Env, in FromTemplateIn) (Card, error) {
@@ -255,9 +268,12 @@ func fromTemplate(e *ops.Env, in FromTemplateIn) (Card, error) {
 	if ltype != "active" && ltype != "closed" {
 		return Card{}, ops.Invalid("cards can only be created in active or closed lists")
 	}
-	name := in.Name
+	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		name = tpl.Name
+	}
+	if err := ops.CheckLen("name", name, ops.MaxCardNameLen); err != nil {
+		return Card{}, err
 	}
 	var newID string
 	var landed boards.LandResult
@@ -356,12 +372,18 @@ func inboxList(e *ops.Env, in InboxIn) (InboxOut, error) {
 	}
 	out := InboxOut{Items: []Card{}}
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT has_inbox FROM boards WHERE id=?`, in.BoardID).Scan(&out.Enabled)
-	for _, id := range strs(e, e.DB, `SELECT id FROM cards WHERE board_id=? AND is_draft=1 ORDER BY created_at`, in.BoardID) {
-		if c, err := loadCard(e, e.DB, id); err == nil {
-			c.ShareToken = nil
-			out.Items = append(out.Items, c)
-		}
+	ids, err := strs(e, e.DB, `SELECT id FROM cards WHERE board_id=? AND is_draft=1 AND is_template=0 ORDER BY created_at`, in.BoardID)
+	if err != nil {
+		return InboxOut{}, err
 	}
+	items, err := loadCardsOn(e, e.DB, in.BoardID, ids)
+	if err != nil {
+		return InboxOut{}, err
+	}
+	for i := range items {
+		items[i].ShareToken = nil
+	}
+	out.Items = items
 	return out, nil
 }
 
@@ -374,12 +396,15 @@ func draftCreate(e *ops.Env, in DraftCreateIn) (Card, error) {
 	if !inbox {
 		return Card{}, ops.Invalid("the board inbox is not enabled")
 	}
-	name := in.Name
+	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return Card{}, ops.Invalid("name is required")
 	}
 	if err := ops.CheckLen("name", name, ops.MaxCardNameLen); err != nil {
 		return Card{}, err
+	}
+	if len(in.Description) > ops.MaxDescBytes {
+		return Card{}, ops.Invalid("description is too long (max 200 KB)")
 	}
 	// A draft still needs a home list (schema); boards must hide is_draft cards from list rendering.
 	list := firstList(e, in.BoardID, "active")
@@ -498,11 +523,24 @@ type SharedCard struct {
 func init() {
 	ops.Register(ops.Op{Name: "card.share.create", Summary: "Create (or return) the anonymous read-only share link", Method: "POST", Path: "/cards/{id}/share",
 		UI: "POST /ui/cards/{id}/share"}, func(e *ops.Env, in IDIn) (ShareOut, error) {
-		if _, err := editCard(e, in.ID); err != nil {
+		a, err := authz.CardEditAccess(e, in.ID, "")
+		if err != nil {
 			return ShareOut{}, err
 		}
+		if a.HomeBoardID == "" || !a.EditableOn(a.HomeBoardID) {
+			return ShareOut{}, ops.Forbidden()
+		}
 		var tok *string
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT share_token FROM cards WHERE id=?`, in.ID).Scan(&tok)
+		var draft, tmpl bool
+		if err := e.DB.QueryRowContext(e.Ctx, `SELECT share_token,is_draft,is_template FROM cards WHERE id=?`, in.ID).Scan(&tok, &draft, &tmpl); err != nil {
+			if err == sql.ErrNoRows {
+				return ShareOut{}, ops.NotFound("card")
+			}
+			return ShareOut{}, err
+		}
+		if draft || tmpl {
+			return ShareOut{}, ops.Invalid("drafts and templates cannot be shared")
+		}
 		if tok == nil {
 			t := db.Token(16)
 			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET share_token=?,updated_at=? WHERE id=?`, t, db.Now(), in.ID); err != nil {
@@ -514,10 +552,14 @@ func init() {
 	})
 	ops.Register(ops.Op{Name: "card.share.revoke", Summary: "Revoke the card's share link", Method: "DELETE", Path: "/cards/{id}/share",
 		UI: "POST /ui/cards/{id}/share/revoke"}, func(e *ops.Env, in IDIn) (Deleted, error) {
-		if _, err := editCard(e, in.ID); err != nil {
+		a, err := authz.CardEditAccess(e, in.ID, "")
+		if err != nil {
 			return Deleted{}, err
 		}
-		_, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET share_token=NULL,updated_at=? WHERE id=?`, db.Now(), in.ID)
+		if a.HomeBoardID == "" || !a.EditableOn(a.HomeBoardID) {
+			return Deleted{}, ops.Forbidden()
+		}
+		_, err = e.DB.ExecContext(e.Ctx, `UPDATE cards SET share_token=NULL,updated_at=? WHERE id=?`, db.Now(), in.ID)
 		return Deleted{in.ID}, err
 	})
 	ops.Register(ops.Op{Name: "card.share.view", Summary: "Read a shared card anonymously", Method: "GET", Path: "/share/{token}", Auth: ops.AuthPublic,
@@ -526,14 +568,16 @@ func init() {
 
 func shareView(e *ops.Env, in ShareViewIn) (SharedCard, error) {
 	var out SharedCard
-	var id string
+	if in.Token == "" {
+		return out, ops.NotFound("shared card")
+	}
+	var id, homeBoardID string
 	var desc *string
 	var done *bool
-	var err error
-	err = e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.name,c.description,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.is_closed,c.lat,c.lng,COALESCE(c.location_name,'')
-		FROM cards c JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id WHERE c.share_token=? AND c.is_template=0`, in.Token).
-		Scan(&id, &out.Name, &desc, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.IsClosed, &out.Lat, &out.Lng, &out.LocationName)
-	if err == sql.ErrNoRows || in.Token == "" {
+	err := e.DB.QueryRowContext(e.Ctx, `SELECT c.id,c.board_id,c.name,c.description,b.name,COALESCE(l.name,l.type),c.due_date,c.is_due_completed,c.is_closed,c.lat,c.lng,COALESCE(c.location_name,'')
+		FROM cards c JOIN boards b ON b.id=c.board_id JOIN lists l ON l.id=c.list_id WHERE c.share_token=? AND c.is_draft=0 AND c.is_template=0`, in.Token).
+		Scan(&id, &homeBoardID, &out.Name, &desc, &out.BoardName, &out.ListName, &out.DueDate, &done, &out.IsClosed, &out.Lat, &out.Lng, &out.LocationName)
+	if err == sql.ErrNoRows {
 		return out, ops.NotFound("shared card")
 	}
 	if err != nil {
@@ -544,14 +588,26 @@ func shareView(e *ops.Env, in ShareViewIn) (SharedCard, error) {
 	}
 	out.IsDueCompleted = done != nil && *done
 	out.Labels, out.Members = []SharedLabel{}, []string{}
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.card_id=?`, id); err == nil {
-		for rows.Next() {
-			var l SharedLabel
-			_ = rows.Scan(&l.Name, &l.Color)
-			out.Labels = append(out.Labels, l)
-		}
-		rows.Close()
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id
+		WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY l.position, l.id`, id, homeBoardID)
+	if err != nil {
+		return out, err
 	}
-	out.Members = strs(e, e.DB, `SELECT u.name FROM card_memberships m JOIN users u ON u.id=m.user_id WHERE m.card_id=?`, id)
+	for rows.Next() {
+		var l SharedLabel
+		if err := rows.Scan(&l.Name, &l.Color); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.Labels = append(out.Labels, l)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return out, err
+	}
+	rows.Close()
+	if out.Members, err = strs(e, e.DB, `SELECT u.name FROM card_memberships m JOIN users u ON u.id=m.user_id WHERE m.card_id=?`, id); err != nil {
+		return out, err
+	}
 	return out, nil
 }

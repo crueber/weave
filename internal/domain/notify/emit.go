@@ -26,7 +26,10 @@ import (
 // ev.Data["originId"] the origin row's id on a fan-out copy, ev.Data["actionAt"] the shared timestamp.
 var ActionWriter func(*ops.Env, ops.Event) bool = defaultActionWriter
 
-var wg sync.WaitGroup
+var (
+	wg    sync.WaitGroup
+	bgSem = make(chan struct{}, 64)
+)
 
 // Wait blocks until all background deliveries (webhooks, notification services,
 // e-mail) started so far have finished. Used by tests and graceful shutdown.
@@ -36,6 +39,8 @@ func bg(fn func()) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		bgSem <- struct{}{}
+		defer func() { <-bgSem }()
 		defer func() {
 			if r := recover(); r != nil {
 				log.Println("notify: background panic:", r)
@@ -148,7 +153,7 @@ func Record(e *ops.Env, ev ops.Event) {
 		}
 	}
 	createNotifications(e, ev)
-	dispatchWebhooks(e, ev, "", evs, s.home)
+	dispatchWebhooks(e, ev, evs, s.home)
 }
 
 type planned struct {
@@ -277,9 +282,9 @@ var viaRank = map[string]int{"board": 1, "list": 2, "card": 3}
 // applies). Bulk side effects use it (a column's closing setting switched on or off flips every card in it: one
 // card.updated per card with auto: "listType"), so a watcher is not sent one notification per card. Everything else
 // about the event is unchanged: the actions row (activity), SSE, the durable event stream and webhooks.
-func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []string) {
+func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []string, string) {
 	if Quiet(ev) || ev.CardID == "" || ev.BoardID == "" {
-		return nil, nil
+		return nil, nil, ""
 	}
 	// the card and ALL its placements with their current column, in one query (home first, then by placed_at)
 	type place struct {
@@ -295,7 +300,7 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 		FROM cards c JOIN card_placements p ON p.card_id=c.id JOIN lists l ON l.id=p.list_id LEFT JOIN lists pl ON pl.id=p.prev_list_id AND pl.board_id=p.board_id
 		WHERE c.id=? ORDER BY p.is_home DESC, p.placed_at, p.board_id`, ev.CardID)
 	if err != nil {
-		return nil, nil
+		return nil, nil, ""
 	}
 	for rows.Next() {
 		var p place
@@ -309,7 +314,7 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 	}
 	rows.Close()
 	if origin < 0 || draft || tmpl {
-		return nil, nil // the event's board holds no placement (stale event, or the card is gone), or a draft/template
+		return nil, nil, "" // the event's board holds no placement (stale event, or the card is gone), or a draft/template
 	}
 	cur := pls[origin].cur
 	card := map[string]any{"name": name}
@@ -327,27 +332,30 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 	case "cardMembershipCreate":
 		id := str(ev.Data, "userId")
 		if id == "" || id == actor {
-			return nil, nil
+			return nil, nil, ""
 		}
 		v := authz.CardViewers(e, ev.CardID, []string{id})[id] // home first when viewable
 		if len(v) == 0 {
-			return nil, nil
+			return nil, nil, ""
 		}
-		return []planned{{id, "addMemberToCard", "", v[0], d}}, nil
+		return []planned{{id, "addMemberToCard", "", v[0], d}}, nil, name
 	case "cardCreate":
 		if ev.Data["draft"] == true {
-			return nil, nil
+			return nil, nil, ""
 		}
 		typ = "createCard"
 		d["list"] = cur.ref()
 	case "cardMove":
 		fromID, toID := str(ev.Data, "fromListId"), str(ev.Data, "toListId")
 		if fromID == "" || toID == "" || fromID == toID || toID != cur.ID {
-			return nil, nil // a reorder inside one column, or a stale event
+			return nil, nil, "" // a reorder inside one column, or a stale event
 		}
 		from := listInfo{ID: fromID}
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(name,''),type FROM lists WHERE id=?`, fromID).Scan(&from.Name, &from.Type)
-		originLists = []listInfo{cur, from} // destination first: it names the reason when both are watched
+		var fromBoard string
+		_ = e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(name,''),type,board_id FROM lists WHERE id=?`, fromID).Scan(&from.Name, &from.Type, &fromBoard)
+		if fromBoard == ev.BoardID {
+			originLists = []listInfo{cur, from} // destination first: it names the reason when both are watched
+		}
 		switch {
 		case cur.Type == "closed" && from.Type != "closed":
 			typ, placementOnly = "closeCard", false // closed is per card: everyone following the card hears it
@@ -357,7 +365,11 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 		default:
 			typ = "moveCard"
 		}
-		moveLists = map[string]any{"fromList": from.ref(), "toList": cur.ref()}
+		if fromBoard == ev.BoardID {
+			moveLists = map[string]any{"fromList": from.ref(), "toList": cur.ref()}
+		} else {
+			moveLists = map[string]any{"toList": cur.ref()}
+		}
 	case "cardUpdate":
 		switch {
 		case changed(ev, "isClosed"):
@@ -369,10 +381,10 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 			typ = "setCardDueDate"
 			d["dueDate"] = dueDate
 		default:
-			return nil, nil
+			return nil, nil, ""
 		}
 	default:
-		return nil, nil // includes cardPlace/cardUnplace until their notification type exists
+		return nil, nil, "" // includes cardPlace/cardUnplace until their notification type exists
 	}
 
 	// the boards in scope: the event's board first, then the card's other boards for a card-level event
@@ -570,7 +582,7 @@ func planNotifications(e *ops.Env, ev ops.Event, actor string) ([]planned, []str
 		}
 		out = append(out, planned{id, typ, commentID, board, nd})
 	}
-	return out, boards
+	return out, boards, name
 }
 
 func listName(m map[string]any) string {
@@ -595,9 +607,9 @@ func baseURL() string {
 	return "http://localhost:8080"
 }
 
-func mdEscape(s string) string {
-	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "`", "\\`", "#", "\\#").Replace(s)
-}
+var mdEscaper = strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "`", "\\`", "#", "\\#")
+
+func mdEscape(s string) string { return mdEscaper.Replace(s) }
 
 // Reason is the "because you watch ..." line of a notification that came from a watch (data.via); "" otherwise.
 func Reason(n NotificationOut) string {
@@ -651,7 +663,7 @@ func message(n NotificationOut, format string) (title, body string) {
 		}
 	}
 	link := baseURL() + "/cards/" + n.CardID
-	var sentence func(a, c, b string, extra ...string) string
+	var sentence func(a, c, b string) string
 	tail := ""
 	// strong marks a list name or a date inside a sentence, escaped for the format
 	strong := func(s string) string {
@@ -667,26 +679,28 @@ func message(n NotificationOut, format string) (title, body string) {
 	case "moveCard":
 		title = "Card Moved"
 		from, to := strong(listName(listRef(n.Data["fromList"]))), strong(listName(listRef(n.Data["toList"])))
-		sentence = func(a, c, b string, x ...string) string {
-			return fmt.Sprintf("%s moved %s from %s to %s on %s", a, c, from, to, b)
-		}
-		if n.Data["toList"] == nil { // a card-level move (archive, restore) told to someone who cannot see its columns
-			sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s moved %s on %s", a, c, b) }
+		switch {
+		case n.Data["toList"] == nil: // a card-level move (archive, restore) told to someone who cannot see its columns
+			sentence = func(a, c, b string) string { return fmt.Sprintf("%s moved %s on %s", a, c, b) }
+		case n.Data["fromList"] == nil: // a cross-board move: only the destination column belongs to this board
+			sentence = func(a, c, b string) string { return fmt.Sprintf("%s moved %s to %s on %s", a, c, to, b) }
+		default:
+			sentence = func(a, c, b string) string { return fmt.Sprintf("%s moved %s from %s to %s on %s", a, c, from, to, b) }
 		}
 	case "createCard":
 		title = "Card Created"
 		in := strong(listName(listRef(n.Data["list"])))
-		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s created %s in %s on %s", a, c, in, b) }
+		sentence = func(a, c, b string) string { return fmt.Sprintf("%s created %s in %s on %s", a, c, in, b) }
 	case "closeCard":
 		title = "Card Closed"
-		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s closed %s on %s", a, c, b) }
+		sentence = func(a, c, b string) string { return fmt.Sprintf("%s closed %s on %s", a, c, b) }
 	case "reopenCard":
 		title = "Card Re-opened"
-		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s re-opened %s on %s", a, c, b) }
+		sentence = func(a, c, b string) string { return fmt.Sprintf("%s re-opened %s on %s", a, c, b) }
 	case "setCardDueDate":
 		title = "Due Date Changed"
 		due := strong(dueText(str(n.Data, "dueDate")))
-		sentence = func(a, c, b string, x ...string) string {
+		sentence = func(a, c, b string) string {
 			return fmt.Sprintf("%s set the due date of %s to %s on %s", a, c, due, b)
 		}
 	case "commentCard", "mentionInComment":
@@ -695,11 +709,11 @@ func message(n NotificationOut, format string) (title, body string) {
 		if n.Type == "mentionInComment" {
 			verb, title = "mentioned you in", "You Were Mentioned in Comment"
 		}
-		tail = truncate(MentionsToText(fmt.Sprint(n.Data["text"])), 280)
-		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s %s %s on %s", a, verb, c, b) }
+		tail = truncate(MentionsToText(str(n.Data, "text")), 280)
+		sentence = func(a, c, b string) string { return fmt.Sprintf("%s %s %s on %s", a, verb, c, b) }
 	case "addMemberToCard":
 		title = "You Were Added to Card"
-		sentence = func(a, c, b string, x ...string) string { return fmt.Sprintf("%s added you to %s on %s", a, c, b) }
+		sentence = func(a, c, b string) string { return fmt.Sprintf("%s added you to %s on %s", a, c, b) }
 	default:
 		return n.Type, n.Type
 	}
@@ -729,7 +743,7 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 	if e.User != nil {
 		actor, actorName = e.User.UserID, e.User.Name
 	}
-	plans, scope := planNotifications(e, ev, actor)
+	plans, scope, cardName := planNotifications(e, ev, actor)
 	if len(plans) == 0 {
 		return
 	}
@@ -760,8 +774,6 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 			rows.Close()
 		}
 	}
-	var cardName string
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM cards WHERE id=?`, ev.CardID).Scan(&cardName)
 	if actorName == "" && actor != "" {
 		_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM users WHERE id=?`, actor).Scan(&actorName)
 	}
@@ -799,11 +811,11 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 		if e.Hub != nil {
 			e.Hub.Publish(realtime.Event{Name: "notification", Room: "user:" + n.UserID, Data: map[string]any{"action": "create", "item": n}})
 		}
-		// one recipient's notification: scoped to the board it names, never fanned out by card
-		dispatchWebhooks(e, ops.Event{Type: "notificationCreate", BoardID: n.BoardID, CardID: ev.CardID, Data: map[string]any{"item": n}}, actor, nil, "")
 		d, ctx := e.DB, context.Background()
 		bg(func() { deliverToUser(ctx, d, n) })
 	}
+	// one recipient's notification: scoped to the board it names, never fanned out by card
+	dispatchNotificationWebhooks(e, created)
 	// Board-level notification services only hear about new comments (Planka behaviour): a comment is card-level, so
 	// each board the card is on tells its own channel once, under its own name.
 	if ev.Type == "commentCreate" {
@@ -818,40 +830,8 @@ func createNotifications(e *ops.Env, ev ops.Event) {
 
 func summaryOf(n NotificationOut) string { _, b := message(n, "text"); return b }
 
-func deliverToUser(ctx context.Context, d *db.DB, n NotificationOut) {
-	var email string
-	var deact bool
-	_ = d.QueryRowContext(ctx, `SELECT email,is_deactivated FROM users WHERE id=?`, n.UserID).Scan(&email, &deact)
-	if deact {
-		return
-	}
-	rows, err := d.QueryContext(ctx, `SELECT url,format FROM notification_services WHERE user_id=?`, n.UserID)
-	if err == nil {
-		type svc struct{ url, format string }
-		var svcs []svc
-		for rows.Next() {
-			var s svc
-			_ = rows.Scan(&s.url, &s.format)
-			svcs = append(svcs, s)
-		}
-		rows.Close()
-		for _, s := range svcs {
-			title, body := Message(n, s.format)
-			_ = deliver(ctx, s.url, title, body) // failures are logged inside deliver
-		}
-	}
-	env := &ops.Env{Ctx: ctx, DB: d}
-	if email != "" && SMTPConfigured(env) && Config(env, "smtp.notifications") != "false" {
-		title, text := Message(n, "text")
-		_, htmlBody := Message(n, "html")
-		if err := SendMail(env, []string{email}, title, text, "<p>"+strings.ReplaceAll(htmlBody, "\n", "<br>")+"</p>"); err != nil {
-			log.Println("notify: email:", err)
-		}
-	}
-}
-
-func deliverToBoard(ctx context.Context, d *db.DB, boardID string, n NotificationOut) {
-	rows, err := d.QueryContext(ctx, `SELECT url,format FROM notification_services WHERE board_id=?`, boardID)
+func deliverServices(ctx context.Context, d *db.DB, where, arg string, n NotificationOut) {
+	rows, err := d.QueryContext(ctx, `SELECT url,format FROM notification_services WHERE `+where, arg)
 	if err != nil {
 		return
 	}
@@ -865,6 +845,29 @@ func deliverToBoard(ctx context.Context, d *db.DB, boardID string, n Notificatio
 	rows.Close()
 	for _, s := range svcs {
 		title, body := Message(n, s.format)
-		_ = deliver(ctx, s.url, title, body)
+		_ = deliver(ctx, s.url, title, body) // failures are logged inside deliver
 	}
+}
+
+func deliverToUser(ctx context.Context, d *db.DB, n NotificationOut) {
+	var email string
+	var deact bool
+	var deletedAt sql.NullString
+	err := d.QueryRowContext(ctx, `SELECT email,is_deactivated,deleted_at FROM users WHERE id=?`, n.UserID).Scan(&email, &deact, &deletedAt)
+	if err != nil || deact || deletedAt.Valid {
+		return
+	}
+	deliverServices(ctx, d, `user_id=?`, n.UserID, n)
+	env := &ops.Env{Ctx: ctx, DB: d}
+	if email != "" && SMTPConfigured(env) && Config(env, "smtp.notifications") != "false" {
+		title, text := Message(n, "text")
+		_, htmlBody := Message(n, "html")
+		if err := SendMail(env, []string{email}, title, text, "<p>"+strings.ReplaceAll(htmlBody, "\n", "<br>")+"</p>"); err != nil {
+			log.Println("notify: email:", err)
+		}
+	}
+}
+
+func deliverToBoard(ctx context.Context, d *db.DB, boardID string, n NotificationOut) {
+	deliverServices(ctx, d, `board_id=?`, boardID, n)
 }

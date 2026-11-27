@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,11 +73,11 @@ func (a *App) roleLists(ctx context.Context, boards []string, name string) (map[
 
 func touchesList(ev Event, lists []string) bool {
 	for _, id := range []string{ev.S("listId"), ev.S("fromListId"), ev.S("toListId")} {
-		if id != "" && contains(lists, id) {
+		if id != "" && slices.Contains(lists, id) {
 			return true
 		}
 	}
-	if c := ev.Card(); c != nil && contains(lists, str(c, "listId")) && ev.S("listId") == "" && ev.S("toListId") == "" {
+	if c := ev.Card(); c != nil && slices.Contains(lists, str(c, "listId")) && ev.S("listId") == "" && ev.S("toListId") == "" {
 		return true
 	}
 	return false
@@ -112,34 +115,17 @@ func cmdAgentRun(a *App, args []string) int {
 		h, _ := os.Hostname()
 		cfg.label = "agent@" + h
 	}
-	ttl := 15 * time.Minute
-	if p.Has("ttl") {
-		if ttl, err = parseDur(p.Str("ttl")); err != nil {
-			return a.fail(err)
-		}
-	}
-	grace := 60 * time.Second
-	if p.Has("grace") {
-		grace, _ = parseDur(p.Str("grace"))
-	}
-	execTimeout := DefaultExecTimeout
-	if p.Has("exec-timeout") {
-		if execTimeout, err = parseDur(p.Str("exec-timeout")); err != nil {
-			return a.fail(err)
-		}
-	}
-	conc := 1
-	if p.Has("concurrency") {
-		fmt.Sscan(p.Str("concurrency"), &conc)
-		if conc < 1 {
-			conc = 1
-		}
+	rt, err := parseRunnerTiming(p, 15*time.Minute, DefaultExecTimeout, 60*time.Second)
+	if err != nil {
+		return a.fail(err)
 	}
 	maxAttempts := 0
 	if p.Has("max-attempts") {
-		if _, err := fmt.Sscan(p.Str("max-attempts"), &maxAttempts); err != nil || maxAttempts < 0 {
+		n, err := strconv.Atoi(strings.TrimSpace(p.Str("max-attempts")))
+		if err != nil || n < 0 {
 			return a.failUsage("--max-attempts needs a number >= 0")
 		}
+		maxAttempts = n
 	}
 	claimMove, doneList, failList, blockedList := p.Str("claim-move-to"), p.Str("done-list"), p.Str("fail-list"), p.Str("blocked-list")
 	noClaim := p.Bool("no-claim")
@@ -157,7 +143,7 @@ func cmdAgentRun(a *App, args []string) int {
 				return a.fail(err)
 			}
 			for id, b := range ids {
-				if contains(cfg.lists, id) && !p.Bool("allow-loop") {
+				if slices.Contains(cfg.lists, id) && !p.Bool("allow-loop") {
 					return a.failUsage(fmt.Sprintf("%s %q is also a --listen column: finished cards would be picked up again in a loop (pass --allow-loop if you really mean it)", role, name))
 				}
 				if role == "--claim-move-to" {
@@ -172,36 +158,39 @@ func cmdAgentRun(a *App, args []string) int {
 		spec = execSpec{shell: p.Str("exec")}
 	}
 	outbox := p.Bool("outbox")
-	var waitFor time.Duration
-	if p.Has("timeout") {
-		waitFor, _ = parseDur(p.Str("timeout"))
-	}
 
 	lctx, cancel := context.WithCancel(ctx0)
 	defer cancel()
 	execCtx, execCancel := context.WithCancel(context.Background())
 	defer execCancel()
 	l := a.buildListener(cfg)
-	sem := make(chan struct{}, conc)
+	sem := make(chan struct{}, rt.concurrency)
 	var wg sync.WaitGroup
+	var retryWg sync.WaitGroup
 	var handled int
 	var mu sync.Mutex
+	var dispatchMu sync.Mutex
 	once := p.Bool("once")
 	inflight := map[string]bool{}
 	deferred := map[string]Event{}
 	respectWIP := p.Bool("respect-wip") && claimMove != ""
-	claimO := claimOpts{ttl: ttl, note: "claimed by weave agent run", moveTo: claimMove, respecWIP: respectWIP,
-		inflight: func(id string) bool { mu.Lock(); defer mu.Unlock(); return inflight[id] }}
+	claimO := claimOpts{ttl: rt.ttl, note: "claimed by weave agent run", moveTo: claimMove, respecWIP: respectWIP}
+
+	retryCh := make(chan struct{}, 1)
+	triggerRetry := func() {
+		select {
+		case retryCh <- struct{}{}:
+		default:
+		}
+	}
 
 	var handle func(ctx context.Context, ev Event, done func())
-	var retrying bool
 	retryDeferred := func(ctx context.Context) {
 		mu.Lock()
-		if retrying || len(deferred) == 0 {
+		if len(deferred) == 0 {
 			mu.Unlock()
 			return
 		}
-		retrying = true
 		evs := make([]Event, 0, len(deferred))
 		for _, e := range deferred {
 			evs = append(evs, e)
@@ -209,14 +198,20 @@ func cmdAgentRun(a *App, args []string) int {
 		deferred = map[string]Event{}
 		mu.Unlock()
 		for _, e := range evs {
+			if ctx.Err() != nil {
+				return
+			}
 			handle(ctx, e, func() {})
 		}
-		mu.Lock()
-		retrying = false
-		mu.Unlock()
 	}
 
 	handle = func(ctx context.Context, ev Event, done func()) {
+		dispatchMu.Lock()
+		defer dispatchMu.Unlock()
+		if ctx.Err() != nil {
+			done()
+			return
+		}
 		mu.Lock()
 		already := once && handled > 0
 		mu.Unlock()
@@ -227,8 +222,8 @@ func cmdAgentRun(a *App, args []string) int {
 		// events from the claim-move-to list itself: only an expired lease (card.released) or the startup sweep
 		// can strand a card there; everything else is people moving cards around and is not ours to claim.
 		if len(cfg.extraLists) > 0 && !touchesList(ev, cfg.lists) {
-			if ev.Type == "card.moved" && contains(cfg.extraLists, ev.S("fromListId")) {
-				go retryDeferred(ctx) // room may have opened up under the WIP limit
+			if ev.Type == "card.moved" && slices.Contains(cfg.extraLists, ev.S("fromListId")) {
+				triggerRetry() // room may have opened up under the WIP limit
 			}
 			if ev.Type != "card.released" && ev.Type != "card.existing" {
 				done()
@@ -241,18 +236,38 @@ func cmdAgentRun(a *App, args []string) int {
 			done()
 			return
 		}
+		cid := ev.CardID()
+		mu.Lock()
+		if (once && handled > 0) || (cid != "" && inflight[cid]) {
+			mu.Unlock()
+			<-sem
+			done()
+			return
+		}
+		if cid != "" {
+			inflight[cid] = true
+		}
+		mu.Unlock()
 		if !noClaim {
 			switch a.tryClaim(ctx, &ev, cfg, claimO) {
 			case claimDeferred:
 				mu.Lock()
+				if cid != "" {
+					delete(inflight, cid)
+				}
 				if len(deferred) < 100 {
-					deferred[ev.CardID()] = ev
+					deferred[cid] = ev
 				}
 				mu.Unlock()
 				<-sem
 				done()
 				return
 			case claimNo:
+				mu.Lock()
+				if cid != "" {
+					delete(inflight, cid)
+				}
+				mu.Unlock()
 				<-sem
 				done()
 				return
@@ -260,7 +275,6 @@ func cmdAgentRun(a *App, args []string) int {
 		}
 		mu.Lock()
 		handled++
-		inflight[ev.CardID()] = true
 		mu.Unlock()
 
 		wg.Add(1)
@@ -268,14 +282,20 @@ func cmdAgentRun(a *App, args []string) int {
 			defer wg.Done()
 			defer func() { <-sem }()
 			defer done()
-			defer func() { mu.Lock(); delete(inflight, ev.CardID()); mu.Unlock() }()
-			a.agentWork(execCtx, ev, spec, ttl, execTimeout, workOpts{
+			defer func() {
+				if cid != "" {
+					mu.Lock()
+					delete(inflight, cid)
+					mu.Unlock()
+				}
+			}()
+			a.agentWork(execCtx, ev, spec, rt.ttl, rt.execTimeout, workOpts{
 				doneList: doneList, failList: failList, blockedList: blockedList, commentOutput: p.Bool("comment-output"),
 				renew: !p.Bool("no-renew") && !noClaim, keepClaim: p.Bool("keep-claim") || noClaim,
 				outbox: outbox, boardFile: !p.Bool("no-board-file"), maxAttempts: maxAttempts,
 			})
 			if respectWIP {
-				go retryDeferred(lctx)
+				triggerRetry()
 			}
 			if once {
 				cancel()
@@ -283,36 +303,42 @@ func cmdAgentRun(a *App, args []string) int {
 		}()
 	}
 	l.Handle = handle
-	if respectWIP {
+	if respectWIP || len(cfg.extraLists) > 0 {
+		retryWg.Add(1)
 		go func() {
-			t := time.NewTicker(wipRecheck)
-			defer t.Stop()
+			defer retryWg.Done()
+			var tickC <-chan time.Time
+			if respectWIP {
+				d := wipRecheck
+				if d <= 0 {
+					d = time.Second
+				}
+				t := time.NewTicker(d)
+				defer t.Stop()
+				tickC = t.C
+			}
 			for {
 				select {
 				case <-lctx.Done():
 					return
-				case <-t.C:
+				case <-retryCh:
+					retryDeferred(lctx)
+				case <-tickC:
 					retryDeferred(lctx)
 				}
 			}
 		}()
 	}
 	var timedOut bool
-	if waitFor > 0 {
-		t := time.AfterFunc(waitFor, func() { mu.Lock(); timedOut = true; mu.Unlock(); cancel() })
+	if rt.waitFor > 0 {
+		t := time.AfterFunc(rt.waitFor, func() { mu.Lock(); timedOut = true; mu.Unlock(); cancel() })
 		defer t.Stop()
 	}
-	a.stderrf("agent %q listening: boards=%v lists=%v (claim=%v, ttl=%s, concurrency=%d, exec-timeout=%s)", cfg.label, cfg.boards, cfg.lists, !noClaim, ttl, conc, execTimeout)
+	a.stderrf("agent %q listening: boards=%v lists=%v (claim=%v, ttl=%s, concurrency=%d, exec-timeout=%s)", cfg.label, cfg.boards, cfg.lists, !noClaim, rt.ttl, rt.concurrency, rt.execTimeout)
 	err = l.Run(lctx)
-	finished := make(chan struct{})
-	go func() { wg.Wait(); close(finished) }()
-	select {
-	case <-finished:
-	case <-time.After(grace):
-		a.stderrf("grace period over; stopping running commands")
-		execCancel()
-		<-finished
-	}
+	cancel()
+	retryWg.Wait()
+	a.drainWorkers(&wg, rt.grace, execCancel)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -409,12 +435,39 @@ func (a *App) prepOutbox(ctx context.Context, ev Event, withBoard bool) (*outbox
 	return ob, nil
 }
 
+// readRootRegular opens a regular file inside root without following symlinks and reads at most maxBytes.
+func readRootRegular(root *os.Root, name string, maxBytes int64) ([]byte, bool) {
+	st, err := root.Lstat(name)
+	if err != nil || !st.Mode().IsRegular() {
+		return nil, false
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|openNoBlock|openNoFollow, 0)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	fst, err := f.Stat()
+	if err != nil || !fst.Mode().IsRegular() || !os.SameFile(st, fst) {
+		return nil, false
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxBytes))
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
 // readOutbox returns the agent's verdict, comment and attachment files.
 func readOutbox(ob *outbox) (result, comment string, files []string) {
-	if b, err := os.ReadFile(filepath.Join(ob.out, "result")); err == nil {
+	root, err := os.OpenRoot(ob.out)
+	if err != nil {
+		return "", "", nil
+	}
+	defer root.Close()
+	if b, ok := readRootRegular(root, "result", 256); ok {
 		result = strings.ToLower(strings.TrimSpace(string(b)))
 	}
-	if b, err := os.ReadFile(filepath.Join(ob.out, "comment.md")); err == nil {
+	if b, ok := readRootRegular(root, "comment.md", maxOutboxComment*utf8.UTFMax+1); ok {
 		comment = strings.TrimSpace(string(b))
 	}
 	if ents, err := os.ReadDir(filepath.Join(ob.out, "attachments")); err == nil {
@@ -422,7 +475,7 @@ func readOutbox(ob *outbox) (result, comment string, files []string) {
 			if len(files) >= maxOutboxFiles {
 				break
 			}
-			fi, err := e.Info()
+			fi, err := root.Lstat(filepath.Join("attachments", e.Name()))
 			if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxOutboxAttachment || fi.Size() == 0 {
 				continue // symlinks, directories, empty or huge files are not uploaded
 			}
@@ -523,8 +576,9 @@ func (a *App) agentWork(ctx context.Context, ev Event, spec execSpec, ttl, execT
 
 	stopRenew := make(chan struct{})
 	if w.renew && cardID != "" && ttl > 0 {
+		interval := max(ttl/3, time.Second)
 		go func() {
-			t := time.NewTicker(ttl / 3)
+			t := time.NewTicker(interval)
 			defer t.Stop()
 			for {
 				select {
@@ -641,7 +695,7 @@ func (a *App) uploadOutbox(ctx context.Context, cardID string, files []string) {
 	if len(files) == 0 {
 		return
 	}
-	op, err := a.mustOp("attachment.create")
+	op, err := a.mustOp(ctx, "attachment.create")
 	if err != nil {
 		a.stderrf("cannot attach files: %v", err)
 		return

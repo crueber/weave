@@ -305,8 +305,8 @@ func removeFile(p place, body string, force bool) (action string, err error) {
 	if p.Fmt == fmtOwnedMD {
 		return "removed", os.Remove(p.Path)
 	}
-	rest := doc[:sp.start] + strings.TrimLeft(strings.TrimPrefix(doc[sp.end:], "\n"), "\n")
-	rest = strings.TrimRight(rest, "\n")
+	rest := doc[:sp.start] + strings.TrimLeft(doc[sp.end:], "\r\n")
+	rest = strings.TrimRight(rest, "\r\n")
 	if strings.TrimSpace(rest) == "" {
 		return "removed", os.Remove(p.Path)
 	}

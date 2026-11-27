@@ -2,6 +2,7 @@ package cardextras
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/crueber/weave/internal/authz"
@@ -58,18 +59,26 @@ func nzi(p *int) int {
 	return *p
 }
 
+const (
+	maxDurationSec = 100000 * 3600
+	maxTimeNoteLen = 2000
+)
+
 func duration(h, m, s int) (int, error) {
 	if h < 0 || m < 0 || s < 0 {
 		return 0, ops.Invalid("duration cannot be negative")
 	}
-	d := h*3600 + m*60 + s
+	if h > maxDurationSec/3600 || m > maxDurationSec/60 || s > maxDurationSec {
+		return 0, ops.Invalid("duration too large")
+	}
+	d := int64(h)*3600 + int64(m)*60 + int64(s)
 	if d <= 0 {
 		return 0, ops.Invalid("duration must be greater than zero")
 	}
-	if d > 100000*3600 {
+	if d > maxDurationSec {
 		return 0, ops.Invalid("duration too large")
 	}
-	return d, nil
+	return int(d), nil
 }
 
 func parseStart(s string) (string, error) {
@@ -183,7 +192,9 @@ func init() {
 				starter = sql.NullString{String: e.User.UserID, Valid: true}
 			}
 			if t, err := time.Parse(time.RFC3339, started); err == nil {
-				elapsed = int(time.Since(t).Seconds())
+				if d := int(time.Since(t).Seconds()); d > 0 {
+					elapsed = d
+				}
 			}
 			if elapsed > 0 {
 				if _, err := tx.ExecContext(e.Ctx, `INSERT INTO time_entries(id,card_id,user_id,started_at,seconds,note) VALUES(?,?,?,?,?,NULL)`,
@@ -220,6 +231,9 @@ func init() {
 		if err != nil {
 			return TimeSummary{}, err
 		}
+		if err := ops.CheckLen("note", in.Note, maxTimeNoteLen); err != nil {
+			return TimeSummary{}, err
+		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(e.Ctx, `INSERT INTO time_entries(id,card_id,user_id,started_at,seconds,note) VALUES(?,?,?,?,?,?)`,
 				db.NewID(), in.CardID, e.User.UserID, started, d, nz(in.Note)); err != nil {
@@ -240,34 +254,39 @@ func init() {
 		if err != nil {
 			return TimeSummary{}, err
 		}
-		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-			if in.Hours != nil || in.Minutes != nil || in.Seconds != nil {
-				d, err := duration(nzi(in.Hours), nzi(in.Minutes), nzi(in.Seconds))
-				if err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE time_entries SET seconds=? WHERE id=?`, d, in.ID); err != nil {
-					return err
-				}
+		var sets []string
+		var args []any
+		if in.Hours != nil || in.Minutes != nil || in.Seconds != nil {
+			d, err := duration(nzi(in.Hours), nzi(in.Minutes), nzi(in.Seconds))
+			if err != nil {
+				return TimeSummary{}, err
 			}
-			if in.StartedAt != "" {
-				s, err := parseStart(in.StartedAt)
-				if err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE time_entries SET started_at=? WHERE id=?`, s, in.ID); err != nil {
-					return err
-				}
+			sets, args = append(sets, "seconds=?"), append(args, d)
+		}
+		if in.StartedAt != "" {
+			s, err := parseStart(in.StartedAt)
+			if err != nil {
+				return TimeSummary{}, err
 			}
-			if in.Note != nil {
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE time_entries SET note=? WHERE id=?`, nz(*in.Note), in.ID); err != nil {
+			sets, args = append(sets, "started_at=?"), append(args, s)
+		}
+		if in.Note != nil {
+			if err := ops.CheckLen("note", *in.Note, maxTimeNoteLen); err != nil {
+				return TimeSummary{}, err
+			}
+			sets, args = append(sets, "note=?"), append(args, nz(*in.Note))
+		}
+		if len(sets) > 0 {
+			args = append(args, in.ID)
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE time_entries SET `+strings.Join(sets, ",")+` WHERE id=?`, args...); err != nil {
 					return err
 				}
+				return syncTotal(e, tx, cardID)
+			})
+			if err != nil {
+				return TimeSummary{}, err
 			}
-			return syncTotal(e, tx, cardID)
-		})
-		if err != nil {
-			return TimeSummary{}, err
 		}
 		emit(e, "timeEntryUpdate", board, cardID, "time.updated", map[string]any{"entryId": in.ID})
 		return timeSummary(e, cardID)

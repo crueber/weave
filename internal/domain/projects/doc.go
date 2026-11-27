@@ -6,7 +6,7 @@
 //
 //	Get(e, id) (Project, error)            // authz-checked (View) project read
 //	List(e, ListOpts) ([]Project, error)   // projects visible to e.User
-//	IsManager(e, projectID) bool           // admin or project manager
+//	IsManager(e, projectID) bool           // project manager
 //	BackgroundCSS(p Project) template.CSS  // inline style for a project background
 //	FilesDir(e) (string, error)            // $WEAVE_DATA_DIR/files
 package projects

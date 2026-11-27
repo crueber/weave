@@ -148,10 +148,11 @@ func Title(d Data) string {
 	return d.Scope
 }
 
+var quoteReplacer = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`", "\n", " ", "\r", " ")
+
 // Quote renders s as a shell double-quoted argument (prompt text only, never executed here).
 func Quote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`", "\n", " ", "\r", " ")
-	return `"` + r.Replace(s) + `"`
+	return `"` + quoteReplacer.Replace(s) + `"`
 }
 
 // OneLine flattens whitespace to single spaces and removes control characters.
@@ -182,17 +183,7 @@ var (
 // are dropped, backtick and tilde runs of three or more (which could close the fence) are
 // neutralised, and the text is cut to max runes with a marker. Every line is indented by indent.
 func FencedBrief(s string, max int, indent string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
-	s = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return r
-		}
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
-	s = strings.TrimSpace(s)
+	s = Clean(s)
 	if s == "" {
 		s = "(no description set - the column name is the brief)"
 	}

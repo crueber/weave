@@ -3,7 +3,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -46,16 +49,22 @@ func (s *Server) env(r *http.Request) *ops.Env {
 
 func (s *Server) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
-	for _, o := range ops.All() {
+	allOps := ops.All()
+	schemas := make([]ops.Schema, 0, len(allOps))
+	for _, o := range allOps {
 		o := o
+		schemas = append(schemas, o.Schema())
 		mux.HandleFunc(o.Method+" /api/v1"+o.Path, func(w http.ResponseWriter, r *http.Request) { s.serveOp(o, w, r) })
 	}
+	opsJSON, err := json.Marshal(map[string]any{"items": schemas})
+	if err != nil {
+		return nil, err
+	}
+	opsJSON = append(opsJSON, '\n')
 	mux.HandleFunc("GET /api/v1/_ops", func(w http.ResponseWriter, r *http.Request) {
-		var out []ops.Schema
-		for _, o := range ops.All() {
-			out = append(out, o.Schema())
-		}
-		writeJSON(w, 200, map[string]any{"items": out})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write(opsJSON)
 	})
 	mux.HandleFunc("GET /events", s.sse)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
@@ -167,11 +176,25 @@ func (s *Server) serveOp(o *ops.Op, w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		var out any
-		if out, err = ops.Call(e, o.Name, in); err == nil {
+		if out, err = o.Handler(e, in); err == nil {
 			if st, ok := out.(*ops.Stream); ok {
+				if st.Reader != nil {
+					defer st.Reader.Close()
+				}
 				w.Header().Set("Content-Type", st.ContentType)
-				w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", st.Name))
-				_, _ = w.Write(st.Data)
+				if w.Header().Get("Cache-Control") == "" {
+					w.Header().Set("Cache-Control", "no-store")
+				}
+				cd := mime.FormatMediaType("attachment", map[string]string{"filename": st.Name})
+				if cd == "" {
+					cd = "attachment"
+				}
+				w.Header().Set("Content-Disposition", cd)
+				if st.Reader != nil {
+					_, _ = io.Copy(w, st.Reader)
+				} else {
+					_, _ = w.Write(st.Data)
+				}
 				return
 			}
 			resp := map[string]any{"item": out}
@@ -187,7 +210,8 @@ func (s *Server) serveOp(o *ops.Op, w http.ResponseWriter, r *http.Request) {
 
 func apiErr(w http.ResponseWriter, err error) {
 	st, code, msg := 500, "internal", "internal error"
-	if e, ok := err.(*ops.Error); ok {
+	var e *ops.Error
+	if errors.As(err, &e) {
 		st, code, msg = e.Status, e.Code, e.Msg
 	} else {
 		fmt.Println("api error:", err)
@@ -199,6 +223,15 @@ func writeJSON(w http.ResponseWriter, st int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(st)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// reauth re-validates an open stream's credentials without touching session activity.
+func (s *Server) reauth(r *http.Request, userID string) bool {
+	if ops.Authenticate == nil {
+		return false
+	}
+	p := ops.Authenticate(&ops.Env{Ctx: r.Context(), DB: s.DB, Hub: s.Hub, Svc: s.Svc, Req: r}, r)
+	return p != nil && p.UserID == userID
 }
 
 // sse streams realtime events. ?rooms=board:ID,project:ID ("user:<me>" is implicit).
@@ -230,9 +263,13 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	fmt.Fprint(w, ": ok\n\n")
+	w.Header().Set("X-Accel-Buffering", "no")
+	if _, err := fmt.Fprint(w, ": ok\n\n"); err != nil {
+		return
+	}
 	fl.Flush()
 	// a comment every 25s: a half-open connection (sleeping laptop, changed Wi-Fi) fails the write,
 	// so the stream ends and its per-user slot is released
@@ -248,8 +285,7 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-recheck.C:
-			p := ops.Authenticate(&ops.Env{Ctx: r.Context(), DB: s.DB, Hub: s.Hub, Svc: s.Svc, Req: r}, r)
-			if p == nil || p.UserID != e.User.UserID {
+			if !s.reauth(r, e.User.UserID) {
 				return
 			}
 		case <-ping.C:
@@ -260,7 +296,9 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 		case ev := <-ch:
 			b, _ := json.Marshal(ev)
 			// event name enables htmx sse extension triggers (sse:<name>)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, b)
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, b); err != nil {
+				return
+			}
 			fl.Flush()
 		}
 	}

@@ -168,17 +168,35 @@ func init() {
 		if _, err := authz.RequireCard(e, in.CardID, authz.View); err != nil {
 			return nil, err
 		}
-		ids, err := query(e.Ctx, e.DB, scanString, `SELECT id FROM task_lists WHERE card_id=? ORDER BY position`, in.CardID)
+		out, err := query(e.Ctx, e.DB, func(r *sql.Rows) (TaskListItem, error) {
+			var l TaskListItem
+			var front, hide int
+			err := r.Scan(&l.ID, &l.CardID, &l.Name, &l.Position, &front, &hide, &l.CreatedAt)
+			l.ShowOnFrontOfCard, l.HideCompletedTasks = front != 0, hide != 0
+			l.Tasks = []TaskItem{}
+			return l, err
+		}, `SELECT id,card_id,name,position,show_on_front_of_card,hide_completed_tasks,created_at FROM task_lists WHERE card_id=? ORDER BY position,id`, in.CardID)
+		if err != nil || len(out) == 0 {
+			return out, err
+		}
+		idx := make(map[string]int, len(out))
+		for i := range out {
+			idx[out[i].ID] = i
+		}
+		tasks, err := query(e.Ctx, e.DB, scanTask, taskSelect+` WHERE tl.card_id=? ORDER BY t.position,t.id`, in.CardID)
 		if err != nil {
 			return nil, err
 		}
-		out := []TaskListItem{}
-		for _, id := range ids {
-			l, err := getTaskList(e, e.DB, id)
-			if err != nil {
-				return nil, err
+		for _, t := range tasks {
+			i, ok := idx[t.TaskListID]
+			if !ok {
+				continue
 			}
-			out = append(out, l)
+			out[i].Tasks = append(out[i].Tasks, t)
+			out[i].TasksTotal++
+			if t.IsCompleted {
+				out[i].TasksCompleted++
+			}
 		}
 		return out, nil
 	})
@@ -192,6 +210,9 @@ func init() {
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
 			return TaskListItem{}, ops.Invalid("name is required")
+		}
+		if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+			return TaskListItem{}, err
 		}
 		id := db.NewID()
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
@@ -216,32 +237,36 @@ func init() {
 			return TaskListItem{}, err
 		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			var sets []string
+			var args []any
 			if in.Name != nil {
 				n := strings.TrimSpace(*in.Name)
 				if n == "" {
 					return ops.Invalid("name cannot be empty")
 				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE task_lists SET name=? WHERE id=?`, n, in.ID); err != nil {
+				if err := ops.CheckLen("name", n, ops.MaxNameLen); err != nil {
 					return err
 				}
+				sets, args = append(sets, "name=?"), append(args, n)
 			}
 			if in.ShowOnFrontOfCard != nil {
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE task_lists SET show_on_front_of_card=? WHERE id=?`, b2i(*in.ShowOnFrontOfCard), in.ID); err != nil {
-					return err
-				}
+				sets, args = append(sets, "show_on_front_of_card=?"), append(args, b2i(*in.ShowOnFrontOfCard))
 			}
 			if in.HideCompletedTasks != nil {
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE task_lists SET hide_completed_tasks=? WHERE id=?`, b2i(*in.HideCompletedTasks), in.ID); err != nil {
-					return err
-				}
+				sets, args = append(sets, "hide_completed_tasks=?"), append(args, b2i(*in.HideCompletedTasks))
 			}
-			pos, ok, err := place(e.Ctx, tx, "task_lists", "card_id=?", []any{cardID}, in.AfterID, in.BeforeID, in.Position)
+			pos, ok, err := place(e.Ctx, tx, "task_lists", "card_id=?", []any{cardID}, in.ID, in.AfterID, in.BeforeID, in.Position)
 			if err != nil {
 				return err
 			}
 			if ok {
-				_, err = tx.ExecContext(e.Ctx, `UPDATE task_lists SET position=? WHERE id=?`, pos, in.ID)
+				sets, args = append(sets, "position=?"), append(args, pos)
 			}
+			if len(sets) == 0 {
+				return nil
+			}
+			args = append(args, in.ID)
+			_, err = tx.ExecContext(e.Ctx, `UPDATE task_lists SET `+strings.Join(sets, ",")+` WHERE id=?`, args...)
 			return err
 		})
 		if err != nil {
@@ -271,6 +296,11 @@ func init() {
 			return TaskItem{}, err
 		}
 		name := strings.TrimSpace(in.Name)
+		if name != "" {
+			if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+				return TaskItem{}, err
+			}
+		}
 		var linked any
 		if in.LinkedCardID != nil && *in.LinkedCardID != "" {
 			if err := checkLinkedCard(e, *in.LinkedCardID, cardID); err != nil {
@@ -279,6 +309,7 @@ func init() {
 			linked = *in.LinkedCardID
 			if name == "" {
 				_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM cards WHERE id=?`, *in.LinkedCardID).Scan(&name)
+				name = clip(strings.TrimSpace(name), ops.MaxNameLen)
 			}
 		}
 		if name == "" {
@@ -329,43 +360,34 @@ func init() {
 		wasDone := false
 		_ = e.DB.QueryRowContext(e.Ctx, `SELECT is_completed FROM tasks WHERE id=?`, in.ID).Scan(&wasDone)
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-			set := func(col string, v any) error {
-				_, err := tx.ExecContext(e.Ctx, `UPDATE tasks SET `+col+`=? WHERE id=?`, v, in.ID)
-				return err
-			}
+			var sets []string
+			var args []any
 			if in.Name != nil {
 				n := strings.TrimSpace(*in.Name)
 				if n == "" {
 					return ops.Invalid("name cannot be empty")
 				}
-				if err := set("name", n); err != nil {
+				if err := ops.CheckLen("name", n, ops.MaxNameLen); err != nil {
 					return err
 				}
+				sets, args = append(sets, "name=?"), append(args, n)
 			}
 			if in.IsCompleted != nil {
-				if err := set("is_completed", b2i(*in.IsCompleted)); err != nil {
-					return err
-				}
+				sets, args = append(sets, "is_completed=?"), append(args, b2i(*in.IsCompleted))
 			}
 			if in.AssigneeUserID != nil {
-				if err := set("assignee_user_id", nz(*in.AssigneeUserID)); err != nil {
-					return err
-				}
+				sets, args = append(sets, "assignee_user_id=?"), append(args, nz(*in.AssigneeUserID))
 			}
 			if in.LinkedCardID != nil {
-				if err := set("linked_card_id", nz(*in.LinkedCardID)); err != nil {
-					return err
-				}
+				sets, args = append(sets, "linked_card_id=?"), append(args, nz(*in.LinkedCardID))
 			}
 			target := listID
 			moved := in.TaskListID != "" && in.TaskListID != listID
 			if moved {
 				target = in.TaskListID
-				if err := set("task_list_id", target); err != nil {
-					return err
-				}
+				sets, args = append(sets, "task_list_id=?"), append(args, target)
 			}
-			pos, ok, err := place(e.Ctx, tx, "tasks", "task_list_id=?", []any{target}, in.AfterID, in.BeforeID, in.Position)
+			pos, ok, err := place(e.Ctx, tx, "tasks", "task_list_id=?", []any{target}, in.ID, in.AfterID, in.BeforeID, in.Position)
 			if err != nil {
 				return err
 			}
@@ -373,9 +395,14 @@ func init() {
 				pos, ok = endPosition(e.Ctx, tx, "tasks", "task_list_id=?", target), true
 			}
 			if ok {
-				return set("position", pos)
+				sets, args = append(sets, "position=?"), append(args, pos)
 			}
-			return nil
+			if len(sets) == 0 {
+				return nil
+			}
+			args = append(args, in.ID)
+			_, err = tx.ExecContext(e.Ctx, `UPDATE tasks SET `+strings.Join(sets, ",")+` WHERE id=?`, args...)
+			return err
 		})
 		if err != nil {
 			return TaskItem{}, err

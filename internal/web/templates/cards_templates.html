@@ -1,4 +1,4 @@
-{{define "page"}}<link rel="stylesheet" href="/static/cards_modal.css">{{template "cards_templates" .}}{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/extras_card.css"><script src="/static/cards_ui.js" defer></script><script src="/static/cards_place.js" defer></script><script src="/static/extras_card.js" defer></script>{{template "cards_templates" .}}{{end}}
 
 {{define "cards_templates"}}{{$d := .Data}}<section id="cards-templates" class="cards-inbox">
   <h3>Card templates</h3>

@@ -3,7 +3,9 @@ package cardextras
 import (
 	"database/sql"
 	"encoding/json"
+	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -191,7 +193,7 @@ func normalizeValue(typ string, options []string, content string) (string, error
 	switch typ {
 	case "number":
 		f, err := strconv.ParseFloat(strings.TrimSpace(content), 64)
-		if err != nil {
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 			return "", ops.Invalid("value must be a number")
 		}
 		return strconv.FormatFloat(f, 'f', -1, 64), nil
@@ -247,12 +249,67 @@ func cleanOptions(in []string) []string {
 
 // cardFields assembles every group applying to a card as seen on board (the context board: the caller can view the
 // card there) with fields, rows and values: that board's board-wide groups plus the card's own groups. Another
-// board's board-wide groups are not shown (their values stay stored).
+// board's board-wide groups are not shown (their values stay stored). Runs in at most 4 constant queries.
 func cardFields(e *ops.Env, cardID, board string) ([]GroupItem, error) {
-	groups, err := query(e.Ctx, e.DB, func(r *sql.Rows) (string, error) { var s string; return s, r.Scan(&s) },
-		`SELECT id FROM custom_field_groups WHERE board_id=? OR card_id=? ORDER BY (board_id IS NULL), position, id`, board, cardID)
+	groups, err := query(e.Ctx, e.DB, func(r *sql.Rows) (groupRow, error) {
+		var g groupRow
+		var rep int
+		err := r.Scan(&g.ID, &g.Board, &g.Card, &g.BaseGroup, &g.Name, &rep, &g.Position)
+		g.Repeatable = rep != 0
+		return g, err
+	}, `SELECT g.id,g.board_id,g.card_id,g.base_group_id,COALESCE(g.name,b.name,''),g.repeatable,g.position
+		FROM custom_field_groups g LEFT JOIN base_custom_field_groups b ON b.id=g.base_group_id
+		WHERE g.board_id=? OR g.card_id=? ORDER BY (g.board_id IS NULL), g.position, g.id`, board, cardID)
+	if err != nil || len(groups) == 0 {
+		return []GroupItem{}, err
+	}
+	gIDs := make([]any, 0, len(groups))
+	var bIDs []any
+	seenBase := map[string]bool{}
+	hasRepeatable := false
+	for _, g := range groups {
+		gIDs = append(gIDs, g.ID)
+		if g.BaseGroup.Valid && g.BaseGroup.String != "" && !seenBase[g.BaseGroup.String] {
+			seenBase[g.BaseGroup.String] = true
+			bIDs = append(bIDs, g.BaseGroup.String)
+		}
+		if g.Repeatable {
+			hasRepeatable = true
+		}
+	}
+	fq := fieldSelect + ` WHERE group_id IN (` + inPlaceholders(len(gIDs)) + `)`
+	fargs := gIDs
+	if len(bIDs) > 0 {
+		fq += ` OR base_group_id IN (` + inPlaceholders(len(bIDs)) + `)`
+		fargs = append(fargs, bIDs...)
+	}
+	fq += ` ORDER BY position,id`
+	allFields, err := query(e.Ctx, e.DB, scanField, fq, fargs...)
 	if err != nil {
 		return nil, err
+	}
+	fieldsByGroup := map[string][]FieldItem{}
+	fieldsByBase := map[string][]FieldItem{}
+	for _, f := range allFields {
+		if f.GroupID != nil {
+			fieldsByGroup[*f.GroupID] = append(fieldsByGroup[*f.GroupID], f)
+		}
+		if f.BaseGroupID != nil {
+			fieldsByBase[*f.BaseGroupID] = append(fieldsByBase[*f.BaseGroupID], f)
+		}
+	}
+	rowsByGroup := map[string][]RowItem{}
+	if hasRepeatable {
+		rlist, err := query(e.Ctx, e.DB, func(r *sql.Rows) (RowItem, error) {
+			ri := RowItem{CardID: cardID}
+			return ri, r.Scan(&ri.ID, &ri.GroupID, &ri.Position)
+		}, `SELECT id,group_id,position FROM custom_field_rows WHERE card_id=? ORDER BY position,id`, cardID)
+		if err != nil {
+			return nil, err
+		}
+		for _, ri := range rlist {
+			rowsByGroup[ri.GroupID] = append(rowsByGroup[ri.GroupID], ri)
+		}
 	}
 	type vk struct{ g, f, r string }
 	vals := map[vk]string{}
@@ -269,26 +326,34 @@ func cardFields(e *ops.Env, cardID, board string) ([]GroupItem, error) {
 	for _, v := range vs {
 		vals[vk{v.GroupID, v.FieldID, v.RowID}] = v.Content
 	}
-	out := []GroupItem{}
-	for _, id := range groups {
-		g, err := loadGroup(e, e.DB, id)
-		if err != nil {
-			return nil, err
-		}
-		fields, err := groupFields(e, e.DB, g)
-		if err != nil {
-			return nil, err
+	out := make([]GroupItem, 0, len(groups))
+	for _, g := range groups {
+		own := fieldsByGroup[g.ID]
+		var fields []FieldItem
+		if g.BaseGroup.Valid && g.BaseGroup.String != "" {
+			base := fieldsByBase[g.BaseGroup.String]
+			if len(own) == 0 {
+				fields = append([]FieldItem{}, base...)
+			} else if len(base) == 0 {
+				fields = append([]FieldItem{}, own...)
+			} else {
+				fields = make([]FieldItem, 0, len(own)+len(base))
+				fields = append(fields, own...)
+				fields = append(fields, base...)
+				sort.Slice(fields, func(i, j int) bool {
+					if fields[i].Position != fields[j].Position {
+						return fields[i].Position < fields[j].Position
+					}
+					return fields[i].ID < fields[j].ID
+				})
+			}
+		} else {
+			fields = append([]FieldItem{}, own...)
 		}
 		it := groupItem(g, fields)
 		rowIDs := []RowItem{{ID: "", CardID: cardID, GroupID: g.ID}}
 		if g.Repeatable {
-			rowIDs, err = query(e.Ctx, e.DB, func(r *sql.Rows) (RowItem, error) {
-				ri := RowItem{CardID: cardID, GroupID: g.ID}
-				return ri, r.Scan(&ri.ID, &ri.Position)
-			}, `SELECT id,position FROM custom_field_rows WHERE card_id=? AND group_id=? ORDER BY position,id`, cardID, g.ID)
-			if err != nil {
-				return nil, err
-			}
+			rowIDs = rowsByGroup[g.ID]
 		}
 		for _, ri := range rowIDs {
 			ri.Values = map[string]string{}
@@ -330,6 +395,9 @@ func init() {
 			return GroupItem{}, err
 		}
 		name := strings.TrimSpace(in.Name)
+		if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+			return GroupItem{}, err
+		}
 		var base any
 		if in.BaseGroupID != "" {
 			var bn sql.NullString
@@ -380,14 +448,17 @@ func init() {
 			return GroupItem{}, err
 		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			var sets []string
+			var args []any
 			if in.Name != nil {
 				n := strings.TrimSpace(*in.Name)
 				if n == "" && !g.BaseGroup.Valid {
 					return ops.Invalid("name cannot be empty")
 				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE custom_field_groups SET name=? WHERE id=?`, nz(n), in.ID); err != nil {
+				if err := ops.CheckLen("name", n, ops.MaxNameLen); err != nil {
 					return err
 				}
+				sets, args = append(sets, "name=?"), append(args, nz(n))
 			}
 			if in.Repeatable != nil && *in.Repeatable != g.Repeatable {
 				var n int
@@ -395,18 +466,21 @@ func init() {
 				if n > 0 {
 					return ops.Conflict("cannot change repeatable while the group holds values; delete them first")
 				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE custom_field_groups SET repeatable=? WHERE id=?`, b2i(*in.Repeatable), in.ID); err != nil {
-					return err
-				}
+				sets, args = append(sets, "repeatable=?"), append(args, b2i(*in.Repeatable))
 			}
-			scope, args := g.scope()
-			pos, ok, err := place(e.Ctx, tx, "custom_field_groups", scope, args, in.AfterID, in.BeforeID, in.Position)
+			scope, scopeArgs := g.scope()
+			pos, ok, err := place(e.Ctx, tx, "custom_field_groups", scope, scopeArgs, in.ID, in.AfterID, in.BeforeID, in.Position)
 			if err != nil {
 				return err
 			}
 			if ok {
-				_, err = tx.ExecContext(e.Ctx, `UPDATE custom_field_groups SET position=? WHERE id=?`, pos, in.ID)
+				sets, args = append(sets, "position=?"), append(args, pos)
 			}
+			if len(sets) == 0 {
+				return nil
+			}
+			args = append(args, in.ID)
+			_, err = tx.ExecContext(e.Ctx, `UPDATE custom_field_groups SET `+strings.Join(sets, ",")+` WHERE id=?`, args...)
 			return err
 		})
 		if err != nil {
@@ -450,6 +524,9 @@ func init() {
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
 			return FieldItem{}, ops.Invalid("name is required")
+		}
+		if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+			return FieldItem{}, err
 		}
 		var board, cardID string
 		if in.GroupID != "" {
@@ -542,42 +619,42 @@ func init() {
 			return FieldItem{}, ops.Invalid("select fields need at least one option")
 		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			ob, _ := json.Marshal(opts)
+			sets := []string{"type=?", "options=?"}
+			args := []any{typ, string(ob)}
 			if in.Name != nil {
 				n := strings.TrimSpace(*in.Name)
 				if n == "" {
 					return ops.Invalid("name cannot be empty")
 				}
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE custom_fields SET name=? WHERE id=?`, n, in.ID); err != nil {
+				if err := ops.CheckLen("name", n, ops.MaxNameLen); err != nil {
 					return err
 				}
+				sets, args = append(sets, "name=?"), append(args, n)
 			}
 			if typ != f.Type {
 				if _, err := tx.ExecContext(e.Ctx, `DELETE FROM custom_field_values WHERE field_id=?`, in.ID); err != nil {
 					return err
 				}
 			}
-			ob, _ := json.Marshal(opts)
-			if _, err := tx.ExecContext(e.Ctx, `UPDATE custom_fields SET type=?,options=? WHERE id=?`, typ, string(ob), in.ID); err != nil {
-				return err
-			}
 			if in.ShowOnFrontOfCard != nil {
-				if _, err := tx.ExecContext(e.Ctx, `UPDATE custom_fields SET show_on_front_of_card=? WHERE id=?`, b2i(*in.ShowOnFrontOfCard), in.ID); err != nil {
-					return err
-				}
+				sets, args = append(sets, "show_on_front_of_card=?"), append(args, b2i(*in.ShowOnFrontOfCard))
 			}
-			scope, args := "group_id=?", []any{""}
+			scope, scopeArgs := "group_id=?", []any{""}
 			if f.GroupID != nil {
-				args[0] = *f.GroupID
+				scopeArgs[0] = *f.GroupID
 			} else {
-				scope, args[0] = "base_group_id=?", *f.BaseGroupID
+				scope, scopeArgs[0] = "base_group_id=?", *f.BaseGroupID
 			}
-			pos, ok, err := place(e.Ctx, tx, "custom_fields", scope, args, in.AfterID, in.BeforeID, in.Position)
+			pos, ok, err := place(e.Ctx, tx, "custom_fields", scope, scopeArgs, in.ID, in.AfterID, in.BeforeID, in.Position)
 			if err != nil {
 				return err
 			}
 			if ok {
-				_, err = tx.ExecContext(e.Ctx, `UPDATE custom_fields SET position=? WHERE id=?`, pos, in.ID)
+				sets, args = append(sets, "position=?"), append(args, pos)
 			}
+			args = append(args, in.ID)
+			_, err = tx.ExecContext(e.Ctx, `UPDATE custom_fields SET `+strings.Join(sets, ",")+` WHERE id=?`, args...)
 			return err
 		})
 		if err != nil {
@@ -652,7 +729,7 @@ func init() {
 		}
 		board, scope := groupScope(g, board)
 		out := ValueItem{CardID: in.CardID, GroupID: in.GroupID, FieldID: in.FieldID, RowID: in.RowID}
-		if in.Content == "" && f.Type != "checkbox" {
+		if in.Content == "" {
 			if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM custom_field_values WHERE card_id=? AND group_id=? AND field_id=? AND row_id=?`, in.CardID, in.GroupID, in.FieldID, in.RowID); err != nil {
 				return out, err
 			}
@@ -715,23 +792,30 @@ func init() {
 		return RowItem{ID: id, CardID: in.CardID, GroupID: in.GroupID, Position: pos, Values: map[string]string{}}, nil
 	})
 
-	rowAuth := func(e *ops.Env, id string) (cardID, groupID, board string, err error) {
+	rowAuth := func(e *ops.Env, id string) (cardID, groupID, board string, g groupRow, err error) {
 		if e.DB.QueryRowContext(e.Ctx, `SELECT card_id,group_id FROM custom_field_rows WHERE id=?`, id).Scan(&cardID, &groupID) != nil {
-			return "", "", "", ops.NotFound("row")
+			return "", "", "", g, ops.NotFound("row")
 		}
 		board, err = authz.RequireCard(e, cardID, authz.Edit)
-		return cardID, groupID, board, err
+		if err != nil {
+			return "", "", "", g, err
+		}
+		g, err = loadGroup(e, e.DB, groupID)
+		if err != nil || !appliesTo(e, g, cardID) {
+			return "", "", "", g, ops.NotFound("row")
+		}
+		return cardID, groupID, board, g, nil
 	}
 
 	ops.Register(ops.Op{Name: "customfieldrow.update", Summary: "Reorder a row of a repeatable group", Method: "PATCH", Path: "/custom-field-rows/{id}",
 		UI: "POST /ui/custom-field-rows/{id}"}, func(e *ops.Env, in RowUpdateIn) (RowItem, error) {
-		cardID, groupID, board, err := rowAuth(e, in.ID)
+		cardID, groupID, board, g, err := rowAuth(e, in.ID)
 		if err != nil {
 			return RowItem{}, err
 		}
 		var pos float64
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-			p, ok, err := place(e.Ctx, tx, "custom_field_rows", "card_id=? AND group_id=?", []any{cardID, groupID}, in.AfterID, in.BeforeID, in.Position)
+			p, ok, err := place(e.Ctx, tx, "custom_field_rows", "card_id=? AND group_id=?", []any{cardID, groupID}, in.ID, in.AfterID, in.BeforeID, in.Position)
 			if err != nil {
 				return err
 			}
@@ -745,7 +829,6 @@ func init() {
 		if err != nil {
 			return RowItem{}, err
 		}
-		g, _ := loadGroup(e, e.DB, groupID)
 		board, scope := groupScope(g, board)
 		emitScoped(e, "customFieldRowUpdate", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID}, scope)
 		return RowItem{ID: in.ID, CardID: cardID, GroupID: groupID, Position: pos, Values: map[string]string{}}, nil
@@ -753,7 +836,7 @@ func init() {
 
 	ops.Register(ops.Op{Name: "customfieldrow.delete", Summary: "Delete a row of a repeatable group and its values", Method: "DELETE", Path: "/custom-field-rows/{id}",
 		UI: "POST /ui/custom-field-rows/{id}/delete"}, func(e *ops.Env, in IDIn) (DeletedOut, error) {
-		cardID, groupID, board, err := rowAuth(e, in.ID)
+		cardID, groupID, board, g, err := rowAuth(e, in.ID)
 		if err != nil {
 			return DeletedOut{}, err
 		}
@@ -767,7 +850,6 @@ func init() {
 		if err != nil {
 			return DeletedOut{}, err
 		}
-		g, _ := loadGroup(e, e.DB, groupID)
 		board, scope := groupScope(g, board)
 		emitScoped(e, "customFieldRowDelete", board, cardID, "customfieldvalue.updated", map[string]any{"groupId": groupID}, scope)
 		return DeletedOut{in.ID, cardID}, nil

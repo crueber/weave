@@ -755,7 +755,7 @@ func TestListUIRoutes(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `id="set-general"`) || !strings.Contains(w.Body.String(), "Renamed") {
 		t.Fatalf("board.update ui: %d %s", w.Code, w.Body.String())
 	}
-	got := call[boards.Board](t, e, "board.get", boards.BoardGetIn{ID: b.ID})
+	got := call[boards.BoardDetail](t, e, "board.get", boards.BoardGetIn{ID: b.ID})
 	_ = got
 	bb, _ := boards.GetBoard(e.Ctx, e.DB, b.ID)
 	if !bb.ShowCardCounter || bb.ShowCardAges {

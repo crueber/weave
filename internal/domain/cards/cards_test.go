@@ -574,7 +574,9 @@ func TestUI(t *testing.T) {
 		t.Fatalf("modal %d %s", w.Code, body)
 	}
 	for _, sec := range []string{"tasks", "comments", "attachments", "fields", "time", "activity"} {
-		if !strings.Contains(body, `hx-get="/ui/cards/`+c.ID+`/`+sec+`" hx-trigger="load"`) {
+		wantLoad := `hx-get="/ui/cards/` + c.ID + `/` + sec + `" hx-trigger="load"`
+		wantLazy := `hx-get="/ui/cards/` + c.ID + `/` + sec + `" hx-trigger="weave:load"`
+		if !strings.Contains(body, wantLoad) && !(sec == "activity" && strings.Contains(body, wantLazy)) {
 			t.Errorf("missing lazy section %s", sec)
 		}
 	}

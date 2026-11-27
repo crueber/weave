@@ -147,8 +147,6 @@ func activitySummary(env events.Envelope, listID, card string, names map[string]
 		case d["targetId"] != nil:
 			id, _ := d["targetId"].(string)
 			return "moved all cards to " + name(id)
-		case d["position"] != nil:
-			return "moved the column"
 		}
 		return "updated this column"
 	}

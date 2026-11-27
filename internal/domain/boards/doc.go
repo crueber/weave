@@ -1,6 +1,6 @@
 // Package boards owns boards, memberships, labels (+groups, project-wide labels),
 // lists, saved filters, public boards, templates, import/export and the board
-// page (kanban / list / grid views).
+// page (board / list / grid views).
 //
 // Card positions: the cards domain owns card_placements (migration 0404); the boards writers that move cards
 // (list.sort, list.moveCards, archive/delete a column, archive-after, template apply, drop positions) update the
@@ -30,8 +30,8 @@
 //	EmitClosedElsewhere(env, boardID, LandResult) after a landing: quiet card.updated isClosed for cards on several boards
 //	LoadDrafts func(e, boardID) ([]Draft, error)  set by cards: the board's drafts for the Inbox column (inbox.go), one query
 //	RemoveFromBoards, BeforeBoardsDelete          set by cards: take a card off boards (re-home, prune) for list.clear and
-//	                                              board/project deletion (placement_hooks.go); DeleteBoards(e, ids, del) runs
-//	                                              the hook in the deleting transaction
+//	                                              board/project deletion (placement_hooks.go); DeleteBoards(e, ids, del) and
+//	                                              DeleteProjectBoards(e, projectID, del) run the hook in the deleting tx
 //
 // Realtime events (room board:<id>): board.created|updated|deleted,
 // boardMembership.created|updated|deleted, label.created|updated|deleted,

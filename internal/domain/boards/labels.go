@@ -2,6 +2,7 @@ package boards
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
@@ -45,6 +46,10 @@ func projectOfBoard(e *ops.Env, boardID string) (pid string, useProject bool) {
 
 func labelsOf(e *ops.Env, boardID string) ([]Label, error) {
 	pid, use := projectOfBoard(e, boardID)
+	return labelsOfProject(e, boardID, pid, use)
+}
+
+func labelsOfProject(e *ops.Env, boardID, pid string, use bool) ([]Label, error) {
 	q, args := `SELECT `+labelCols+` FROM labels WHERE board_id=?`, []any{boardID}
 	if use {
 		q += ` OR (project_id=? AND board_id IS NULL)`
@@ -68,6 +73,10 @@ func labelsOf(e *ops.Env, boardID string) ([]Label, error) {
 
 func groupsOf(e *ops.Env, boardID string) ([]LabelGroup, error) {
 	pid, use := projectOfBoard(e, boardID)
+	return groupsOfProject(e, boardID, pid, use)
+}
+
+func groupsOfProject(e *ops.Env, boardID, pid string, use bool) ([]LabelGroup, error) {
 	q, args := `SELECT id,board_id,project_id,name,single_select,position FROM label_groups WHERE board_id=?`, []any{boardID}
 	if use {
 		q += ` OR (project_id=? AND board_id IS NULL)`
@@ -226,6 +235,9 @@ func labelBoards(e *ops.Env, l Label) []string {
 	if l.BoardID != nil {
 		return []string{*l.BoardID}
 	}
+	if l.ProjectID == nil {
+		return nil
+	}
 	var out []string
 	rows, err := e.DB.QueryContext(e.Ctx, `SELECT id FROM boards WHERE project_id=?`, *l.ProjectID)
 	if err != nil {
@@ -309,21 +321,21 @@ func registerLabelOps() {
 		if err != nil {
 			return l, err
 		}
+		var sets []string
+		var args []any
 		if in.Name != nil {
 			if err := ops.CheckLen("name", *in.Name, ops.MaxNameLen); err != nil {
 				return l, err
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE labels SET name=? WHERE id=?`, nullStr(*in.Name), in.ID); err != nil {
-				return l, err
-			}
+			sets = append(sets, "name=?")
+			args = append(args, nullStr(*in.Name))
 		}
 		if in.Color != nil {
 			if !validColor(*in.Color) {
 				return l, ops.Invalid("invalid color")
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE labels SET color=? WHERE id=?`, *in.Color, in.ID); err != nil {
-				return l, err
-			}
+			sets = append(sets, "color=?")
+			args = append(args, *in.Color)
 		}
 		if in.GroupID != nil {
 			if *in.GroupID != "" {
@@ -338,13 +350,21 @@ func registerLabelOps() {
 					return l, ops.NotFound("label group")
 				}
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE labels SET group_id=? WHERE id=?`, nullStr(*in.GroupID), in.ID); err != nil {
+			sets = append(sets, "group_id=?")
+			args = append(args, nullStr(*in.GroupID))
+		}
+		if len(sets) > 0 {
+			args = append(args, in.ID)
+			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE labels SET `+strings.Join(sets, ",")+` WHERE id=?`, args...); err != nil {
 				return l, err
 			}
 		}
 		l, err = scanLabel(e.DB.QueryRowContext(e.Ctx, `SELECT `+labelCols+` FROM labels WHERE id=?`, in.ID))
+		if err != nil {
+			return l, err
+		}
 		emitLabel(e, "labelUpdate", "label.updated", l)
-		return l, err
+		return l, nil
 	})
 	ops.Register(ops.Op{Name: "label.move", Summary: "Reorder a label", Method: "POST", Path: "/labels/{id}/move",
 		UI: ui("POST", "/labels/{id}/move")}, func(e *ops.Env, in LabelMoveIn) (Label, error) {
@@ -397,16 +417,16 @@ func registerLabelOps() {
 		}
 		pid, use := projectOfBoard(e, in.BoardID)
 		if use {
-			return createGroup(e, "", pid, in.Name, in.SingleSelect, in.BoardID)
+			return createGroup(e, "", pid, in.Name, in.SingleSelect)
 		}
-		return createGroup(e, in.BoardID, "", in.Name, in.SingleSelect, in.BoardID)
+		return createGroup(e, in.BoardID, "", in.Name, in.SingleSelect)
 	})
 	ops.Register(ops.Op{Name: "labelgroup.project.create", Summary: "Create a project-wide label group (project manager)", Method: "POST", Path: "/projects/{projectId}/label-groups",
 		UI: ui("POST", "/projects/{projectId}/label-groups")}, func(e *ops.Env, in ProjectGroupCreateIn) (LabelGroup, error) {
 		if err := authz.RequireProject(e, in.ProjectID, authz.Manage); err != nil {
 			return LabelGroup{}, err
 		}
-		return createGroup(e, "", in.ProjectID, in.Name, in.SingleSelect, "")
+		return createGroup(e, "", in.ProjectID, in.Name, in.SingleSelect)
 	})
 	ops.Register(ops.Op{Name: "labelgroup.update", Summary: "Rename / reorder a label group or toggle single-select", Method: "PATCH", Path: "/label-groups/{id}",
 		UI: ui("PATCH", "/label-groups/{id}")}, func(e *ops.Env, in GroupUpdateIn) (LabelGroup, error) {
@@ -417,6 +437,9 @@ func registerLabelOps() {
 		if in.Name != nil {
 			if *in.Name == "" {
 				return g, ops.Invalid("name must not be empty")
+			}
+			if err := ops.CheckLen("name", *in.Name, ops.MaxNameLen); err != nil {
+				return g, err
 			}
 			g.Name = *in.Name
 		}
@@ -452,9 +475,12 @@ func emitGroup(e *ops.Env, g LabelGroup) {
 	}
 }
 
-func createGroup(e *ops.Env, boardID, projectID, name string, ss bool, emitBoard string) (LabelGroup, error) {
+func createGroup(e *ops.Env, boardID, projectID, name string, ss bool) (LabelGroup, error) {
 	if name == "" {
 		return LabelGroup{}, ops.Invalid("name is required")
+	}
+	if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+		return LabelGroup{}, err
 	}
 	var scope string
 	var args []any

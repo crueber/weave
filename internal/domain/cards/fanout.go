@@ -34,7 +34,7 @@ func placementsOf(e *ops.Env, cardID string) []events.Placement {
 
 // placementBoards is the boards a card is on (home first). Writers that delete a card read it BEFORE the write and
 // pass it as ops.Event.Boards, since the placements are gone when the event is recorded.
-func placementBoards(e *ops.Env, q querier, cardID string) []string {
+func placementBoards(e *ops.Env, q querier, cardID string) ([]string, error) {
 	return strs(e, q, `SELECT board_id FROM card_placements WHERE card_id=? ORDER BY is_home DESC, placed_at, board_id`, cardID)
 }
 
@@ -63,6 +63,7 @@ func eventCard(c Card) Card {
 // project for a project label: db.LabelOnBoard): a label event concerns only those, never a board whose vocabulary
 // does not have the label. One query.
 func labelBoards(e *ops.Env, cardID, labelID string) []string {
-	return strs(e, e.DB, `SELECT p.board_id FROM card_placements p JOIN labels l ON l.id=? WHERE p.card_id=? AND `+db.LabelOnBoard("l", "p.board_id")+`
+	out, _ := strs(e, e.DB, `SELECT p.board_id FROM card_placements p JOIN labels l ON l.id=? WHERE p.card_id=? AND `+db.LabelOnBoard("l", "p.board_id")+`
 		ORDER BY p.is_home DESC, p.placed_at, p.board_id`, labelID, cardID)
+	return out
 }

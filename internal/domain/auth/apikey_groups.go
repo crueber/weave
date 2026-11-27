@@ -214,26 +214,36 @@ func MintKey(ctx context.Context, d *db.DB, email, role string) (APIKeyOut, erro
 	if role != "" && !validRole(role) {
 		return APIKeyOut{}, ops.Invalid("role must be one of " + strings.Join(Roles, "|"))
 	}
-	var id string
-	err = d.QueryRowContext(ctx, `SELECT id FROM users WHERE email=? AND deleted_at IS NULL`, email).Scan(&id)
-	switch {
-	case err == sql.ErrNoRows:
-		if role == "" {
-			role = "boardUser"
+	var out APIKeyOut
+	err = d.Tx(ctx, func(tx *sql.Tx) error {
+		var id string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email=? AND deleted_at IS NULL`, email).Scan(&id)
+		switch {
+		case err == sql.ErrNoRows:
+			r := role
+			if r == "" {
+				r = "boardUser"
+			}
+			name, _, _ := strings.Cut(email, "@")
+			id = db.NewID()
+			if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,subscribe_own_cards,created_at) VALUES(?,?,?,?,1,1,1,?)`, id, email, name, r, db.Now()); err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		case role != "":
+			if _, err := tx.ExecContext(ctx, `UPDATE users SET role=?,is_deactivated=0,updated_at=? WHERE id=?`, role, db.Now(), id); err != nil {
+				return err
+			}
+		default:
+			if _, err := tx.ExecContext(ctx, `UPDATE users SET is_deactivated=0,updated_at=? WHERE id=? AND is_deactivated=1`, db.Now(), id); err != nil {
+				return err
+			}
 		}
-		name, _, _ := strings.Cut(email, "@")
-		id = db.NewID()
-		if _, err := d.ExecContext(ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,subscribe_own_cards,created_at) VALUES(?,?,?,?,1,1,1,?)`, id, email, name, role, db.Now()); err != nil {
-			return APIKeyOut{}, err
-		}
-	case err != nil:
-		return APIKeyOut{}, err
-	case role != "":
-		if _, err := d.ExecContext(ctx, `UPDATE users SET role=?,is_deactivated=0,updated_at=? WHERE id=?`, role, db.Now(), id); err != nil {
-			return APIKeyOut{}, err
-		}
-	}
-	return addAPIKey(ctx, d, id, "mint-key", 0)
+		out, err = addAPIKey(ctx, tx, id, "mint-key", 0)
+		return err
+	})
+	return out, err
 }
 
 func init() {
@@ -326,9 +336,14 @@ func init() {
 				if keyID != "" && len(prefixes) == 0 {
 					return ops.NotFound("key") // an unknown id, or another user's key: nothing is deleted
 				}
-				dq := strings.Replace(q, `SELECT prefix`, `DELETE`, 1)
-				if _, err := tx.ExecContext(e.Ctx, dq, args...); err != nil {
-					return err
+				var delErr error
+				if keyID != "" {
+					_, delErr = tx.ExecContext(e.Ctx, `DELETE FROM api_keys WHERE user_id=? AND id=?`, id, keyID)
+				} else {
+					_, delErr = tx.ExecContext(e.Ctx, `DELETE FROM api_keys WHERE user_id=?`, id)
+				}
+				if delErr != nil {
+					return delErr
 				}
 				if others && len(prefixes) > 0 {
 					kind := "user"
@@ -507,7 +522,28 @@ func addGroupMember(e *ops.Env, tx *sql.Tx, groupID, userID string) (*AuditEntry
 	return &a, writeAudit(e.Ctx, tx, &a)
 }
 
+type prefixScanner struct {
+	prefix any
+	inner  rowScanner
+}
+
+func (p prefixScanner) Scan(dest ...any) error {
+	args := make([]any, 0, len(dest)+1)
+	args = append(args, p.prefix)
+	args = append(args, dest...)
+	return p.inner.Scan(args...)
+}
+
 func listGroups(e *ops.Env, only string) (GroupList, error) {
+	restricted := directoryRestricted(e)
+	var visGroups, visUsers map[string]bool
+	if restricted {
+		visGroups = visibleGroupIDs(e)
+		if only != "" && !visGroups[only] {
+			return GroupList{Items: []*Group{}}, nil
+		}
+		visUsers = visibleUserIDs(e)
+	}
 	q := `SELECT id,name,created_at FROM user_groups`
 	var args []any
 	if only != "" {
@@ -519,28 +555,60 @@ func listGroups(e *ops.Env, only string) (GroupList, error) {
 		return GroupList{}, err
 	}
 	out := GroupList{Items: []*Group{}}
+	byID := map[string]*Group{}
+	var groupIDs []string
 	for rows.Next() {
 		g := &Group{Members: []*User{}, MemberIDs: []string{}}
 		if err := rows.Scan(&g.ID, &g.Name, &g.CreatedAt); err != nil {
 			rows.Close()
 			return out, err
 		}
+		if restricted && !visGroups[g.ID] {
+			continue
+		}
 		out.Items = append(out.Items, g)
+		byID[g.ID] = g
+		groupIDs = append(groupIDs, g.ID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return out, err
 	}
 	rows.Close()
-	for _, g := range out.Items {
-		mr, err := e.DB.QueryContext(e.Ctx, `SELECT `+userCols+` FROM users WHERE deleted_at IS NULL AND id IN (SELECT user_id FROM user_group_members WHERE group_id=?) ORDER BY name COLLATE NOCASE`, g.ID)
+	if len(groupIDs) == 0 {
+		return out, nil
+	}
+	const chunk = 500
+	for i := 0; i < len(groupIDs); i += chunk {
+		part := groupIDs[i:min(i+chunk, len(groupIDs))]
+		ph := "?" + strings.Repeat(",?", len(part)-1)
+		margs := make([]any, len(part))
+		for j, id := range part {
+			margs[j] = id
+		}
+		mr, err := e.DB.QueryContext(e.Ctx, `SELECT gm.group_id,`+userCols+` FROM user_group_members gm JOIN users ON users.id=gm.user_id
+			WHERE users.deleted_at IS NULL AND gm.group_id IN (`+ph+`) ORDER BY users.name COLLATE NOCASE`, margs...)
 		if err != nil {
 			return out, err
 		}
 		for mr.Next() {
-			u, err := scanUser(mr)
+			var gid string
+			u, err := scanUser(prefixScanner{&gid, mr})
 			if err != nil {
 				mr.Close()
 				return out, err
 			}
-			g.Members = append(g.Members, redact(e, u))
-			g.MemberIDs = append(g.MemberIDs, u.ID)
+			if restricted && !visUsers[u.ID] {
+				continue
+			}
+			if g := byID[gid]; g != nil {
+				g.Members = append(g.Members, redact(e, u))
+				g.MemberIDs = append(g.MemberIDs, u.ID)
+			}
+		}
+		if err := mr.Err(); err != nil {
+			mr.Close()
+			return out, err
 		}
 		mr.Close()
 	}

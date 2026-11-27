@@ -1,7 +1,6 @@
 package boards
 
 import (
-	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
@@ -102,65 +101,66 @@ func promptColumn(l List) agentprompt.Column {
 	return c
 }
 
-// promptBoard loads a board with its finite columns (caller has checked View).
-func promptBoard(e *ops.Env, id string) (agentprompt.Board, Board, error) {
-	b, err := GetBoard(e.Ctx, e.DB, id)
+// promptBoardFrom builds an agentprompt.Board from an already-loaded Board (caller has checked View).
+func promptBoardFrom(e *ops.Env, b Board) (agentprompt.Board, error) {
+	lists, err := listsOf(e, b.ID, true)
 	if err != nil {
-		return agentprompt.Board{}, b, err
-	}
-	lists, err := listsOf(e, id, true)
-	if err != nil {
-		return agentprompt.Board{}, b, err
+		return agentprompt.Board{}, err
 	}
 	pb := agentprompt.Board{ID: b.ID, Name: b.Name}
 	for _, l := range lists {
 		pb.Columns = append(pb.Columns, promptColumn(l))
 	}
-	return pb, b, nil
+	return pb, nil
 }
 
 // PromptContext is the chain of ids the dialog needs to decide which tabs to show.
 type PromptContext struct{ ProjectID, BoardID, ListID string }
 
-// promptChain resolves scope/id to its project, board and list ids, authorizing View on the way.
-func promptChain(e *ops.Env, scope, id string) (PromptContext, error) {
-	var pc PromptContext
+// resolvePromptChain resolves scope/id to its ids and already-loaded Board/List, authorizing View on the way.
+func resolvePromptChain(e *ops.Env, scope, id string) (pc PromptContext, board Board, list List, err error) {
 	switch scope {
 	case agentprompt.ScopeProject:
 		if id == "" {
-			return pc, ops.Invalid("id (project) is required")
+			return pc, board, list, ops.Invalid("id (project) is required")
 		}
 		if err := authz.RequireProject(e, id, authz.View); err != nil {
-			return pc, err
+			return pc, board, list, err
 		}
 		pc.ProjectID = id
 	case agentprompt.ScopeBoard, agentprompt.ScopeRunner:
 		if id == "" {
-			return pc, nil
+			return pc, board, list, nil
 		}
 		if err := authz.RequireBoard(e, id, authz.View); err != nil {
-			return pc, err
+			return pc, board, list, err
 		}
-		b, err := GetBoard(e.Ctx, e.DB, id)
+		board, err = GetBoard(e.Ctx, e.DB, id)
 		if err != nil {
-			return pc, err
+			return pc, board, list, err
 		}
-		pc.BoardID, pc.ProjectID = b.ID, b.ProjectID
+		pc.BoardID, pc.ProjectID = board.ID, board.ProjectID
 	case agentprompt.ScopeList, agentprompt.ScopeWorkOrder:
 		if id == "" {
-			return pc, ops.Invalid("id (list) is required")
+			return pc, board, list, ops.Invalid("id (list) is required")
 		}
-		l, err := requireList(e, id, authz.View)
+		list, err = requireList(e, id, authz.View)
 		if err != nil {
-			return pc, err
+			return pc, board, list, err
 		}
-		b, err := GetBoard(e.Ctx, e.DB, l.BoardID)
+		board, err = GetBoard(e.Ctx, e.DB, list.BoardID)
 		if err != nil {
-			return pc, err
+			return pc, board, list, err
 		}
-		pc = PromptContext{ProjectID: b.ProjectID, BoardID: b.ID, ListID: l.ID}
+		pc = PromptContext{ProjectID: board.ProjectID, BoardID: board.ID, ListID: list.ID}
 	}
-	return pc, nil
+	return pc, board, list, nil
+}
+
+// promptChain resolves scope/id to its project, board and list ids, authorizing View on the way.
+func promptChain(e *ops.Env, scope, id string) (PromptContext, error) {
+	pc, _, _, err := resolvePromptChain(e, scope, id)
+	return pc, err
 }
 
 func validCardFile(s string) error {
@@ -188,7 +188,7 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 		// instance text (admin default or built-in): no object data
 		d.Custom, source = promptText(e, in.Scope, "")
 	case agentprompt.ScopeProject:
-		pc, err := promptChain(e, in.Scope, in.ID)
+		pc, _, _, err := resolvePromptChain(e, in.Scope, in.ID)
 		if err != nil {
 			return AgentPromptOut{}, err
 		}
@@ -202,22 +202,48 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 		if err != nil {
 			return AgentPromptOut{}, err
 		}
-		for _, b := range bs { // board.list only returns boards the caller can see
-			pb, _, err := promptBoard(e, b.ID)
-			if err != nil {
-				return AgentPromptOut{}, err
+		if len(bs) > 0 {
+			byBoard := map[string][]agentprompt.Column{}
+			for i := 0; i < len(bs); i += archiveChunk {
+				chunk := bs[i:min(i+archiveChunk, len(bs))]
+				inClause := "?" + strings.Repeat(",?", len(chunk)-1)
+				args := make([]any, len(chunk))
+				for k, b := range chunk {
+					args[k] = b.ID
+				}
+				rows, err := e.DB.QueryContext(e.Ctx, `SELECT `+listCols+` FROM lists WHERE board_id IN (`+inClause+`) AND type IN ('active','closed') ORDER BY position IS NULL, position, id`, args...)
+				if err != nil {
+					return AgentPromptOut{}, err
+				}
+				for rows.Next() {
+					l, err := scanList(rows)
+					if err != nil {
+						rows.Close()
+						return AgentPromptOut{}, err
+					}
+					byBoard[l.BoardID] = append(byBoard[l.BoardID], promptColumn(l))
+				}
+				if err := rows.Close(); err != nil {
+					return AgentPromptOut{}, err
+				}
+				if err := rows.Err(); err != nil {
+					return AgentPromptOut{}, err
+				}
 			}
-			d.Boards = append(d.Boards, pb)
+			for _, b := range bs { // board.list only returns boards the caller can see
+				d.Boards = append(d.Boards, agentprompt.Board{ID: b.ID, Name: b.Name, Columns: byBoard[b.ID]})
+			}
 		}
 		vars["projectId"], vars["project"] = d.ProjectID, d.ProjectName
 	case agentprompt.ScopeBoard:
 		if in.ID == "" {
 			return AgentPromptOut{}, ops.Invalid("id (board) is required")
 		}
-		if _, err := promptChain(e, in.Scope, in.ID); err != nil {
+		_, b, _, err := resolvePromptChain(e, in.Scope, in.ID)
+		if err != nil {
 			return AgentPromptOut{}, err
 		}
-		pb, b, err := promptBoard(e, in.ID)
+		pb, err := promptBoardFrom(e, b)
 		if err != nil {
 			return AgentPromptOut{}, err
 		}
@@ -225,12 +251,13 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 		d.Custom, source = promptText(e, in.Scope, b.AgentPrompt)
 		vars["boardId"], vars["board"] = pb.ID, pb.Name
 	case agentprompt.ScopeRunner:
-		if _, err := promptChain(e, in.Scope, in.ID); err != nil {
+		_, b, _, err := resolvePromptChain(e, in.Scope, in.ID)
+		if err != nil {
 			return AgentPromptOut{}, err
 		}
 		d.Custom, source = promptText(e, in.Scope, "") // admin default only; no per-board runner text
 		if in.ID != "" {
-			pb, _, err := promptBoard(e, in.ID)
+			pb, err := promptBoardFrom(e, b)
 			if err != nil {
 				return AgentPromptOut{}, err
 			}
@@ -238,15 +265,11 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 			vars["boardId"], vars["board"] = pb.ID, pb.Name
 		}
 	case agentprompt.ScopeList, agentprompt.ScopeWorkOrder:
-		pc, err := promptChain(e, in.Scope, in.ID)
+		pc, b, l, err := resolvePromptChain(e, in.Scope, in.ID)
 		if err != nil {
 			return AgentPromptOut{}, err
 		}
-		pb, _, err := promptBoard(e, pc.BoardID)
-		if err != nil {
-			return AgentPromptOut{}, err
-		}
-		l, err := GetList(e.Ctx, e.DB, pc.ListID)
+		pb, err := promptBoardFrom(e, b)
 		if err != nil {
 			return AgentPromptOut{}, err
 		}
@@ -268,16 +291,8 @@ func BuildPrompt(e *ops.Env, in AgentPromptIn) (AgentPromptOut, error) {
 		if err := validCardFile(in.CardFile); err != nil {
 			return AgentPromptOut{}, err
 		}
-		got, err := ops.CallMap(e, "card.get", map[string]any{"id": in.CardID, "boardId": pc.BoardID}) // seen on this board when it is placed here
-		if err != nil {
+		if err := authz.RequireCardOn(e, in.CardID, pc.BoardID, authz.View); err != nil {
 			return AgentPromptOut{}, err
-		}
-		var card struct {
-			BoardID string `json:"boardId"`
-		}
-		raw, _ := json.Marshal(got)
-		if json.Unmarshal(raw, &card) != nil || card.BoardID != pc.BoardID {
-			return AgentPromptOut{}, ops.NotFound("card")
 		}
 		d.CardID = in.CardID
 		d.CardFile = in.CardFile

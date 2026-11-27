@@ -31,11 +31,13 @@ func init() {
 			t := time.NewTicker(6 * time.Hour)
 			defer t.Stop()
 			for {
-				if n, err := events.Purge(context.Background(), s.DB, time.Duration(retentionDays())*24*time.Hour); err != nil {
+				ctx := context.Background()
+				if n, err := events.Purge(ctx, s.DB, time.Duration(retentionDays())*24*time.Hour); err != nil {
 					log.Println("events: purge:", err)
 				} else if n > 0 {
 					log.Printf("events: dropped %d replay payloads older than %d days", n, retentionDays())
 				}
+				pruneWebhookDeliveries(ctx, s.DB)
 				<-t.C
 			}
 		}()

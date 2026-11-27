@@ -63,7 +63,6 @@ func RelinkByEmail(ctx context.Context, d *db.DB, email string) error {
 	if !ok {
 		return ops.NotFound("user")
 	}
-	log.Printf("auth: AUDIT SSO identity unlinked for %s via host command; their next SSO login with this e-mail binds the identity it presents", email)
 	return nil
 }
 
@@ -77,8 +76,12 @@ func init() {
 			if u.IsAgent {
 				return nil, ops.Conflict("agents have no SSO identity")
 			}
-			if _, _, err := RelinkIdentity(e.Ctx, e.DB, u.ID, "", e.User, auditSource(e)); err != nil {
+			_, ok, err := RelinkIdentity(e.Ctx, e.DB, u.ID, "", e.User, auditSource(e))
+			if err != nil {
 				return nil, err
+			}
+			if !ok {
+				return nil, ops.NotFound("user")
 			}
 			ops.Emit(e, ops.Event{Type: "userRelink", Name: "user.relinked", Room: "global", Data: map[string]any{"item": map[string]any{"userId": u.ID, "by": e.User.UserID}}})
 			return loadUser(e, u.ID)

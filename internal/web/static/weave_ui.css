@@ -166,8 +166,8 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:blur(3px)}
 /* ---- toasts ---- */
 #toasts{position:fixed;right:var(--space-4);bottom:var(--space-4);z-index:100;display:flex;flex-direction:column;gap:var(--space-2);max-width:min(380px,calc(100vw - 2rem))}
 .toast{background:var(--fg);color:var(--bg);border-radius:var(--radius);padding:var(--space-3) var(--space-4);box-shadow:var(--shadow-3);font-weight:500;animation:toast-in var(--dur) var(--ease)}
-.toast-error{background:var(--danger);color:#fff}
-.toast-success{background:var(--success);color:#fff}
+.toast-error{background:var(--danger);color:var(--label-fg)}
+.toast-success{background:var(--success);color:var(--label-fg)}
 @keyframes toast-in{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
 
 /* ---- responsive top bar ---- */
@@ -188,18 +188,6 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:blur(3px)}
   .topbar>.view-switch,.topbar-crumbs .crumb-proj{display:none}
   .topbar-crumbs{margin-left:0;max-width:calc(100vw - 190px)}
 }
-
-/* ---- admin console ---- */
-.admin-page{max-width:960px;margin:0 auto}
-.admin-page h1{font-size:var(--text-2xl);font-weight:800;letter-spacing:-.03em;margin:0 0 var(--space-4)}
-.admin-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-3);margin-bottom:var(--space-5)}
-.admin-tile{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-4);border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-1);color:var(--fg);font-weight:700;text-decoration:none;
-  transition:transform var(--dur) var(--ease),box-shadow var(--dur) var(--ease),border-color var(--dur)}
-.admin-tile:hover{transform:translateY(-3px);box-shadow:var(--shadow-2);border-color:var(--accent);color:var(--fg)}
-.admin-ico{font-size:1.6rem;line-height:1}
-.admin-sys h2{font-size:var(--text-lg)}
-.admin-stats{width:100%;max-width:420px}
-.admin-stats td{padding:.3rem .5rem;border-bottom:1px solid var(--border)}.admin-stats td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 
 /* The Weave preset names (colors.go) on the same tokens, so labels created with them (built-in templates do) read in card sheets too. */
 .lc-crimson,.cards-color-crimson{background:var(--label-red);color:var(--label-fg)}
@@ -229,4 +217,3 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:blur(3px)}
 .help-tip::after{content:"";position:absolute;inset:-.45rem}
 .help-tip:hover,.help-tip:focus-visible,.help-tip[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
 .help-tip-pop{position:fixed;z-index:400;width:max-content;max-width:min(16rem,calc(100vw - 1rem));padding:.5rem .65rem;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface);color:var(--fg);box-shadow:var(--shadow-2);font:400 var(--text-sm)/1.4 var(--font-sans);text-align:left;white-space:normal;pointer-events:none}
-.help-tip-pop[hidden]{display:none}

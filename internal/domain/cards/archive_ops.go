@@ -144,15 +144,18 @@ type archiveBound struct {
 
 func normalizeArchiveFilter(q, labelID, memberID, fromListID, since, until string) (archiveFilter, error) {
 	f := archiveFilter{Q: strings.TrimSpace(q), LabelID: labelID, MemberID: memberID, FromListID: fromListID}
-	var err error
-	if f.Since, _, err = normalizeArchiveDate(since, false); err != nil {
+	sinceValue, sinceBound, err := normalizeArchiveDate(since, false)
+	if err != nil {
 		return f, err
 	}
 	untilValue, untilBound, err := normalizeArchiveDate(until, true)
 	if err != nil {
 		return f, err
 	}
-	f.Until, f.UntilExclusive = untilValue, untilBound.Exclusive
+	f.Since, f.Until, f.UntilExclusive = sinceValue, untilValue, untilBound.Exclusive
+	if err := validateArchiveRange(f, sinceBound, untilBound); err != nil {
+		return f, err
+	}
 	return f, nil
 }
 
@@ -230,19 +233,18 @@ func validateArchiveRange(f archiveFilter, since, until archiveBound) error {
 
 const archiveFrom = ` FROM card_placements p JOIN cards c ON c.id=p.card_id
 	JOIN lists l ON l.id=p.list_id AND l.board_id=p.board_id
-	LEFT JOIN lists fl ON fl.id=p.prev_list_id AND fl.board_id=p.board_id
-	LEFT JOIN lists stored_fl ON stored_fl.id=p.prev_list_id`
+	LEFT JOIN lists fl ON fl.id=p.prev_list_id`
 
 // archiveFromName never reads a foreign column's name. A missing stored id means the source column was deleted;
 // an id that exists only on another board stays unresolved and empty.
 const archiveFromName = `CASE
 	WHEN p.prev_list_id IS NULL OR p.prev_list_id='' THEN ''
-	WHEN fl.id IS NOT NULL THEN COALESCE(fl.name,'')
-	WHEN stored_fl.id IS NULL THEN '(removed)'
+	WHEN fl.id IS NULL THEN '(removed)'
+	WHEN fl.board_id=p.board_id THEN COALESCE(fl.name,'')
 	ELSE '' END`
 
 func archiveWhere(boardID string, kinds []string, f archiveFilter) (string, []any) {
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	ph := inPlaceholders(len(kinds))
 	args := []any{boardID}
 	for _, k := range kinds {
 		args = append(args, k)
@@ -267,7 +269,7 @@ func archiveWhere(boardID string, kinds []string, f archiveFilter) (string, []an
 		}
 	}
 	if f.FromListID != "" {
-		q += ` AND fl.id=?` // board-scoped join: a stale id from another board behaves as removed
+		q += ` AND fl.id=? AND fl.board_id=p.board_id` // board-scoped: a stale id from another board behaves as removed
 		args = append(args, f.FromListID)
 	}
 	if f.Since != "" {
@@ -331,11 +333,6 @@ func cardArchiveList(e *ops.Env, in ArchiveListIn) (ArchiveListOut, error) {
 		return ArchiveListOut{}, err
 	}
 	if f.MemberID, err = resolveArchiveMemberID(e, f.MemberID); err != nil {
-		return ArchiveListOut{}, err
-	}
-	_, sinceBound, _ := normalizeArchiveDate(in.Since, false)
-	_, untilBound, _ := normalizeArchiveDate(in.Until, true)
-	if err := validateArchiveRange(f, sinceBound, untilBound); err != nil {
 		return ArchiveListOut{}, err
 	}
 	fp := archiveFingerprint{BoardID: in.BoardID, Kind: kind, Filter: f, Sort: sortBy, Dir: dir}
@@ -468,7 +465,7 @@ func loadArchiveRelations(e *ops.Env, boardID string, ids []string) (map[string]
 	if len(ids) == 0 {
 		return labels, members, active, nil
 	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	ph := inPlaceholders(len(ids))
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
@@ -557,7 +554,7 @@ func loadArchiveDeletable(e *ops.Env, ids []string) (map[string]bool, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	ph := inPlaceholders(len(ids))
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
@@ -728,7 +725,7 @@ func archiveSnapshot(e *ops.Env, boardID string, kinds []string, f archiveFilter
 }
 
 func archivePlacementOnBoard(ctx context.Context, q querier, cardID, boardID string, kinds []string) (bool, error) {
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	ph := inPlaceholders(len(kinds))
 	args := []any{cardID, boardID}
 	for _, k := range kinds {
 		args = append(args, k)
@@ -743,9 +740,21 @@ func archivePlacementOnBoard(ctx context.Context, q querier, cardID, boardID str
 // chunk starts. It catches the deterministic failures single-card restore would report, including a hidden board with
 // no active fallback, without leaving earlier chunks committed.
 func preflightArchiveRestore(e *ops.Env, boardID string, ids []string) error {
+	firstActiveCache := map[string]string{}
+	firstActiveFor := func(b string) (string, error) {
+		if l, ok := firstActiveCache[b]; ok {
+			return l, nil
+		}
+		l, err := firstListQ(e.Ctx, e.DB, b, "active")
+		if err != nil {
+			return "", err
+		}
+		firstActiveCache[b] = l
+		return l, nil
+	}
 	for start := 0; start < len(ids); start += archiveBulkChunk {
 		chunk := ids[start:min(start+archiveBulkChunk, len(ids))]
-		ph := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		ph := inPlaceholders(len(chunk))
 		args := make([]any, len(chunk))
 		for i, id := range chunk {
 			args[i] = id
@@ -761,6 +770,8 @@ func preflightArchiveRestore(e *ops.Env, boardID string, ids []string) error {
 		if err != nil {
 			return err
 		}
+		seenPrev := map[string]bool{}
+		var prevIDs []string
 		for rows.Next() {
 			var id string
 			var p placementRow
@@ -778,6 +789,10 @@ func preflightArchiveRestore(e *ops.Env, boardID string, ids []string) error {
 			if p.Board == boardID && (p.ListType == "archive" || p.ListType == "trash") {
 				x.Candidate = true
 			}
+			if (p.ListType == "archive" || p.ListType == "trash") && p.Prev != nil && *p.Prev != "" && !seenPrev[*p.Prev] {
+				seenPrev[*p.Prev] = true
+				prevIDs = append(prevIDs, *p.Prev)
+			}
 			x.Places = append(x.Places, p)
 		}
 		if err := rows.Err(); err != nil {
@@ -785,6 +800,32 @@ func preflightArchiveRestore(e *ops.Env, boardID string, ids []string) error {
 			return err
 		}
 		rows.Close()
+		type listMeta struct{ typ, board string }
+		prevLists := map[string]listMeta{}
+		for pstart := 0; pstart < len(prevIDs); pstart += cardBatchSize {
+			pchunk := prevIDs[pstart:min(pstart+cardBatchSize, len(prevIDs))]
+			pargs := make([]any, len(pchunk))
+			for i, id := range pchunk {
+				pargs[i] = id
+			}
+			prows, err := e.DB.QueryContext(e.Ctx, `SELECT id,type,board_id FROM lists WHERE id IN (`+inPlaceholders(len(pchunk))+`)`, pargs...)
+			if err != nil {
+				return err
+			}
+			for prows.Next() {
+				var id, typ, b string
+				if err := prows.Scan(&id, &typ, &b); err != nil {
+					prows.Close()
+					return err
+				}
+				prevLists[id] = listMeta{typ: typ, board: b}
+			}
+			if err := prows.Err(); err != nil {
+				prows.Close()
+				return err
+			}
+			prows.Close()
+		}
 		for _, id := range chunk {
 			c := byCard[id]
 			if c == nil || !c.Candidate {
@@ -800,8 +841,20 @@ func preflightArchiveRestore(e *ops.Env, boardID string, ids []string) error {
 				if p.ListType != "archive" && p.ListType != "trash" {
 					continue
 				}
-				if _, err := restoreTarget(e.Ctx, e.DB, p.Board, boardID, p.Prev); err != nil {
+				if p.Prev != nil {
+					if m, ok := prevLists[*p.Prev]; ok && m.board == p.Board && (m.typ == "active" || m.typ == "closed") {
+						continue
+					}
+				}
+				target, err := firstActiveFor(p.Board)
+				if err != nil {
 					return err
+				}
+				if target == "" {
+					if p.Board == boardID {
+						return ops.Invalid("board has no active list to restore into")
+					}
+					return ops.Invalid("a board the card is on has no active list to restore into")
 				}
 			}
 		}
@@ -834,11 +887,6 @@ func cardRestoreBulk(e *ops.Env, in RestoreBulkIn) (out RestoreBulkOut, err erro
 	}
 	f, err := normalizeArchiveFilter(in.Q, in.LabelID, in.MemberID, in.FromListID, in.Since, in.Until)
 	if err != nil {
-		return RestoreBulkOut{}, err
-	}
-	_, sinceBound, _ := normalizeArchiveDate(in.Since, false)
-	_, untilBound, _ := normalizeArchiveDate(in.Until, true)
-	if err := validateArchiveRange(f, sinceBound, untilBound); err != nil {
 		return RestoreBulkOut{}, err
 	}
 	ids, err := normalizeBulkIDs(in.CardIDs, in.All, in.ConfirmCount, f)
@@ -905,23 +953,34 @@ func cardRestoreBulk(e *ops.Env, in RestoreBulkIn) (out RestoreBulkOut, err erro
 		out.Restored += chunk.Restored
 		out.Skipped += chunk.Skipped
 		committed = true
-		for _, em := range emissions {
-			res := em.Result
-			c, err := loadCardOn(e, e.DB, em.CardID, in.BoardID)
-			if err != nil {
-				continue // committed already; a card removed concurrently gets no event, the rest still do
+		if len(emissions) > 0 {
+			emIDs := make([]string, len(emissions))
+			for i, em := range emissions {
+				emIDs[i] = em.CardID
 			}
-			moves := make(map[string][2]string, len(res.Moves))
-			from, to := "", ""
-			for _, m := range res.Moves {
-				moves[m.Board] = [2]string{m.From, m.Target}
-				if m.Board == in.BoardID {
-					from, to = m.From, m.Target
+			cards, _ := loadCardsOn(e, e.DB, in.BoardID, emIDs)
+			byID := make(map[string]Card, len(cards))
+			for _, c := range cards {
+				byID[c.ID] = c
+			}
+			for _, em := range emissions {
+				c, ok := byID[em.CardID]
+				if !ok {
+					continue // committed already; a card removed concurrently gets no event, the rest still do
 				}
+				res := em.Result
+				moves := make(map[string][2]string, len(res.Moves))
+				from, to := "", ""
+				for _, m := range res.Moves {
+					moves[m.Board] = [2]string{m.From, m.Target}
+					if m.Board == in.BoardID {
+						from, to = m.From, m.Target
+					}
+				}
+				emitKind(e, "card.restored", "cardMove", "card.moved", in.BoardID, em.CardID, map[string]any{"card": c,
+					"fromListId": from, "toListId": to, "fromBoardId": in.BoardID, "trash": false,
+					"quiet": true, "auto": "bulkRestore", events.CardLevel: true, events.PlacementLists: moves})
 			}
-			emitKind(e, "card.restored", "cardMove", "card.moved", in.BoardID, em.CardID, map[string]any{"card": c,
-				"fromListId": from, "toListId": to, "fromBoardId": in.BoardID, "trash": false,
-				"quiet": true, "auto": "bulkRestore", events.CardLevel: true, events.PlacementLists: moves})
 		}
 		boards.EmitClosedElsewhere(e, in.BoardID, landed)
 		boards.EmitAutoArchived(e, landed)
@@ -940,11 +999,6 @@ func cardDeleteBulk(e *ops.Env, in DeleteBulkIn) (out DeleteBulkOut, err error) 
 	}
 	f, err := normalizeArchiveFilter(in.Q, in.LabelID, in.MemberID, in.FromListID, in.Since, in.Until)
 	if err != nil {
-		return DeleteBulkOut{}, err
-	}
-	_, sinceBound, _ := normalizeArchiveDate(in.Since, false)
-	_, untilBound, _ := normalizeArchiveDate(in.Until, true)
-	if err := validateArchiveRange(f, sinceBound, untilBound); err != nil {
 		return DeleteBulkOut{}, err
 	}
 	ids, err := normalizeBulkIDs(in.CardIDs, in.All, in.ConfirmCount, f)

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/events"
@@ -16,12 +17,28 @@ import (
 
 func csv(s string) []string {
 	var out []string
+	seen := map[string]bool{}
 	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
+		if p = strings.TrimSpace(p); p != "" && !seen[p] {
+			seen[p] = true
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+func sanitizeAgentLabel(s string) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s))
+	runes := []rune(s)
+	if len(runes) > 80 {
+		return string(runes[:80])
+	}
+	return s
 }
 
 // envelopeMode reports whether the request asks for the durable envelope stream.
@@ -126,7 +143,7 @@ func (s *Server) sseEvents(w http.ResponseWriter, r *http.Request, e *ops.Env) {
 		last = events.LastSeq(r.Context(), s.DB)
 	}
 	if len(okLists) > 0 {
-		label := strings.TrimSpace(q.Get("agent"))
+		label := sanitizeAgentLabel(q.Get("agent"))
 		if label == "" {
 			label = e.User.Name
 		}
@@ -140,7 +157,9 @@ func (s *Server) sseEvents(w http.ResponseWriter, r *http.Request, e *ops.Env) {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no")
 	ready, _ := json.Marshal(map[string]any{"serverTime": time.Now().UTC().Format(time.RFC3339), "resumeFrom": events.FormatID(last)})
-	fmt.Fprintf(w, "event: ready\ndata: %s\n\n", ready)
+	if _, err := fmt.Fprintf(w, "event: ready\ndata: %s\n\n", ready); err != nil {
+		return
+	}
 	fl.Flush()
 
 	// Credentials and board access are re-checked while the stream is open: rotating or
@@ -148,58 +167,95 @@ func (s *Server) sseEvents(w http.ResponseWriter, r *http.Request, e *ops.Env) {
 	// (and with it the listener registration).
 	recheck := time.NewTicker(3 * time.Second)
 	defer recheck.Stop()
-	scope := append(append([]string{}, okBoards...), okListBoards...)
+	var scope []string
+	seenScope := map[string]bool{}
+	for _, b := range okBoards {
+		if !seenScope[b] {
+			seenScope[b] = true
+			scope = append(scope, b)
+		}
+	}
+	for _, b := range okListBoards {
+		if !seenScope[b] {
+			seenScope[b] = true
+			scope = append(scope, b)
+		}
+	}
 	stillAllowed := func() bool {
-		p := ops.Authenticate(&ops.Env{Ctx: r.Context(), DB: s.DB, Hub: s.Hub, Svc: s.Svc, Req: r}, r)
-		if p == nil || p.UserID != e.User.UserID {
+		if !s.reauth(r, e.User.UserID) {
 			return false
 		}
 		if len(scope) == 0 {
 			return true
 		}
+		now := time.Now()
+		if len(scope) == 1 {
+			ok := authz.BoardLevel(e, scope[0]) >= authz.View
+			ac.m[scope[0]] = accessEntry{ok, now}
+			return ok
+		}
+		lv := authz.BoardLevels(e, scope)
+		anyOK := false
 		for _, b := range scope {
-			if authz.BoardLevel(e, b) >= authz.View {
-				return true
+			ok := lv[b] >= authz.View
+			ac.m[b] = accessEntry{ok, now}
+			if ok {
+				anyOK = true
 			}
 		}
-		return false
+		return anyOK
 	}
-	beat := time.NewTicker(time.Duration(hb) * time.Second)
-	defer beat.Stop()
-	poll := time.NewTicker(2 * time.Second) // safety net if a tick is ever missed
-	defer poll.Stop()
-	for {
+	drain := func() bool {
 		for {
 			f.Since = last
 			rows, err := events.Query(r.Context(), s.DB, f)
 			if err != nil {
-				return
+				return false
 			}
 			for _, row := range rows {
 				last = row.Seq
 				if !ac.can(row.BoardID) {
 					continue
 				}
-				fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", events.FormatID(row.Seq), row.Type, row.JSON())
+				if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", events.FormatID(row.Seq), row.Type, row.JSON()); err != nil {
+					return false
+				}
 			}
 			if len(rows) > 0 {
 				fl.Flush()
 			}
 			if len(rows) < 500 {
-				break
+				return true
 			}
 		}
+	}
+	if !drain() {
+		return
+	}
+	beat := time.NewTicker(time.Duration(hb) * time.Second)
+	defer beat.Stop()
+	poll := time.NewTicker(2 * time.Second) // safety net if a tick is ever missed
+	defer poll.Stop()
+	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticks:
+			if !drain() {
+				return
+			}
 		case <-poll.C:
+			if !drain() {
+				return
+			}
 		case <-recheck.C:
 			if !stillAllowed() {
 				return
 			}
 		case <-beat.C:
-			fmt.Fprint(w, ": ping\n\n")
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
 			fl.Flush()
 		}
 	}

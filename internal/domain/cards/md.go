@@ -4,6 +4,7 @@ import (
 	"html"
 	"html/template"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/crueber/weave/internal/realtime"
@@ -14,24 +15,50 @@ func rtEvent(name, room string, data any) realtime.Event {
 }
 
 var (
-	reCode   = regexp.MustCompile("`([^`\n]+)`")
-	reBold   = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
-	reItalic = regexp.MustCompile(`(^|[^*\w])[*_]([^*_\n]+)[*_]($|[^*\w])`)
-	reStrike = regexp.MustCompile(`~~([^~\n]+)~~`)
-	reLink   = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+|mailto:[^\s)]+)\)`)
-	reHead   = regexp.MustCompile(`^(#{1,3})\s+(.*)$`)
-	reUL     = regexp.MustCompile(`^\s*[-*+]\s+(.*)$`)
-	reOL     = regexp.MustCompile(`^\s*\d+[.)]\s+(.*)$`)
-	reTask   = regexp.MustCompile(`^\[([ xX])\]\s+(.*)$`)
+	reCode        = regexp.MustCompile("`([^`\n]+)`")
+	reBold        = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
+	reItalicStar  = regexp.MustCompile(`(^|[^*\w])\*([^*\n]+)\*($|[^*\w])`)
+	reItalicUnder = regexp.MustCompile(`(^|[^_\w])_([^_\n]+)_($|[^_\w])`)
+	reStrike      = regexp.MustCompile(`~~([^~\n]+)~~`)
+	reLink        = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+|mailto:[^\s)]+)\)`)
+	reHead        = regexp.MustCompile(`^(#{1,3})\s+(.*)$`)
+	reUL          = regexp.MustCompile(`^\s*[-*+]\s+(.*)$`)
+	reOL          = regexp.MustCompile(`^\s*\d+[.)]\s+(.*)$`)
+	reTask        = regexp.MustCompile(`^\[([ xX])\]\s+(.*)$`)
 )
 
-func inline(s string) string {
-	s = html.EscapeString(s)
-	s = reCode.ReplaceAllString(s, "<code>$1</code>")
+func formatEmphasis(s string) string {
 	s = reBold.ReplaceAllString(s, "<strong>$1</strong>")
-	s = reItalic.ReplaceAllString(s, "$1<em>$2</em>$3")
+	s = reItalicStar.ReplaceAllString(s, "$1<em>$2</em>$3")
+	s = reItalicUnder.ReplaceAllString(s, "$1<em>$2</em>$3")
 	s = reStrike.ReplaceAllString(s, "<del>$1</del>")
-	s = reLink.ReplaceAllString(s, `<a href="$2" target="_blank" rel="noopener nofollow ugc">$1</a>`)
+	return s
+}
+
+func inline(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	s = html.EscapeString(s)
+	var codes []string
+	s = reCode.ReplaceAllStringFunc(s, func(m string) string {
+		inner := m[1 : len(m)-1]
+		tok := "\x00C" + strconv.Itoa(len(codes)) + "\x00"
+		codes = append(codes, "<code>"+inner+"</code>")
+		return tok
+	})
+	var links []string
+	s = reLink.ReplaceAllStringFunc(s, func(m string) string {
+		sub := reLink.FindStringSubmatch(m)
+		tok := "\x00L" + strconv.Itoa(len(links)) + "\x00"
+		links = append(links, `<a href="`+sub[2]+`" target="_blank" rel="noopener nofollow ugc">`+formatEmphasis(sub[1])+`</a>`)
+		return tok
+	})
+	s = formatEmphasis(s)
+	for i, l := range links {
+		s = strings.ReplaceAll(s, "\x00L"+strconv.Itoa(i)+"\x00", l)
+	}
+	for i, c := range codes {
+		s = strings.ReplaceAll(s, "\x00C"+strconv.Itoa(i)+"\x00", c)
+	}
 	return s
 }
 

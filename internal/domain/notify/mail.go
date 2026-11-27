@@ -20,9 +20,10 @@ type SMTPConfig struct {
 
 // LoadSMTP resolves the effective SMTP settings.
 func LoadSMTP(e *ops.Env) SMTPConfig {
-	c := SMTPConfig{Host: Config(e, "smtp.host"), User: Config(e, "smtp.user"), Password: Config(e, "smtp.password"),
-		From: Config(e, "smtp.from"), Secure: strings.ToLower(Config(e, "smtp.secure")), SkipVerify: ConfigBool(e, "smtp.skipVerify")}
-	c.Port, _ = strconv.Atoi(Config(e, "smtp.port"))
+	cfg := configBatch(e)
+	c := SMTPConfig{Host: cfg["smtp.host"], User: cfg["smtp.user"], Password: cfg["smtp.password"],
+		From: cfg["smtp.from"], Secure: strings.ToLower(cfg["smtp.secure"]), SkipVerify: parseBool(cfg["smtp.skipVerify"])}
+	c.Port, _ = strconv.Atoi(cfg["smtp.port"])
 	if c.Secure == "" {
 		c.Secure = "starttls"
 	}
@@ -86,7 +87,7 @@ func sendSMTP(cfg SMTPConfig, to []string, subject, text, html string) error {
 	case "none":
 		opts = append(opts, mail.WithTLSPolicy(mail.NoTLS))
 	default:
-		opts = append(opts, mail.WithTLSPolicy(mail.TLSOpportunistic))
+		opts = append(opts, mail.WithTLSPolicy(mail.TLSMandatory))
 	}
 	if cfg.SkipVerify {
 		opts = append(opts, mail.WithTLSConfig(&tls.Config{InsecureSkipVerify: true, ServerName: cfg.Host}))

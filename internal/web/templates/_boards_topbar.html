@@ -22,7 +22,7 @@
 {{define "boards_views"}}{{$b := .Board.ID}}{{$cur := .View}}{{$pk := .Picker}}{{$pu := .PageURL}}{{$q := .Query}}
 {{- if .Picker}}<details class="boards-dd view-pick"><summary aria-label="Board view">{{template "boards_vicon" $cur}}<svg class="view-pick-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><nav class="boards-dd-pop view-pick-pop boards-views" aria-label="Board views">
 {{- else}}<nav class="view-switch boards-views" aria-label="Board views">{{end}}
-  {{template "boards_vlink" dict "Href" (boardsHref $pu "kanban" $q) "View" "kanban" "Cur" $cur "Label" "Kanban" "Picker" $pk}}
+  {{template "boards_vlink" dict "Href" (boardsHref $pu "kanban" $q) "View" "kanban" "Cur" $cur "Label" "Board" "Picker" $pk}}
   {{template "boards_vlink" dict "Href" (boardsHref $pu "list" $q) "View" "list" "Cur" $cur "Label" "List" "Picker" $pk}}
   {{template "boards_vlink" dict "Href" (boardsHref $pu "grid" $q) "View" "grid" "Cur" $cur "Label" "Grid" "Picker" $pk}}
   {{template "boards_vlink" dict "Href" (print "/boards/" $b "/calendar") "View" "calendar" "Cur" $cur "Label" "Calendar" "Picker" $pk}}

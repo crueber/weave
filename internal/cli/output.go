@@ -54,6 +54,9 @@ func lookup(v any, segs []string) (any, bool) {
 	}
 	s := segs[0]
 	if strings.HasPrefix(s, "[") {
+		if !strings.HasSuffix(s, "]") {
+			return nil, false
+		}
 		arr, ok := v.([]any)
 		if !ok {
 			return nil, false
@@ -112,7 +115,7 @@ func buildFieldTree(paths []string) *fieldTree {
 		segs := splitPath(p)
 		keys := segs[:0:0]
 		for _, s := range segs {
-			if !strings.HasPrefix(s, "[") { // [] and [n] are optional: arrays are always mapped over
+			if !(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) { // [] and [n] are optional: arrays are always mapped over
 				keys = append(keys, s)
 			}
 		}
@@ -195,6 +198,9 @@ func EvalJQ(v any, expr string) ([]any, error) {
 func jqStep(stream []any, seg string) ([]any, error) {
 	var next []any
 	if strings.HasPrefix(seg, "[") {
+		if !strings.HasSuffix(seg, "]") {
+			return nil, fmt.Errorf("unclosed bracket %s", seg)
+		}
 		idx := seg[1 : len(seg)-1]
 		n, nerr := strconv.Atoi(idx)
 		if idx != "" && nerr != nil {
@@ -300,9 +306,10 @@ func scalarString(v any) string {
 
 // OutOpts are the global output settings.
 type OutOpts struct {
-	Format string // json | ndjson | table | ids | quiet
-	Fields []string
-	JQ     string
+	Format    string // json | ndjson | table | ids | quiet
+	FormatSet bool   // true when the caller explicitly chose an output format
+	Fields    []string
+	JQ        string
 }
 
 func (a *App) stdoutTTY() bool {
@@ -363,12 +370,14 @@ func (a *App) emit(v any, raw []byte) error {
 		}
 		return nil
 	case "ndjson":
+		var tree *fieldTree
 		if len(o.Fields) > 0 {
-			a.noteUnmatchedFields(rows, o.Fields)
+			tree = buildFieldTree(o.Fields)
+			a.noteUnmatchedFields(rows, o.Fields, tree)
 		}
 		for _, r := range rows {
-			if len(o.Fields) > 0 {
-				r = Project(r, o.Fields)
+			if tree != nil {
+				r = projectNode(r, tree)
 			}
 			b, _ := json.Marshal(r)
 			fmt.Fprintln(w, string(b))
@@ -379,8 +388,9 @@ func (a *App) emit(v any, raw []byte) error {
 	}
 	// json
 	if len(o.Fields) > 0 {
-		a.noteUnmatchedFields(rows, o.Fields)
-		v = projectEnvelope(v, o.Fields)
+		tree := buildFieldTree(o.Fields)
+		a.noteUnmatchedFields(rows, o.Fields, tree)
+		v = projectEnvelopeTree(v, tree)
 		raw = nil
 	}
 	if raw != nil && !a.stdoutTTY() {
@@ -400,14 +410,14 @@ func (a *App) emit(v any, raw []byte) error {
 
 // noteUnmatchedFields warns on stderr when no --fields path matches any record, so a typo does not
 // look like an empty result. The output itself is unchanged.
-func (a *App) noteUnmatchedFields(rows []any, fields []string) {
+func (a *App) noteUnmatchedFields(rows []any, fields []string, tree *fieldTree) {
 	var keys []string
 	for _, r := range rows {
 		m, ok := r.(map[string]any)
 		if !ok {
 			return
 		}
-		if p, _ := Project(m, fields).(map[string]any); len(p) > 0 {
+		if p, _ := projectNode(m, tree).(map[string]any); len(p) > 0 {
 			return
 		}
 		if keys == nil {
@@ -420,9 +430,13 @@ func (a *App) noteUnmatchedFields(rows []any, fields []string) {
 }
 
 func projectEnvelope(v any, fields []string) any {
+	return projectEnvelopeTree(v, buildFieldTree(fields))
+}
+
+func projectEnvelopeTree(v any, tree *fieldTree) any {
 	m, ok := v.(map[string]any)
 	if !ok {
-		return Project(v, fields)
+		return projectNode(v, tree)
 	}
 	out := map[string]any{}
 	for k, c := range m {
@@ -431,10 +445,10 @@ func projectEnvelope(v any, fields []string) any {
 			for pk, pv := range c.(map[string]any) {
 				cp[pk] = pv
 			}
-			cp["items"] = Project(page, fields)
+			cp["items"] = projectNode(page, tree)
 			out[k] = cp
 		} else if k == "item" || k == "items" {
-			out[k] = Project(c, fields)
+			out[k] = projectNode(c, tree)
 		} else {
 			out[k] = c
 		}
@@ -486,7 +500,7 @@ func (a *App) writeTable(rows []any) error {
 		head[i] = strings.ToUpper(c)
 	}
 	hdr := strings.Join(head, "\t")
-	if colorOK(os.Stdout) && a.Stdout == io.Writer(os.Stdout) {
+	if !a.NoColor && colorOK(os.Stdout) && a.Stdout == io.Writer(os.Stdout) {
 		hdr = "\x1b[1m" + hdr + "\x1b[0m"
 	}
 	fmt.Fprintln(tw, hdr)

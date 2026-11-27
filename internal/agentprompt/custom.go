@@ -166,7 +166,18 @@ func Expand(text string, vals map[string]string) string {
 	sb.Grow(len(text) * 2)
 	lines := strings.SplitAfter(text, "\n")
 	for _, ln := range lines {
-		body := strings.TrimSuffix(ln, "\n")
+		eol := ""
+		body := ln
+		if strings.HasSuffix(body, "\r\n") {
+			body = body[:len(body)-2]
+			eol = "\r\n"
+		} else if strings.HasSuffix(body, "\n") {
+			body = body[:len(body)-1]
+			eol = "\n"
+		} else if strings.HasSuffix(body, "\r") {
+			body = body[:len(body)-1]
+			eol = "\r"
+		}
 		tok := strings.TrimLeft(body, " \t")
 		if len(tok) > 2 && tok[0] == '{' && tok[len(tok)-1] == '}' && isTokenName(tok[1:len(tok)-1]) {
 			if v, ok := vals[tok[1:len(tok)-1]]; ok {
@@ -181,7 +192,7 @@ func Expand(text string, vals map[string]string) string {
 						v += "\n"
 					}
 				}
-				sb.WriteString(indent + v + ln[len(body):])
+				sb.WriteString(indent + v + eol)
 				continue
 			}
 		}

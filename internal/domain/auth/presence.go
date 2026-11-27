@@ -56,8 +56,14 @@ func init() {
 
 	ops.Register(ops.Op{Name: "presence.list", Summary: "Presence of every user who is not offline", Method: "GET", Path: "/presence", UI: "GET /admin/users (presence dot)"},
 		func(e *ops.Env, _ NoInput) (PresenceList, error) {
-			rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,name,presence,last_seen_at FROM users WHERE presence<>'offline' AND deleted_at IS NULL AND is_deactivated=0 AND last_seen_at>? ORDER BY name`,
-				time.Now().UTC().Add(-presenceTTL).Format(time.RFC3339))
+			q := `SELECT id,name,presence FROM users WHERE presence<>'offline' AND deleted_at IS NULL AND is_deactivated=0 AND last_seen_at>?`
+			args := []any{time.Now().UTC().Add(-presenceTTL).Format(time.RFC3339)}
+			if directoryRestricted(e) {
+				sub, subArgs := visibleUsersSQL(e)
+				q += ` AND id IN (` + sub + `)`
+				args = append(args, subArgs...)
+			}
+			rows, err := e.DB.QueryContext(e.Ctx, q+` ORDER BY name`, args...)
 			if err != nil {
 				return PresenceList{}, err
 			}
@@ -65,8 +71,7 @@ func init() {
 			out := PresenceList{Items: []PresenceEntry{}}
 			for rows.Next() {
 				var p PresenceEntry
-				var seen *string
-				if err := rows.Scan(&p.UserID, &p.Name, &p.State, &seen); err != nil {
+				if err := rows.Scan(&p.UserID, &p.Name, &p.State); err != nil {
 					return out, err
 				}
 				out.Items = append(out.Items, p)

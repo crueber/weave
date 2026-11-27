@@ -211,10 +211,17 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 	// the old card gives up its rule either way, so it never spawns twice
 	var newID string
 	var landed boards.LandResult
+	var claimed bool
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET recurrence=NULL,updated_at=? WHERE id=? AND recurrence IS NOT NULL`, db.Now(), cardID); err != nil {
+		claimed = false
+		res, err := tx.ExecContext(e.Ctx, `UPDATE cards SET recurrence=NULL,updated_at=? WHERE id=? AND recurrence IS NOT NULL`, db.Now(), cardID)
+		if err != nil {
 			return err
 		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil
+		}
+		claimed = true
 		if r.Until != "" {
 			if u, err := parseTime(r.Until); err == nil && next.After(u) {
 				return nil
@@ -235,8 +242,8 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 			if b, t, err := listRef(e.Ctx, tx, r.ListID); err == nil && b == src.BoardID && (t == "active" || t == "closed") {
 				list = r.ListID
 			}
-		} else if t := listType(e.Ctx, tx, src.ListID); t != "active" && t != "closed" {
-			if l := firstActive(e.Ctx, tx, src.BoardID); l != "" {
+		} else if _, t, _ := listRef(e.Ctx, tx, src.ListID); t != "active" && t != "closed" {
+			if l, _ := firstListQ(e.Ctx, tx, src.BoardID, "active"); l != "" {
 				list = l
 			}
 		}
@@ -258,7 +265,7 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 			}
 			l := p.List
 			if p.ListType != "active" {
-				l = firstActive(e.Ctx, tx, p.Board)
+				l, _ = firstListQ(e.Ctx, tx, p.Board, "active")
 			}
 			if l != "" {
 				also = append(also, boards.Landing{ListID: l})
@@ -267,7 +274,7 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 		newID, landed, err = cloneCard(e, tx, src, cloneOpts{Name: src.Name, ListID: list, Position: pos, DueDate: &due, Recurrence: rec, Also: also})
 		return err
 	})
-	if err != nil {
+	if err != nil || !claimed {
 		return "", err
 	}
 	if newID != "" {
@@ -292,16 +299,6 @@ func spawnNextAt(e *ops.Env, cardID string, now time.Time) (string, error) {
 		emit(e, "cardUpdate", "card.updated", cur.BoardID, cardID, map[string]any{"card": cur})
 	}
 	return newID, nil
-}
-
-func listType(ctx context.Context, q querier, id string) (t string) {
-	_ = q.QueryRowContext(ctx, `SELECT type FROM lists WHERE id=?`, id).Scan(&t)
-	return
-}
-
-func firstActive(ctx context.Context, q querier, boardID string) (id string) {
-	_ = q.QueryRowContext(ctx, `SELECT id FROM lists WHERE board_id=? AND type='active' ORDER BY position LIMIT 1`, boardID).Scan(&id)
-	return
 }
 
 // RunRecurrence spawns the next occurrence of every recurring card whose trigger

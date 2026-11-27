@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,13 +125,9 @@ func newEvent(id, typ string, raw []byte) Event {
 // marshal returns the envelope as one JSON line.
 func (e Event) marshal() []byte {
 	if e.Raw != nil {
-		var buf strings.Builder
-		if json.Valid(e.Raw) {
-			// compact
-			var m json.RawMessage = e.Raw
-			b, _ := json.Marshal(m)
-			buf.Write(b)
-			return []byte(buf.String())
+		var buf bytes.Buffer
+		if json.Compact(&buf, e.Raw) == nil {
+			return buf.Bytes()
 		}
 	}
 	b, _ := json.Marshal(e.M)
@@ -182,7 +179,13 @@ func (c *cursor) finish(e *cursorEntry) {
 		if c.q[0].id != "" {
 			last = c.q[0].id
 		}
+		c.q[0] = nil
 		c.q = c.q[1:]
+	}
+	if len(c.q) == 0 {
+		c.q = nil
+	} else if cap(c.q) > 64 && len(c.q) < cap(c.q)/4 {
+		c.q = append([]*cursorEntry(nil), c.q...)
 	}
 	if last != "" && last != c.done {
 		c.done = last
@@ -224,7 +227,8 @@ type Listener struct {
 	cur      *cursor
 	lastRecv string
 	seen     map[string]bool
-	seenQ    []string
+	seenRing []string
+	seenPos  int
 	Resumed  bool // true when started from a saved cursor
 	Connects atomic.Int64
 	existing bool
@@ -280,7 +284,7 @@ func (l *Listener) streamURL() string {
 		q.Set("since", l.lastRecv)
 	}
 	if l.Rooms == "" {
-		q.Set("heartbeat", strconv.Itoa(int(l.Heartbeat/time.Second)))
+		q.Set("heartbeat", strconv.Itoa(max(int(l.Heartbeat/time.Second), 1)))
 	}
 	if l.AgentLabel != "" {
 		q.Set("agent", l.AgentLabel)
@@ -381,8 +385,9 @@ func (l *Listener) connectOnce(ctx context.Context) (bool, error) {
 	}
 	if hb > 0 {
 		limit := time.Duration(l.WatchdogFactor) * hb
+		tick := max(limit/6, time.Millisecond)
 		go func() {
-			t := time.NewTicker(limit / 6)
+			t := time.NewTicker(tick)
 			defer t.Stop()
 			for {
 				select {
@@ -495,11 +500,20 @@ func (l *Listener) deliverExisting(ctx context.Context) error {
 	return nil
 }
 
+const maxSeenIDs = 8192
+
 func (l *Listener) remember(id string) {
-	l.seen[id] = true
-	l.seenQ = append(l.seenQ, id)
-	if len(l.seenQ) > 8192 {
-		delete(l.seen, l.seenQ[0])
-		l.seenQ = l.seenQ[1:]
+	if l.seen[id] {
+		return
 	}
+	l.seen[id] = true
+	if len(l.seenRing) < maxSeenIDs {
+		l.seenRing = append(l.seenRing, id)
+		return
+	}
+	if old := l.seenRing[l.seenPos]; old != "" {
+		delete(l.seen, old)
+	}
+	l.seenRing[l.seenPos] = id
+	l.seenPos = (l.seenPos + 1) % maxSeenIDs
 }

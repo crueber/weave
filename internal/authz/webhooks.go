@@ -1,6 +1,10 @@
 package authz
 
-import "github.com/crueber/weave/internal/ops"
+import (
+	"errors"
+
+	"github.com/crueber/weave/internal/ops"
+)
 
 // Webhook scopes (webhooks.project_id / board_id):
 //
@@ -14,6 +18,11 @@ import "github.com/crueber/weave/internal/ops"
 //
 // A board-scoped webhook never also carries a project scope when a non-admin manages it. Agents never manage
 // webhooks. Missing access answers not_found so a webhook's existence does not leak.
+
+// canManageBoardWebhooks is the pure predicate for board-scoped webhooks (used by Board caps).
+func canManageBoardWebhooks(e *ops.Env, boardLevel Level) bool {
+	return e.User != nil && !e.User.IsAgent && boardLevel >= Manage
+}
 
 // RequireWebhookScope checks that the caller may create, see or manage a webhook with this scope.
 func RequireWebhookScope(e *ops.Env, projectID, boardID string) error {
@@ -31,7 +40,8 @@ func RequireWebhookScope(e *ops.Env, projectID, boardID string) error {
 		return ops.Forbidden()
 	}
 	if err := RequireBoard(e, boardID, Manage); err != nil {
-		if oe, ok := err.(*ops.Error); ok && oe.Status == 404 {
+		var oe *ops.Error
+		if errors.As(err, &oe) && oe.Status == 404 {
 			return ops.NotFound("webhook")
 		}
 		return err

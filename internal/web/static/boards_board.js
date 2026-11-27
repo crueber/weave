@@ -2,8 +2,9 @@
 // what the user is doing (per-column merge), toasts with Undo, collapse state.
 (function () {
   if (window.Boards) { window.Boards.setup && window.Boards.setup(); return; }
+  var W = window.Weave;
   var B = window.Boards = { dragging: false };
-  var esc = window.CSS && CSS.escape ? CSS.escape : function (s) { return String(s).replace(/[^\w-]/g, '\\$&'); };
+  var esc = W.esc;
   B.esc = esc;
 
   B.body = function () { return document.getElementById('board-body'); };
@@ -14,46 +15,33 @@
   B.canEdit = function () { var l = B.lists(); return !!(l && l.dataset.canEdit); };
   B.reduced = function () { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; };
 
+  // Track the board's active query string so refreshes and closing sheets never drop active filters (?q=...&view=list).
+  function queryOf(u) { if (!u) return ''; var i = u.indexOf('?'); return i >= 0 ? u.slice(i) : ''; }
+  var boardSearch = location.search;
+  function syncBoardSearch() {
+    if (/^\/boards\/[^/]+$/.test(location.pathname)) { boardSearch = location.search; return; }
+    var b = B.body(), bu = b && b.dataset && b.dataset.bodyUrl;
+    if (bu && !/\/archive(?:[?]|$)/.test(bu)) boardSearch = queryOf(bu);
+  }
+  syncBoardSearch();
+  B.search = function () {
+    if (/^\/boards\/[^/]+$/.test(location.pathname)) boardSearch = location.search;
+    return boardSearch;
+  };
+
   // ---- announcements + toasts ----
   B.announce = function (msg) {
     var r = document.getElementById('boards-announce'); if (!r) return;
     r.textContent = ''; setTimeout(function () { r.textContent = msg; }, 30);
   };
   B.toast = function (msg, o) {
-    o = o || {};
-    var host = document.getElementById('boards-toasts'); if (!host) return;
-    var t = document.createElement('div'); t.className = 'boards-toast' + (o.error ? ' is-error' : '');
-    if (o.error) t.setAttribute('role', 'alert');
-    var s = document.createElement('span'); s.textContent = msg; t.appendChild(s);
-    function done() { clearTimeout(timer); t.remove(); }
-    if (o.action) {
-      var b = document.createElement('button'); b.type = 'button'; b.textContent = o.action;
-      b.addEventListener('click', function () { done(); o.onAction && o.onAction(); });
-      t.appendChild(b);
-    }
-    host.appendChild(t);
-    var timer = setTimeout(done, o.ms || (o.action ? 6000 : 4000));
-    return t;
+    var opts = { board: true };
+    if (o) for (var k in o) opts[k] = o[k];
+    return W.toast(msg, opts);
   };
 
   // ---- tiny fetch helper that speaks htmx (so handlers answer with fragments) ----
-  B.post = function (url, data, method) {
-    var body = new URLSearchParams();
-    Object.keys(data || {}).forEach(function (k) {
-      [].concat(data[k]).forEach(function (v) { body.append(k, v); });
-    });
-    return fetch(url, { method: method || 'POST', credentials: 'same-origin', body: body,
-      headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave', 'Content-Type': 'application/x-www-form-urlencoded' } })
-      .then(function (r) {
-        return r.text().then(function (html) {
-          var trig = {}; try { trig = JSON.parse(r.headers.get('HX-Trigger') || '{}'); } catch (e) { trig = {}; }
-          var err = '';
-          if (!r.ok) { var m = /<div[^>]*toast[^>]*>([^<]*)</.exec(html); err = (m && m[1]) || 'Something went wrong'; }
-          if (r.headers.get('HX-Redirect')) { location.href = r.headers.get('HX-Redirect'); }
-          return { ok: r.ok, status: r.status, html: html, trigger: trig, error: err };
-        });
-      }, function () { return { ok: false, status: 0, html: '', trigger: {}, error: 'You appear to be offline' }; });
-  };
+  B.post = W.post;
   B.fragment = function (html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content; };
   // refetch one tile (after quick edit / closing the card sheet) and put focus back on it when asked
   B.refreshTile = function (id, focus) {
@@ -68,13 +56,12 @@
   B.process = function (el) { if (window.htmx && el) htmx.process(el); };
 
   // ---- collapse state (per browser) ----
-  function store(k, v) { try { if (v === undefined) return JSON.parse(localStorage.getItem(k) || 'null'); localStorage.setItem(k, JSON.stringify(v)); } catch (e) { return null; } }
-  var collapsed = store('weave.boards.collapsed') || {};
+  var collapsed = W.ls.getJSON('weave.boards.collapsed') || {};
   B.setCollapsed = function (col, on) {
     col.classList.toggle('is-collapsed', on);
     var b = col.querySelector('[data-collapse]'); if (b) { b.setAttribute('aria-expanded', on ? 'false' : 'true'); b.setAttribute('aria-label', (on ? 'Expand' : 'Collapse') + ' list'); }
     if (on) collapsed[col.dataset.id] = 1; else delete collapsed[col.dataset.id];
-    store('weave.boards.collapsed', collapsed);
+    W.ls.setJSON('weave.boards.collapsed', collapsed);
   };
   B.initCol = function (col) {
     if (collapsed[col.dataset.id]) col.classList.add('is-collapsed');
@@ -278,7 +265,7 @@
     }
     if (B.dragging) { B.schedule(1200); return; }
     if (force) document.querySelectorAll('.boards-col').forEach(function (c) { c.__sig = null; });
-    return fetch('/ui/boards/' + id + '/body' + location.search, { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
+    return fetch('/ui/boards/' + id + '/body' + B.search(), { credentials: 'same-origin', headers: { 'HX-Request': 'true', 'X-Requested-With': 'weave' } })
       .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
       .then(function (html) {
         if (archiveMode()) return; // the Show request won the race while this refresh was in flight
@@ -289,17 +276,29 @@
   };
   B.schedule = function (ms) { if (archiveMode()) return; clearTimeout(timer); timer = setTimeout(B.refresh, ms || 300); };
 
-  var verbs = ['created', 'updated', 'deleted', 'moved', 'claimed', 'released'];
-  var nouns = ['board', 'list', 'card', 'label', 'boardMembership', 'cardMembership', 'cardLabel', 'task', 'taskList', 'comment', 'attachment', 'customFieldValue'];
-  // card.placed / card.unplaced: a card was put on or taken off this board; card.placement.changed: a card on this
-  // board changed on one of its OTHER boards (its "also on" marker may change)
-  var liveNames = ['listener.joined', 'listener.left', 'time.updated', 'card.placement.changed', 'card.placed', 'card.unplaced'];
-  nouns.forEach(function (n) { verbs.forEach(function (v) { liveNames.push(n + '.' + v); }); });
+  var liveNames = [
+    'board.updated', 'board.deleted',
+    'list.created', 'list.updated', 'list.deleted', 'list.moved',
+    'card.created', 'card.updated', 'card.deleted', 'card.moved', 'card.claimed', 'card.released',
+    'card.placed', 'card.unplaced', 'card.placement.changed',
+    'label.created', 'label.updated', 'label.deleted', 'label.added', 'label.removed',
+    'member.added', 'member.removed',
+    'boardMembership.created', 'boardMembership.updated', 'boardMembership.deleted',
+    'cardMembership.created', 'cardMembership.deleted',
+    'cardLabel.created', 'cardLabel.deleted',
+    'task.created', 'task.updated', 'task.deleted', 'task.moved',
+    'taskList.created', 'taskList.updated', 'taskList.deleted', 'taskList.moved',
+    'comment.created', 'comment.updated', 'comment.deleted',
+    'attachment.created', 'attachment.updated', 'attachment.deleted',
+    'customFieldValue.created', 'customFieldValue.updated', 'customFieldValue.deleted',
+    'listener.joined', 'listener.left', 'time.updated'
+  ];
+  function scheduleRefresh() { if (B.boardId()) B.schedule(300); }
   // The tab's one realtime stream belongs to notify_live.js (layout); the board adds its room and
   // listeners to it. After a dropped connection comes back, refresh once (rooms have no replay).
   var live = window.WeaveLive;
   if (live) {
-    liveNames.concat(['message', 'reconnect']).forEach(function (n) { live.on(n, function () { if (B.boardId()) B.schedule(300); }); });
+    liveNames.concat(['message', 'reconnect']).forEach(function (n) { live.on(n, scheduleRefresh); });
     live.on('list.updated', autoArchived);
   }
   function setup() {
@@ -311,8 +310,8 @@
     if (es) { es.close(); es = null; }
     if (!id || !window.EventSource) return;
     es = new EventSource('/events?rooms=board:' + encodeURIComponent(id));
-    liveNames.forEach(function (n) { es.addEventListener(n, function () { B.schedule(300); }); });
-    es.onmessage = function () { B.schedule(300); };
+    liveNames.forEach(function (n) { es.addEventListener(n, scheduleRefresh); });
+    es.onmessage = scheduleRefresh;
     es.addEventListener('list.updated', autoArchived);
   }
   // A column's auto-archive rule ran (one summary event per pass; the per-card events are quiet): say so once. The
@@ -346,17 +345,18 @@
         if (pushURL && pushURL !== 'false') {
           var target = pushURL === 'true' ? p : pushURL;
           if (target) {
+            boardSearch = queryOf(target);
             var absolute = new URL(target, location.href).href;
             if (absolute !== location.href) history.pushState(history.state, '', target);
           }
-        } else if (p) history.replaceState(history.state, '', p);
+        } else if (p) { boardSearch = queryOf(p); history.replaceState(history.state, '', p); }
       } catch (x) { /* history can be unavailable in embedded views */ }
     }
   });
   // other mutations answered with 4xx: show the message as a toast (htmx would swap by default)
   document.body.addEventListener('htmx:responseError', function (e) {
-    var m = /<div[^>]*toast[^>]*>([^<]*)</.exec(e.detail.xhr.responseText || '');
-    if (m && B.toast) { B.toast(m[1], { error: true }); }
+    var msg = W.errorOf(e.detail.xhr.responseText || '');
+    if (msg && B.toast) { B.toast(msg, { error: true }); }
   });
 
   // Saved filters always capture the live filter form (minus the view).
@@ -384,10 +384,6 @@
         });
       });
     } });
-  });
-  // list menu: move-cards target list excludes the list itself
-  document.addEventListener('htmx:afterSwap', function (e) {
-    var s = e.target; if (s && s.dataset && s.dataset.excludeList) { var o = s.querySelector('option[value="' + s.dataset.excludeList + '"]'); if (o) o.remove(); }
   });
   // submitting a list-menu action closes the menu so the refreshed column can apply
   document.body.addEventListener('htmx:beforeRequest', function (e) {

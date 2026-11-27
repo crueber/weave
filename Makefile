@@ -1,7 +1,6 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-PKG := github.com/crueber/weave/internal/domain/admin
 VPKG := github.com/crueber/weave/internal/version
-LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(VPKG).Version=$(VERSION)
+LDFLAGS := -s -w -X $(VPKG).Version=$(VERSION)
 WEAVE_URL ?= http://localhost:8080
 
 .PHONY: build cli skill skill-check release-local test vet docker run e2e ui-smoke site site-preview

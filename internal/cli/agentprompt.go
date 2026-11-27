@@ -28,6 +28,8 @@ func cmdAgentPrompt(a *App, args []string) int {
 	boardRaw := firstNonEmpty(p.Str("board"), os.Getenv("WEAVE_BOARD"))
 	resolveBoard := func() (string, error) { return a.Resolve(ctx, "board", boardRaw, Scope{}) }
 	switch {
+	case p.Bool("general"):
+		params["scope"] = "general"
 	case p.Bool("work-order"):
 		if boardRaw == "" || p.Str("list") == "" || p.Str("card") == "" {
 			return a.failUsage("a work order needs --board, --list and --card\n" + usage)

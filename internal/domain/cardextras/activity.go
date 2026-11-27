@@ -51,18 +51,29 @@ func scanAction(r *sql.Rows) (ActionItem, error) {
 	return a, err
 }
 
-func listActions(e *ops.Env, where string, args []any, before string, limit int) ([]ActionItem, error) {
+var actionVerbs = map[string]string{
+	"taskListCreate": "added a task list", "taskListUpdate": "updated a task list", "taskListDelete": "deleted a task list",
+	"taskCreate": "added task", "taskUpdate": "updated task", "taskComplete": "completed task", "taskReopen": "reopened task", "taskDelete": "deleted a task",
+	"commentCreate": "commented", "commentUpdate": "edited a comment", "commentDelete": "deleted a comment",
+	"attachmentCreate": "attached", "attachmentUpdate": "updated attachment", "attachmentDelete": "removed attachment", "attachmentCover": "changed the cover",
+	"customFieldGroupCreate": "added a field group", "customFieldGroupUpdate": "updated a field group", "customFieldGroupDelete": "removed a field group",
+	"customFieldCreate": "added a field", "customFieldUpdate": "updated a field", "customFieldDelete": "removed a field",
+	"customFieldValueUpdate": "set a field value", "customFieldValueDelete": "cleared a field value",
+	"customFieldRowCreate": "added a field row", "customFieldRowUpdate": "reordered a field row", "customFieldRowDelete": "removed a field row",
+	"stopwatchStart": "started the stopwatch", "stopwatchStop": "stopped the stopwatch", "stopwatchReset": "reset time tracking",
+	"timeEntryCreate": "logged time", "timeEntryUpdate": "edited a time entry", "timeEntryDelete": "deleted a time entry",
+	"cardCreate": "created the card", "cardMove": "moved the card", "cardUpdate": "updated the card", "cardDelete": "deleted the card",
+	"cardPlace": "placed the card on a board", "cardUnplace": "removed the card from a board",
+	"cardMembershipCreate": "added a member", "cardMembershipDelete": "removed a member",
+	"cardLabelCreate": "added a label", "cardLabelDelete": "removed a label",
+	"cardClaim": "claimed the card", "cardRelease": "released the card",
+}
+
+func actionLimit(limit int) int {
 	if limit <= 0 || limit > 200 {
-		limit = 50
+		return 50
 	}
-	q := actionSelect + ` WHERE ` + where
-	if before != "" {
-		q += ` AND (a.created_at,a.id) < (SELECT created_at,id FROM actions WHERE id=?)`
-		args = append(args, before)
-	}
-	q += ` ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
-	args = append(args, limit)
-	return query(e.Ctx, e.DB, scanAction, q, args...)
+	return limit
 }
 
 // ActionText renders a short human sentence fragment for an activity row.
@@ -70,19 +81,7 @@ func ActionText(a ActionItem) string {
 	var d map[string]any
 	_ = json.Unmarshal(a.Data, &d)
 	name, _ := d["name"].(string)
-	verbs := map[string]string{
-		"taskListCreate": "added a task list", "taskListUpdate": "updated a task list", "taskListDelete": "deleted a task list",
-		"taskCreate": "added task", "taskUpdate": "updated task", "taskComplete": "completed task", "taskReopen": "reopened task", "taskDelete": "deleted a task",
-		"commentCreate": "commented", "commentUpdate": "edited a comment", "commentDelete": "deleted a comment",
-		"attachmentCreate": "attached", "attachmentUpdate": "updated attachment", "attachmentDelete": "removed attachment", "attachmentCover": "changed the cover",
-		"customFieldGroupCreate": "added a field group", "customFieldGroupUpdate": "updated a field group", "customFieldGroupDelete": "removed a field group",
-		"customFieldCreate": "added a field", "customFieldUpdate": "updated a field", "customFieldDelete": "removed a field",
-		"customFieldValueUpdate": "set a field value", "customFieldValueDelete": "cleared a field value",
-		"stopwatchStart": "started the stopwatch", "stopwatchStop": "stopped the stopwatch", "stopwatchReset": "reset time tracking",
-		"timeEntryCreate": "logged time", "timeEntryUpdate": "edited a time entry", "timeEntryDelete": "deleted a time entry",
-		"createCard": "created the card", "cardClaim": "claimed the card", "cardRelease": "released the card", "moveCard": "moved the card",
-	}
-	s, ok := verbs[a.Type]
+	s, ok := actionVerbs[a.Type]
 	if !ok {
 		s = humanize(a.Type)
 	}
@@ -134,7 +133,15 @@ func init() {
 		}
 		// quiet per-card events (bulk side effects: auto-archive, applying a template) are left out of the board feed;
 		// each bulk change records its own summary row. The card's own feed keeps them.
-		return listActions(e, `a.board_id=? AND (a.card_id IS NULL OR json_extract(a.data,'$.quiet') IS NOT 1)`, []any{in.BoardID}, in.Before, in.Limit)
+		q := actionSelect + ` WHERE a.board_id=? AND (a.card_id IS NULL OR json_extract(a.data,'$.quiet') IS NOT 1)`
+		args := []any{in.BoardID}
+		if in.Before != "" {
+			q += ` AND (a.created_at,a.id) < (SELECT created_at,id FROM actions WHERE id=? AND board_id=?)`
+			args = append(args, in.Before, in.BoardID)
+		}
+		q += ` ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
+		args = append(args, actionLimit(in.Limit))
+		return query(e.Ctx, e.DB, scanAction, q, args...)
 	})
 	ops.Register(ops.Op{Name: "activity.card", Summary: "Card activity feed (actions), newest first. Only what was recorded on boards you can view; an event recorded on several boards (the card is on several) is listed once", Method: "GET", Path: "/cards/{cardId}/actions",
 		Auth: ops.AuthPublic, UI: "GET /ui/cards/{id}/activity"}, func(e *ops.Env, in CardActionsIn) ([]ActionItem, error) {
@@ -146,39 +153,44 @@ func init() {
 		// card has left keeps its rows for that board's viewers), and one row per logical event (COALESCE(origin_id,id)):
 		// the context board's copy, else the oldest viewable copy. The filter runs before the dedupe, so a hidden
 		// origin row never hides the event or names its board. Two queries plus one BoardLevels, whatever the history.
+		all, err := query(e.Ctx, e.DB, scanString, `SELECT DISTINCT board_id FROM actions WHERE card_id=?`, in.CardID)
+		if err != nil {
+			return nil, err
+		}
 		var boards []string
-		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT DISTINCT board_id FROM actions WHERE card_id=?`, in.CardID); err == nil {
-			var all []string
-			for rows.Next() {
-				var b string
-				if rows.Scan(&b) == nil {
-					all = append(all, b)
-				}
-			}
-			rows.Close()
-			for b, l := range authz.BoardLevels(e, all) {
-				if l >= authz.View {
-					boards = append(boards, b)
-				}
+		for b, l := range authz.BoardLevels(e, all) {
+			if l >= authz.View {
+				boards = append(boards, b)
 			}
 		}
 		if len(boards) == 0 {
 			return []ActionItem{}, nil
 		}
 		sort.Strings(boards)
-		ph := "?" + strings.Repeat(",?", len(boards)-1)
-		args := []any{in.CardID}
+		ph := inPlaceholders(len(boards))
+		args := make([]any, 0, 2+len(boards)*2+3)
+		args = append(args, a.BoardID, in.CardID)
 		for _, b := range boards {
 			args = append(args, b)
 		}
-		args = append(args, in.CardID)
-		for _, b := range boards {
-			args = append(args, b)
+		q := `WITH ranked AS (
+			SELECT id,board_id,card_id,user_id,type,data,created_at,
+				ROW_NUMBER() OVER (PARTITION BY COALESCE(origin_id,id) ORDER BY (board_id=?) DESC, id ASC) AS rn
+			FROM actions WHERE card_id=? AND board_id IN (` + ph + `)
+		)
+		SELECT a.id,a.board_id,a.card_id,c.name,a.user_id,u.name,a.type,a.data,a.created_at
+		FROM ranked a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN cards c ON c.id=a.card_id
+		WHERE a.rn=1`
+		if in.Before != "" {
+			q += ` AND (a.created_at,a.id) < (SELECT created_at,id FROM actions WHERE id=? AND card_id=? AND board_id IN (` + ph + `))`
+			args = append(args, in.Before, in.CardID)
+			for _, b := range boards {
+				args = append(args, b)
+			}
 		}
-		args = append(args, a.BoardID, a.BoardID, a.BoardID, a.BoardID)
-		return listActions(e, `a.card_id=? AND a.board_id IN (`+ph+`) AND NOT EXISTS (SELECT 1 FROM actions x WHERE x.card_id=? AND x.id<>a.id
-			AND COALESCE(x.origin_id,x.id)=COALESCE(a.origin_id,a.id) AND x.board_id IN (`+ph+`)
-			AND ((x.board_id=?) > (a.board_id=?) OR ((x.board_id=?) = (a.board_id=?) AND x.id < a.id)))`, args, in.Before, in.Limit)
+		q += ` ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
+		args = append(args, actionLimit(in.Limit))
+		return query(e.Ctx, e.DB, scanAction, q, args...)
 	})
 }
 

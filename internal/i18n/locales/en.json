@@ -18,7 +18,5 @@
   "common.delete": "Delete",
   "common.create": "Create",
   "common.close": "Close",
-  "login.title": "Sign in",
-  "login.email": "Email or username",
-  "login.password": "Password"
+  "login.title": "Sign in"
 }

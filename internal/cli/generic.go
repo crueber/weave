@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
-	"sort"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -62,7 +63,7 @@ func fieldSpecs(o *Op) []FlagSpec {
 		}
 		specs = append(specs, s)
 	}
-	return append(specs, FlagSpec{Name: "output-file", Aliases: []string{"out"}, Short: "o"})
+	return specs
 }
 
 // fieldAliases are the short flag names the workflow shortcuts use (card create --desc/--due), accepted
@@ -115,7 +116,7 @@ func (a *App) cmdOp(o *Op, args []string) int {
 	pi := 0
 	raws := map[string]string{}
 	for _, f := range o.Fields {
-		if p.Has(f.Name) && f.In != "file" || (f.In == "file" && p.Has(f.Name)) {
+		if p.Has(f.Name) {
 			raws[f.Name] = joinMulti(p.All(f.Name))
 		}
 	}
@@ -129,15 +130,25 @@ func (a *App) cmdOp(o *Op, args []string) int {
 		raws[pathFields[pi].Name] = pos
 		pi++
 	}
-	// context for name resolution
-	sc := Scope{}
-	var rerr error
-	if v := firstNonEmpty(raws["projectId"], p.Str("project"), os.Getenv("WEAVE_PROJECT")); v != "" && o.Tag != "project" {
-		if sc.ProjectID, rerr = a.Resolve(ctx, "project", v, Scope{}); rerr != nil {
-			return a.fail(rerr)
+	// context for name resolution: only resolve WEAVE_PROJECT/WEAVE_BOARD lazily when an op field
+	// needs it or explicit --project/--board flags were passed.
+	needProject := raws["projectId"] != "" || p.Has("project")
+	needBoard := raws["boardId"] != "" || p.Has("board") || (o.Tag == "board" && raws["id"] != "")
+	for _, f := range o.Fields {
+		raw, ok := raws[f.Name]
+		if !ok || f.In == "file" || f.Type != "string" {
+			continue
 		}
-		if _, ok := raws["projectId"]; ok {
-			raws["projectId"] = sc.ProjectID
+		switch kindOfField(f.Name, o.Tag) {
+		case "board":
+			needBoard = true
+			if !looksLikeID(raw) {
+				needProject = true
+			}
+		case "list", "label", "card":
+			if !looksLikeID(raw) {
+				needBoard = true
+			}
 		}
 	}
 	boardRaw := firstNonEmpty(raws["boardId"], p.Str("board"), os.Getenv("WEAVE_BOARD"))
@@ -146,7 +157,22 @@ func (a *App) cmdOp(o *Op, args []string) int {
 			boardRaw = r
 		}
 	}
-	if boardRaw != "" {
+	if needBoard && !needProject && boardRaw != "" && !looksLikeID(boardRaw) {
+		needProject = true
+	}
+	sc := Scope{}
+	var rerr error
+	if needProject && o.Tag != "project" {
+		if v := firstNonEmpty(raws["projectId"], p.Str("project"), os.Getenv("WEAVE_PROJECT")); v != "" {
+			if sc.ProjectID, rerr = a.Resolve(ctx, "project", v, Scope{}); rerr != nil {
+				return a.fail(rerr)
+			}
+			if _, ok := raws["projectId"]; ok {
+				raws["projectId"] = sc.ProjectID
+			}
+		}
+	}
+	if needBoard && boardRaw != "" {
 		if sc.BoardID, rerr = a.Resolve(ctx, "board", boardRaw, Scope{ProjectID: sc.ProjectID}); rerr != nil {
 			return a.fail(rerr)
 		}
@@ -202,15 +228,11 @@ func (a *App) cmdOp(o *Op, args []string) int {
 		}
 	}
 	params := Params(vals)
-	if (p.Has("limit") && o.Field("limit") == nil) || (p.Has("cursor") && o.Field("cursor") == nil) || p.Bool("all") {
-		// handled by pagination below
-	} else {
-		if p.Has("limit") {
-			params["limit"] = parseValue("number", p.Str("limit"))
-		}
-		if p.Has("cursor") {
-			params["cursor"] = p.Str("cursor")
-		}
+	if p.Has("cursor") && o.Field("cursor") != nil {
+		params["cursor"] = p.Str("cursor")
+	}
+	if p.Has("limit") && o.Field("limit") != nil && !p.Bool("all") {
+		params["limit"] = parseValue("number", p.Str("limit"))
 	}
 	if isDestructive(o) && !a.Yes && !a.DryRun && a.stdinTTY() {
 		if !a.confirm(fmt.Sprintf("Run %s %v?", o.Name, redactParams(params))) {
@@ -219,13 +241,63 @@ func (a *App) cmdOp(o *Op, args []string) int {
 	}
 	limit := 0
 	if p.Has("limit") {
-		limit, _ = strconv.Atoi(p.Str("limit"))
+		n, err := strconv.Atoi(strings.TrimSpace(p.Str("limit")))
+		if err != nil || n < 0 {
+			return a.failUsage("--limit needs a non-negative integer")
+		}
+		limit = n
 	}
-	resp, err := a.fetchPaged(ctx, o, params, files, limit, p.Bool("all"))
+	outFile := p.Str("output-file")
+	all := p.Bool("all")
+	if outFile != "" && !all && !(limit > 0 && o.Field("limit") == nil) && !(a.DryRun && o.Method != "GET") {
+		return a.streamToFile(ctx, o, params, files, outFile)
+	}
+	resp, err := a.fetchPaged(ctx, o, params, files, limit, all)
 	if err != nil {
 		return a.fail(err)
 	}
-	return a.finish(resp, p.Str("output-file"))
+	return a.finish(resp, outFile)
+}
+
+func (a *App) streamToFile(ctx context.Context, o *Op, params Params, files map[string]string, outFile string) int {
+	var written int64
+	stream := func(resp *http.Response) error {
+		dir := filepath.Dir(outFile)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return &APIError{Code: "io", Message: err.Error()}
+		}
+		f, err := os.CreateTemp(dir, ".tmp-*")
+		if err != nil {
+			return &APIError{Code: "io", Message: err.Error()}
+		}
+		tmp := f.Name()
+		n, cerr := io.Copy(f, resp.Body)
+		if cerr == nil {
+			cerr = f.Sync()
+		}
+		if err := f.Close(); cerr == nil {
+			cerr = err
+		}
+		if cerr == nil {
+			cerr = os.Chmod(tmp, 0o644)
+		}
+		if cerr == nil {
+			cerr = os.Rename(tmp, outFile)
+		}
+		if cerr != nil {
+			_ = os.Remove(tmp)
+			return &APIError{Code: "io", Message: cerr.Error()}
+		}
+		written = n
+		return nil
+	}
+	if _, err := a.call(ctx, o, params, callOpts{files: files, stream: stream}); err != nil {
+		return a.fail(err)
+	}
+	if err := a.emit(map[string]any{"item": map[string]any{"saved": outFile, "bytes": written}}, nil); err != nil {
+		return a.fail(err)
+	}
+	return 0
 }
 
 func joinMulti(v []string) string {
@@ -311,12 +383,16 @@ func nextCursorOf(v any) string {
 // merges every page into one {"items":[...]} response. limit is the page size when the op has a
 // `limit` field, otherwise a client-side cap.
 func (a *App) fetchPaged(ctx context.Context, o *Op, params Params, files map[string]string, limit int, all bool) (*Response, error) {
-	paged := o.Field("limit") != nil && o.Field("cursor") != nil
-	if limit > 0 && o.Field("limit") != nil {
-		params["limit"] = float64(limit)
+	q := make(Params, len(params)+2)
+	for k, v := range params {
+		q[k] = v
 	}
+	paged := o.Field("limit") != nil && o.Field("cursor") != nil
 	if !all {
-		r, err := a.Call(ctx, o, params, files)
+		if limit > 0 && o.Field("limit") != nil {
+			q["limit"] = float64(limit)
+		}
+		r, err := a.Call(ctx, o, q, files)
 		if err != nil {
 			return r, err
 		}
@@ -326,20 +402,28 @@ func (a *App) fetchPaged(ctx context.Context, o *Op, params Params, files map[st
 		return r, nil
 	}
 	if !paged {
-		r, err := a.Call(ctx, o, params, files)
+		if limit > 0 && o.Field("limit") != nil {
+			q["limit"] = float64(limit)
+		}
+		r, err := a.Call(ctx, o, q, files)
 		if err == nil && limit > 0 {
 			r = truncateItems(r, limit)
 		}
 		return r, err
 	}
-	if limit == 0 {
-		params["limit"] = float64(100)
+	pageSize := 100
+	if limit > 0 && limit < pageSize {
+		pageSize = limit
 	}
-	var items []any
+	q["limit"] = float64(pageSize)
+	items := []any{}
 	seen := map[string]bool{}
+	if start, ok := q["cursor"].(string); ok && start != "" {
+		seen[start] = true
+	}
 	var last *Response
 	for page := 0; page < 100000; page++ {
-		r, err := a.Call(ctx, o, params, files)
+		r, err := a.Call(ctx, o, q, files)
 		if err != nil {
 			return r, err
 		}
@@ -351,7 +435,7 @@ func (a *App) fetchPaged(ctx context.Context, o *Op, params Params, files map[st
 			break
 		}
 		seen[next] = true
-		params["cursor"] = next
+		q["cursor"] = next
 	}
 	if limit > 0 && len(items) > limit {
 		items = items[:limit]
@@ -462,17 +546,27 @@ func (a *App) confirm(q string) bool {
 	return line == "y" || line == "yes"
 }
 
-func redactParams(p Params) string {
-	keys := make([]string, 0, len(p))
-	for k := range p {
-		keys = append(keys, k)
+func isSensitiveParam(k string) bool {
+	lk := strings.ToLower(k)
+	for _, sub := range []string{"secret", "token", "password", "credential", "key"} {
+		if strings.Contains(lk, sub) {
+			return true
+		}
 	}
-	sort.Strings(keys)
+	return false
+}
+
+func redactParams(p Params) string {
 	var parts []string
-	for _, k := range keys {
-		s := scalarString(p[k])
-		if len(s) > 40 {
-			s = s[:40] + "..."
+	for _, k := range sortedKeys(p) {
+		var s string
+		if isSensitiveParam(k) {
+			s = "[redacted]"
+		} else {
+			s = scalarString(p[k])
+			if r := []rune(s); len(r) > 40 {
+				s = string(r[:40]) + "..."
+			}
 		}
 		parts = append(parts, k+"="+s)
 	}
@@ -493,9 +587,6 @@ func placeholder(f Field) string {
 		return `"Example"`
 	case "text":
 		return `"text"`
-	}
-	if k := kindOfField(f.Name, ""); k != "" || strings.HasSuffix(f.Name, "Id") || f.Name == "id" {
-		return "<" + f.Name + ">"
 	}
 	return "<" + f.Name + ">"
 }

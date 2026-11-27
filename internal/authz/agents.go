@@ -39,6 +39,25 @@ func agentFacts(e *ops.Env, agentID string) (createdBy string, boards []string, 
 	return createdBy, boards, true
 }
 
+// CanManageAgentFrom evaluates CanManageAgent from preloaded agent facts and BoardLevels (used by batched agent.list).
+func CanManageAgentFrom(e *ops.Env, createdBy string, boards []string, levels map[string]Level) bool {
+	if e.User == nil || e.User.IsAgent {
+		return false
+	}
+	if SystemAdmin(e) || (createdBy != "" && createdBy == e.User.UserID) {
+		return true
+	}
+	if len(boards) == 0 {
+		return false
+	}
+	for _, b := range boards {
+		if levels[b] < Manage {
+			return false
+		}
+	}
+	return true
+}
+
 // CanManageAgent reports whether the caller may manage an agent account (see the rules above).
 func CanManageAgent(e *ops.Env, agentID string) bool {
 	if e.User == nil || e.User.IsAgent {
@@ -54,13 +73,7 @@ func CanManageAgent(e *ops.Env, agentID string) bool {
 	if len(boards) == 0 {
 		return false
 	}
-	lv := BoardLevels(e, boards)
-	for _, b := range boards {
-		if lv[b] < Manage {
-			return false
-		}
-	}
-	return true
+	return CanManageAgentFrom(e, createdBy, boards, BoardLevels(e, boards))
 }
 
 // CanSeeAgent reports whether the caller may see an agent account in agent.list: system administrators, the creator, and anyone who
@@ -87,10 +100,32 @@ func CanSeeAgent(e *ops.Env, agentID string) bool {
 // RequireAgentManage is CanManageAgent as an error: not_found when the caller may not even see the agent,
 // forbidden when they see it but may not manage it.
 func RequireAgentManage(e *ops.Env, agentID string) error {
-	if CanManageAgent(e, agentID) {
+	if e.User == nil || e.User.IsAgent {
+		return ops.NotFound("agent")
+	}
+	createdBy, boards, ok := agentFacts(e, agentID)
+	if !ok {
+		return ops.NotFound("agent")
+	}
+	if SystemAdmin(e) || (createdBy != "" && createdBy == e.User.UserID) {
 		return nil
 	}
-	if CanSeeAgent(e, agentID) {
+	if len(boards) == 0 {
+		return ops.NotFound("agent")
+	}
+	lv := BoardLevels(e, boards)
+	allManage, anyManage := true, false
+	for _, b := range boards {
+		if lv[b] >= Manage {
+			anyManage = true
+		} else {
+			allManage = false
+		}
+	}
+	if allManage {
+		return nil
+	}
+	if anyManage {
 		return ops.Forbidden()
 	}
 	return ops.NotFound("agent")

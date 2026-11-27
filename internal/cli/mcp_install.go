@@ -6,6 +6,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -167,7 +168,11 @@ func (a *App) mcpPrintConfig(tool, scopeArg string) int {
 func mcpWrite(path, key string, entry map[string]any, force, dry bool) (string, error) {
 	doc := map[string]any{}
 	perm := os.FileMode(0o600)
-	if b, err := os.ReadFile(path); err == nil {
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err == nil {
 		if st, err := os.Stat(path); err == nil {
 			perm = st.Mode().Perm()
 		}
@@ -202,15 +207,18 @@ func mcpWrite(path, key string, entry map[string]any, force, dry bool) (string, 
 	}
 	servers["weave"] = entry
 	doc[key] = servers
-	b, _ := json.MarshalIndent(doc, "", "  ")
-	return act, safeWrite(path, append(b, '\n'), perm)
+	out, _ := json.MarshalIndent(doc, "", "  ")
+	return act, safeWrite(path, append(out, '\n'), perm)
 }
 
 // mcpRemove deletes our entry (when it is ours, or with force).
 func mcpRemove(path, key string, entry map[string]any, force, dry bool) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "not-installed", nil
+		if errors.Is(err, os.ErrNotExist) {
+			return "not-installed", nil
+		}
+		return "", err
 	}
 	doc := map[string]any{}
 	if json.Unmarshal(b, &doc) != nil {

@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -42,6 +43,8 @@ func (r *Listeners) Register(l Listener) func() {
 	r.next++
 	l.id = r.next
 	cp := l
+	cp.Lists = slices.Clone(l.Lists)
+	cp.Boards = slices.Clone(l.Boards)
 	r.all[l.id] = &cp
 	r.mu.Unlock()
 	r.announce("listener.joined", &cp)
@@ -63,7 +66,7 @@ func (r *Listeners) announce(name string, l *Listener) {
 	byBoard := map[string][]string{}
 	var order []string
 	for i, b := range l.Boards {
-		if b == "" {
+		if b == "" || i >= len(l.Lists) {
 			continue
 		}
 		if _, ok := byBoard[b]; !ok {
@@ -128,7 +131,13 @@ func (r *Listeners) collect(match func(*Listener) bool) []Listener {
 		if out[i].Since != out[j].Since {
 			return out[i].Since < out[j].Since
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		if out[i].Label != out[j].Label {
+			return out[i].Label < out[j].Label
+		}
+		return out[i].UserID < out[j].UserID
 	})
 	return out
 }

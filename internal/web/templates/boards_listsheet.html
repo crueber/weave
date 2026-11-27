@@ -38,7 +38,7 @@
   </header>
 
   <div class="cm-cols">
-    <main class="cm-main" aria-label="Column content">
+    <div class="cm-main" role="region" aria-label="Column content">
       <section id="ls-desc" class="cm-desc" aria-labelledby="ls-desc-h">
         <div class="cm-sec-head"><h3 id="ls-desc-h">Description</h3>{{if $edit}}<button type="button" class="cm-ghost" data-ls-desc-edit title="Edit description"{{if not $l.Description}} hidden{{end}}>Edit</button>{{end}}</div>
         <div id="ls-desc-view">{{template "boards_list_desc_view" .}}</div>
@@ -68,7 +68,7 @@
         <div class="x-head"><h3 class="x-h"><button type="button" class="x-toggle" data-ls-sec-toggle aria-expanded="true" aria-controls="ls-activity-body"><span class="x-chev" aria-hidden="true"></span>Activity</button></h3></div>
         <div class="ls-secbody" id="ls-activity-body"><div data-ls-activity hx-get="/ui/lists/{{$l.ID}}/activity" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></div>
       </section>
-    </main>
+    </div>
 
     <div class="cm-rail">
       <aside class="cm-props" aria-label="Properties">

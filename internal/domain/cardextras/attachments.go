@@ -83,40 +83,58 @@ const attSelect = `SELECT a.id,a.card_id,c.name,a.creator_user_id,u.name,a.type,
 	COALESCE(c.cover_attachment_id=a.id,0),a.created_at,a.file
 	FROM attachments a JOIN cards c ON c.id=a.card_id LEFT JOIN users u ON u.id=a.creator_user_id`
 
-func scanAtt(dir string) func(*sql.Rows) (AttachmentItem, error) {
-	return func(r *sql.Rows) (AttachmentItem, error) {
-		var a AttachmentItem
-		var cr, cn, urlv, mime, file sql.NullString
-		var w, h sql.NullInt64
-		var img, cover int
-		err := r.Scan(&a.ID, &a.CardID, &a.CardName, &cr, &cn, &a.Type, &a.Name, &urlv, &mime, &a.Size, &img, &w, &h, &cover, &a.CreatedAt, &file)
-		a.CreatorID, a.CreatorName, a.URL, a.Mime = strp(cr), strp(cn), strp(urlv), strp(mime)
-		a.IsImage, a.IsCover = img != 0, cover != 0
-		if w.Valid {
-			v := int(w.Int64)
-			a.Width = &v
-		}
-		if h.Valid {
-			v := int(h.Int64)
-			a.Height = &v
-		}
-		if a.Mime != nil && strings.HasPrefix(*a.Mime, "video/") {
-			a.IsVideo = true
-		}
-		if a.Type == "file" {
-			a.DownloadURL = "/attachments/" + a.ID + "/download/" + url.PathEscape(a.Name)
-			if a.IsImage && file.Valid {
-				if _, err := os.Stat(filepath.Join(dir, "files", path.Dir(file.String), "thumb.jpg")); err == nil {
-					a.ThumbnailURL = "/attachments/" + a.ID + "/thumbnail"
-				}
+type attScanRow struct {
+	item AttachmentItem
+	file sql.NullString
+}
+
+func scanAttRow(r *sql.Rows) (attScanRow, error) {
+	var row attScanRow
+	a := &row.item
+	var cr, cn, urlv, mime sql.NullString
+	var w, h sql.NullInt64
+	var img, cover int
+	err := r.Scan(&a.ID, &a.CardID, &a.CardName, &cr, &cn, &a.Type, &a.Name, &urlv, &mime, &a.Size, &img, &w, &h, &cover, &a.CreatedAt, &row.file)
+	a.CreatorID, a.CreatorName, a.URL, a.Mime = strp(cr), strp(cn), strp(urlv), strp(mime)
+	a.IsImage, a.IsCover = img != 0, cover != 0
+	if w.Valid {
+		v := int(w.Int64)
+		a.Width = &v
+	}
+	if h.Valid {
+		v := int(h.Int64)
+		a.Height = &v
+	}
+	if a.Mime != nil && strings.HasPrefix(*a.Mime, "video/") {
+		a.IsVideo = true
+	}
+	if a.Type == "file" {
+		a.DownloadURL = "/attachments/" + a.ID + "/download/" + url.PathEscape(a.Name)
+	}
+	return row, err
+}
+
+func loadAttachments(e *ops.Env, q string, args ...any) ([]AttachmentItem, error) {
+	rows, err := query(e.Ctx, e.DB, scanAttRow, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	dir := dataDir(e)
+	out := make([]AttachmentItem, len(rows))
+	for i, r := range rows {
+		a := r.item
+		if a.Type == "file" && a.IsImage && r.file.Valid {
+			if _, err := os.Stat(filepath.Join(dir, "files", path.Dir(r.file.String), "thumb.jpg")); err == nil {
+				a.ThumbnailURL = "/attachments/" + a.ID + "/thumbnail"
 			}
 		}
-		return a, err
+		out[i] = a
 	}
+	return out, nil
 }
 
 func getAttachment(e *ops.Env, id string) (AttachmentItem, error) {
-	l, err := query(e.Ctx, e.DB, scanAtt(dataDir(e)), attSelect+` WHERE a.id=?`, id)
+	l, err := loadAttachments(e, attSelect+` WHERE a.id=?`, id)
 	if err != nil {
 		return AttachmentItem{}, err
 	}
@@ -215,7 +233,7 @@ func init() {
 		if _, err := authz.RequireCard(e, in.CardID, authz.View); err != nil {
 			return nil, err
 		}
-		return query(e.Ctx, e.DB, scanAtt(dataDir(e)), attSelect+` WHERE a.card_id=? ORDER BY a.created_at,a.id`, in.CardID)
+		return loadAttachments(e, attSelect+` WHERE a.card_id=? ORDER BY a.created_at,a.id`, in.CardID)
 	})
 
 	ops.Register(ops.Op{Name: "attachment.create", Summary: "Attach a file (multipart upload) or a link to a card", Method: "POST", MaxBody: 257 << 20, Path: "/cards/{cardId}/attachments",
@@ -264,6 +282,7 @@ func init() {
 				return AttachmentItem{}, err
 			}
 			if err := os.WriteFile(filepath.Join(dir, fname), in.File.Data, 0o644); err != nil {
+				_ = os.RemoveAll(dir)
 				return AttachmentItem{}, err
 			}
 			stored := int64(len(in.File.Data))
@@ -352,21 +371,24 @@ func init() {
 		if err != nil {
 			return DeletedOut{}, err
 		}
-		freed := removeAttachmentFiles(e, file)
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET cover_attachment_id=NULL WHERE id=? AND cover_attachment_id=?`, cardID, in.ID); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(e.Ctx, `DELETE FROM attachments WHERE id=?`, in.ID); err != nil {
+			res, err := tx.ExecContext(e.Ctx, `DELETE FROM attachments WHERE id=?`, in.ID)
+			if err != nil {
 				return err
 			}
-			if freed > 0 {
-				return addStorage(tx, e, -freed)
+			if n, _ := res.RowsAffected(); n == 0 {
+				return ops.NotFound("attachment")
 			}
 			return nil
 		})
 		if err != nil {
 			return DeletedOut{}, err
+		}
+		if freed := removeAttachmentFiles(e, file); freed > 0 {
+			_ = addStorage(e.DB, e, -freed)
 		}
 		emit(e, "attachmentDelete", board, cardID, "attachment.deleted", map[string]any{"attachmentId": in.ID, "name": name})
 		return DeletedOut{in.ID, cardID}, nil
@@ -429,6 +451,6 @@ func init() {
 		default:
 			return nil, ops.Invalid("type must be all, image, video or doc")
 		}
-		return query(e.Ctx, e.DB, scanAtt(dataDir(e)), q+` ORDER BY a.created_at DESC,a.id DESC LIMIT 1000`, in.BoardID)
+		return loadAttachments(e, q+` ORDER BY a.created_at DESC,a.id DESC LIMIT 1000`, in.BoardID)
 	})
 }

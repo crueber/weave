@@ -2,8 +2,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -21,14 +23,22 @@ func env(k, d string) string {
 }
 
 func Load() Config {
-	h, _ := strconv.Atoi(env("WEAVE_SESSION_HOURS", "24"))
+	h := 24
+	if raw := strings.TrimSpace(os.Getenv("WEAVE_SESSION_HOURS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			h = n
+		} else {
+			fmt.Println("WEAVE_SESSION_HOURS: invalid value", raw, "- using 24")
+		}
+	}
+	tp := strings.ToLower(strings.TrimSpace(os.Getenv("WEAVE_TRUST_PROXY")))
 	return Config{
 		Addr:            env("WEAVE_ADDR", ":8080"),
 		BaseURL:         env("WEAVE_BASE_URL", "http://localhost:8080"),
 		DataDir:         env("WEAVE_DATA_DIR", "./data"),
 		SecretKey:       env("WEAVE_SECRET_KEY", ""),
 		AgentInstallURL: env("WEAVE_AGENT_INSTALL_URL", "https://github.com/crueber/weave/releases/latest/download"),
-		TrustProxy:      os.Getenv("WEAVE_TRUST_PROXY") == "true",
+		TrustProxy:      tp == "true" || tp == "1",
 		SessionHours:    h,
 	}
 }

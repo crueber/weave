@@ -13,40 +13,16 @@
 // Loaded by the board page and by the card sheet itself (the full /cards/{id} page has no board scripts).
 (function () {
   if (window.CardPlace) return;
+  var W = window.Weave;
   var HDR = { 'HX-Request': 'true', 'X-Requested-With': 'weave' };
-  var phone = window.matchMedia ? matchMedia('(max-width:640px)') : { matches: false };
 
   function byId(id) { return document.getElementById(id); }
-  function typing(el) { return !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))); }
   function B() { return window.Boards || null; }
   function sheet() { var cm = byId('card-modal'); if (!cm) return null; var d = cm.closest('dialog'); return !d || d.open ? cm : null; }
   function modalOpen() { var m = byId('modal'); return !!(m && m.open); }
-  // a toast that is seen: the board's toasts on the board page, else (the card sheet is a modal <dialog>: anything
-  // outside it is painted under its top layer) a toast host inside the dialog, else the layout's toasts
-  function toast(msg, err) {
-    var b = B(), m = byId('modal');
-    if (m && m.open) {
-      var h = m.querySelector(':scope > .cm-toasts');
-      if (!h) { h = document.createElement('div'); h.className = 'cm-toasts'; h.setAttribute('aria-live', 'polite'); m.appendChild(h); }
-      var t = document.createElement('div'); t.className = 'toast' + (err ? ' toast-error' : ''); if (err) t.setAttribute('role', 'alert'); t.textContent = msg;
-      h.appendChild(t); setTimeout(function () { t.remove(); }, 4000);
-      return;
-    }
-    if (b && b.toast) { b.toast(msg, { error: !!err }); return; }
-    document.body.dispatchEvent(new CustomEvent('toast', { detail: { value: msg } }));
-  }
+  function toast(msg, err) { W.toast(msg, { error: !!err }); }
   function announce(msg) { var b = B(); if (b && b.announce) b.announce(msg); }
-  function errorOf(html) { var m = /<div[^>]*toast[^>]*>([^<]*)</.exec(html || ''); return (m && m[1]) || ''; }
-  function post(url, data) {
-    var body = new URLSearchParams(); Object.keys(data || {}).forEach(function (k) { if (data[k] !== undefined) body.append(k, data[k]); });
-    var h = { 'Content-Type': 'application/x-www-form-urlencoded' }; for (var k in HDR) h[k] = HDR[k];
-    return fetch(url, { method: 'POST', credentials: 'same-origin', body: body, headers: h }).then(function (r) {
-      return r.text().then(function (html) {
-        var trig = {}; try { trig = JSON.parse(r.headers.get('HX-Trigger') || '{}'); } catch (x) { trig = {}; }
-        return { ok: r.ok, status: r.status, html: html, trigger: trig, error: r.ok ? '' : (errorOf(html) || 'Something went wrong') };
-      });
-    }, function () { return { ok: false, status: 0, html: '', trigger: {}, error: 'You appear to be offline' }; });
-  }
+  function post(url, data) { return W.post(url, data); }
   // re-render the open sheet (through htmx, so the sheet's section stash and popover logic in cards_ui.js apply)
   function reloadSheet(id, board) {
     var cm = sheet(); if (!cm || cm.dataset.card !== id || !window.htmx) return Promise.resolve();
@@ -63,37 +39,11 @@
   }
 
   // ---------------------------------------------------------------- confirm ----
-  // A small modal <dialog> (top layer: above the card sheet too). Focus starts on the confirming button: Enter / Space
-  // confirm, Escape or Cancel cancel; Tab stays inside.
   function confirmBox(o) {
-    var d = document.createElement('dialog'); d.className = 'cm-confirm';
-    d.setAttribute('aria-labelledby', 'cm-confirm-h'); d.setAttribute('aria-describedby', 'cm-confirm-p');
-    var h = document.createElement('p'); h.className = 'cm-confirm-h'; h.id = 'cm-confirm-h'; h.textContent = o.title;
-    var p = document.createElement('p'); p.className = 'cm-confirm-p'; p.id = 'cm-confirm-p'; p.textContent = o.text || '';
-    var row = document.createElement('div'); row.className = 'cm-confirm-row';
-    var no = document.createElement('button'); no.type = 'button'; no.className = 'btn btn-ghost cm-confirm-no'; no.textContent = 'Cancel';
-    var yes = document.createElement('button'); yes.type = 'button'; yes.className = 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary') + ' cm-confirm-yes'; yes.textContent = o.ok || 'OK';
-    row.appendChild(no); row.appendChild(yes); d.appendChild(h); if (o.text) d.appendChild(p); d.appendChild(row);
-    (modalOpen() ? byId('modal') : document.body).appendChild(d);
-    var back = document.activeElement, done = false;
-    function finish(ok) {
-      if (done) return; done = true;
-      if (d.open) d.close(); d.remove();
-      if (!ok) { if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true }); if (o.onCancel) o.onCancel(); return; }
-      o.onOk();
-    }
-    yes.addEventListener('click', function () { finish(true); });
-    no.addEventListener('click', function () { finish(false); });
-    d.addEventListener('cancel', function (e) { e.preventDefault(); finish(false); });
-    d.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
-      else if (e.key === 'Tab') { e.preventDefault(); (document.activeElement === yes ? no : yes).focus(); }
-      else e.stopPropagation();   // no shortcut of the page or the sheet runs under the confirmation
+    return W.confirm({
+      title: o.title, text: o.text, ok: o.ok, danger: o.danger,
+      className: 'cm-confirm', onOk: o.onOk, onCancel: o.onCancel
     });
-    d.addEventListener('pointerdown', function (e) { if (e.target === d) { var r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) finish(false); } });
-    d.showModal();
-    yes.focus();
-    return d;
   }
   // hx-confirm with data-confirm-title: the styled confirmation instead of the browser's
   document.addEventListener('htmx:confirm', function (e) {
@@ -103,32 +53,20 @@
   });
 
   // ---------------------------------------------------------------- the picker ----
-  var cur = null;   // { id, board, host, anchor, back }
-  function popRoot() {
-    var r = byId('popover-root');
-    if (!r) { r = document.createElement('div'); r.id = 'popover-root'; r.innerHTML = '<div class="boards-scrim" hidden></div>'; document.body.appendChild(r); }
-    return r;
-  }
+  var cur = null, openSeq = 0, pendingOpen = false;   // { id, board, host, anchor, back }
   // the host: inside the sheet's dialog while it is open (outside #card-modal, which re-renders), else #popover-root
   function hostFor() {
-    var m = byId('modal'), parent = m && m.open ? m : popRoot();
+    var m = byId('modal'), parent = m && m.open ? m : W.popRoot();
     var h = parent.querySelector(':scope > .cm-place-host');
     if (!h) { h = document.createElement('div'); h.className = 'cm-place-host'; parent.appendChild(h); }
     return h;
   }
   function place(box, anchor) {
-    if (!box) return;
-    if (phone.matches) { box.style.cssText = ''; return; }        // CSS: a bottom sheet
-    if (!anchor || !document.contains(anchor)) return;             // re-rendered under us: stay where we are
-    var r = anchor.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, M = 8, G = 4;
-    box.style.position = 'fixed'; box.style.left = '0px'; box.style.top = '0px'; box.style.maxHeight = 'none';
-    var w = box.offsetWidth, h = box.offsetHeight;
-    var left = Math.max(M, Math.min(r.left, vw - w - M)), below = vh - r.bottom - G - M, above = r.top - G - M, top, mh;
-    if (h <= below || below >= above) { top = r.bottom + G; mh = below; } else { mh = above; top = Math.max(M, r.top - G - Math.min(h, above)); }
-    box.style.left = left + 'px'; box.style.top = top + 'px'; box.style.maxHeight = Math.max(200, mh) + 'px';
+    W.place(box, anchor, { align: 'left', minHeight: 200, phoneSheet: true });
   }
   function box() { return cur && cur.host ? cur.host.querySelector('.cm-place') : null; }
   function close(focusBack) {
+    openSeq++; pendingOpen = false;
     if (!cur) return;
     var c = cur; cur = null;
     c.host.innerHTML = ''; c.host.remove();
@@ -140,11 +78,14 @@
   function open(id, board, anchor, tile) {
     close(false);
     var b = B(); if (b && b.closePop) b.closePop(false);
+    var seq = ++openSeq; pendingOpen = true;
     var back = document.activeElement;
     return fetch('/ui/cards/' + encodeURIComponent(id) + '/place-picker' + (board ? '?board=' + encodeURIComponent(board) : ''), { credentials: 'same-origin', headers: HDR })
       .then(function (r) { return r.text().then(function (html) { return { ok: r.ok, html: html, status: r.status }; }); })
       .then(function (r) {
-        if (!r.ok) { toast(errorOf(r.html) || (r.status === 403 ? 'Read-only: you cannot change this card' : 'Could not open the board picker'), true); return; }
+        if (seq !== openSeq) return;
+        pendingOpen = false;
+        if (!r.ok) { toast(W.errorOf(r.html) || (r.status === 403 ? 'Read-only: you cannot change this card' : 'Could not open the board picker'), true); return; }
         var host = hostFor();
         host.innerHTML = r.html;
         cur = { id: id, board: board, host: host, anchor: anchor, back: back, tileId: tile ? tile.id : '' };
@@ -153,7 +94,7 @@
         var f = bx.querySelector('[data-place-filter]') || bx.querySelector('.cm-place-opt') || bx;
         f.focus({ preventScroll: true });
         announce('Add to board: type to find a board');
-      }, function () { toast('You appear to be offline', true); });
+      }, function () { if (seq !== openSeq) return; pendingOpen = false; toast('You appear to be offline', true); });
   }
   function step() { var bx = box(); return bx ? bx.querySelector('.cm-place-step:not([hidden])') : null; }
   function opts(st) { return st ? [].slice.call(st.querySelectorAll('.cm-place-opt')).filter(function (o) { return !o.hidden && !(o.closest('[data-place-group]') || {}).hidden; }) : []; }
@@ -237,30 +178,24 @@
   });
   document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('.cm-place [data-place-filter]')) { msg('', ''); filter(); } });
   document.addEventListener('pointerdown', function (e) {
-    if (!cur || !e.target.closest) return;
+    if ((!cur && !pendingOpen) || !e.target.closest) return;
     if (e.target.closest('.cm-place, .cm-confirm, [data-place-open]')) return;
     close(false);
   }, true);
   window.addEventListener('resize', function () { if (cur) place(box(), cur.anchor); });
   // the sheet closing takes its picker with it
-  document.addEventListener('close', function (e) { if (cur && e.target && e.target.id === 'modal') close(false); }, true);
+  document.addEventListener('close', function (e) { if ((cur || pendingOpen) && e.target && e.target.id === 'modal') close(false); }, true);
 
   // keys inside the picker (capture: before the sheet's and the board's own shortcuts)
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && pendingOpen && !cur) { openSeq++; pendingOpen = false; return; }
     var bx = e.target.closest && e.target.closest('.cm-place'); if (!bx || !cur || e.isComposing) return;
     var k = e.key, st = step(), os = opts(st), i = os.indexOf(document.activeElement), f = bx.querySelector('[data-place-filter]');
     var inCols = !!(st && st.dataset.step === 'cols');
     if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (inCols) showBoards(); else close(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     e.stopPropagation();
-    if (k === 'Tab') {
-      var foc = [].slice.call(bx.querySelectorAll('button:not([disabled]),input')).filter(function (el) { return el.offsetParent && !el.closest('[hidden]'); });
-      if (!foc.length) return;
-      var j = foc.indexOf(document.activeElement);
-      if (!e.shiftKey && j === foc.length - 1) { e.preventDefault(); foc[0].focus(); }
-      else if (e.shiftKey && j <= 0) { e.preventDefault(); foc[foc.length - 1].focus(); }
-      return;
-    }
+    if (k === 'Tab') { W.trapTab(bx, e); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       if (!os.length) return;
       e.preventDefault();
@@ -272,9 +207,9 @@
     if (k === 'Enter' && e.target === f) { e.preventDefault(); if (os[0]) showCols(os[0].dataset.placeBoard); return; }
     if (inCols && (k === 'ArrowLeft' || k === 'Backspace')) { e.preventDefault(); showBoards(); return; }
     if (!inCols && k === 'ArrowRight' && e.target.dataset && e.target.dataset.placeBoard) { e.preventDefault(); showCols(e.target.dataset.placeBoard); return; }
-    if ((k === 'Home' || k === 'End') && os.length && !typing(e.target)) { e.preventDefault(); os[k === 'Home' ? 0 : os.length - 1].focus(); return; }
+    if ((k === 'Home' || k === 'End') && os.length && !W.typing(e.target)) { e.preventDefault(); os[k === 'Home' ? 0 : os.length - 1].focus(); return; }
     // typing on a board goes to the filter
-    if (!inCols && f && !typing(e.target) && (k === 'Backspace' || (k.length === 1 && k !== ' '))) {
+    if (!inCols && f && !W.typing(e.target) && (k === 'Backspace' || (k.length === 1 && k !== ' '))) {
       e.preventDefault();
       f.value = k === 'Backspace' ? f.value.slice(0, -1) : f.value + k;
       f.focus(); filter();
@@ -307,8 +242,8 @@
   function readOnly() { if (Date.now() - roAt > 2500) { roAt = Date.now(); toast('Read-only: you cannot add this card to another board'); } }
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'b' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat) return;
-    if (typing(e.target) || (e.target.closest && e.target.closest('.cm-place'))) return;
-    if (document.querySelector('dialog.cm-confirm[open], dialog.boards-confirm[open]')) return;
+    if (W.typing(e.target) || (e.target.closest && e.target.closest('.cm-place'))) return;
+    if (W.confirmOpen()) return;
     var cm = sheet();
     if (cm) {
       if (cm.querySelector('details.cards-pop[open], details.x-pop[open]') || (byId('cm-help') && !byId('cm-help').hidden)) return;
@@ -338,9 +273,9 @@
   function busy(el) { return !!(el && (el.querySelector('details[open]') || el.contains(document.activeElement) || (el.matches && el.matches('details[open]')))); }
   function sheetIdle(cm) {
     var a = document.activeElement;
-    if (a && cm.contains(a) && typing(a)) return false;
+    if (a && cm.contains(a) && W.typing(a)) return false;
     var ta = cm.querySelector('[data-comment-input]');
-    return !(cm.querySelector('details[open], #card-desc form') || (ta && ta.value.trim()) || cur || document.querySelector('dialog.cm-confirm[open]'));
+    return !(cm.querySelector('details[open], #card-desc form') || (ta && ta.value.trim()) || cur || W.confirmOpen());
   }
   function liveRefresh() {
     var cm = sheet(); if (!cm || !window.htmx) return;

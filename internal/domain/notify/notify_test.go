@@ -346,6 +346,11 @@ func TestConfigAndMail(t *testing.T) {
 	if _, err := ops.Call(w.admin, "config.update", &notify.Settings{SMTPSecure: s("ssl3")}); err == nil {
 		t.Fatal("bad smtp.secure accepted")
 	}
+	for _, badPort := range []string{"0", "65536", "99999", "-1", "abc"} {
+		if _, err := ops.Call(w.admin, "config.update", &notify.Settings{SMTPPort: s(badPort)}); err == nil {
+			t.Fatalf("bad smtp.port %q accepted", badPort)
+		}
+	}
 	pub, _ := ops.Typed[notify.PublicConfig](testutil.As(w.admin, nil), "config.public", notify.NoInput{})
 	if pub.AppName != "Acme Tasks" {
 		t.Fatalf("public = %+v", pub)
@@ -612,6 +617,121 @@ func TestExport(t *testing.T) {
 	c, err := ops.Typed[*ops.Stream](w.carol, "export.card", notify.ExportCardIn{ID: "c1"})
 	if err != nil || !strings.Contains(string(c.Data), "Light fuse") || c.Name != "Fuel-the-rocket.html" {
 		t.Fatalf("card export = %+v %v", c, err)
+	}
+
+	// export: two identically named columns stay separate; base custom field group name resolves; another board's custom field group is filtered out
+	x(t, w.admin, `INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('l1dup','b1','active',3,'Todo',?)`, db.Now())
+	x(t, w.admin, `INSERT INTO cards(id,board_id,list_id,position,name,list_changed_at,created_at) VALUES('c1dup','b1','l1dup',1,'Second todo card',?,?)`, db.Now(), db.Now())
+	x(t, w.admin, `INSERT INTO base_custom_field_groups(id,project_id,name,created_at) VALUES('bg1','p1','BaseGroup',?)`, db.Now())
+	x(t, w.admin, `INSERT INTO custom_field_groups(id,board_id,base_group_id,name,position,created_at) VALUES('g1','b1','bg1',NULL,1,?),('g2','b2',NULL,'SecretGroup',2,?)`, db.Now(), db.Now())
+	x(t, w.admin, `INSERT INTO custom_fields(id,group_id,base_group_id,name,position) VALUES('f1','g1','bg1','Stage',1),('f2','g2',NULL,'SecretField',1)`)
+	x(t, w.admin, `INSERT INTO custom_field_values(id,card_id,group_id,field_id,content) VALUES('v1','c1','g1','f1','Ready'),('v2','c1','g2','f2','TopSecret')`)
+	st2, err := ops.Typed[*ops.Stream](w.carol, "export.board", notify.ExportBoardIn{ID: "b1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2 := string(st2.Data)
+	if strings.Count(h2, "<h2>Todo ") != 2 {
+		t.Fatalf("identically named columns merged in export: %s", h2)
+	}
+	if !strings.Contains(h2, "BaseGroup / Stage:") || !strings.Contains(h2, "Ready") {
+		t.Fatalf("base custom field group missing from export: %s", h2)
+	}
+	if strings.Contains(h2, "SecretGroup") || strings.Contains(h2, "TopSecret") {
+		t.Fatalf("other board custom field leaked into export: %s", h2)
+	}
+}
+
+func TestNotificationListPagesPastHiddenBoards(t *testing.T) {
+	w := seed(t)
+	now := db.Now()
+	// oldest: 2 visible notifications on b1; newest: 60 hidden notifications on b2 (carol cannot view b2)
+	for i := 0; i < 2; i++ {
+		x(t, w.admin, `INSERT INTO notifications(id,user_id,board_id,card_id,type,data,is_read,created_at) VALUES(?,?, 'b1','c1','commentCard','{}',0,?)`, db.NewID(), "carol", now)
+	}
+	for i := 0; i < 60; i++ {
+		x(t, w.admin, `INSERT INTO notifications(id,user_id,board_id,card_id,type,data,is_read,created_at) VALUES(?,?, 'b2','c2','commentCard','{}',0,?)`, db.NewID(), "carol", now)
+	}
+	l, err := ops.Typed[notify.ListOut](w.carol, "notification.list", notify.ListIn{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 2 || l.NextBefore != "" {
+		t.Fatalf("paged past hidden boards = %d items next=%q, want 2 and empty", len(l.Items), l.NextBefore)
+	}
+}
+
+func TestWebhookMutuallyExclusiveScopeAndRetryFencing(t *testing.T) {
+	w := seed(t)
+	// mutually exclusive projectId + boardId rejected
+	if _, err := ops.Call(w.admin, "webhook.create", &notify.WebhookCreateIn{Name: "both", URL: "http://127.0.0.1:1/x", ProjectID: "p1", BoardID: "b1"}); err == nil {
+		t.Fatal("mutually exclusive projectId and boardId accepted")
+	}
+	// retry cancels a sleeping backoff loop instead of double-delivering
+	var mu sync.Mutex
+	calls := 0
+	fail := true
+	firstFailed := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		f := fail
+		mu.Unlock()
+		if f {
+			rw.WriteHeader(500)
+			select {
+			case firstFailed <- struct{}{}:
+			default:
+			}
+			return
+		}
+		rw.WriteHeader(204)
+	}))
+	defer srv.Close()
+	old := notify.RetryBackoff
+	notify.RetryBackoff = []time.Duration{5 * time.Second}
+	defer func() { notify.RetryBackoff = old }()
+	wh, err := ops.Typed[notify.WebhookOut](w.admin, "webhook.create", notify.WebhookCreateIn{Name: "retry-race", URL: srv.URL, Events: &notify.StringList{"cardCreate"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops.Emit(w.alice, ops.Event{Type: "cardCreate", BoardID: "b1", CardID: "c1", Data: map[string]any{"item": map[string]any{"id": "c1"}}})
+	select {
+	case <-firstFailed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first attempt never fired")
+	}
+	// give runDelivery a moment to update DB and enter backoff sleep
+	var delivID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		_ = w.admin.DB.QueryRow(`SELECT id FROM webhook_deliveries WHERE webhook_id=? AND attempts=1`, wh.ID).Scan(&delivID)
+		if delivID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if delivID == "" {
+		t.Fatal("delivery did not record attempt 1")
+	}
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+	if _, err := ops.Call(w.admin, "webhook.retry", &notify.IDIn{ID: delivID}); err != nil {
+		t.Fatal(err)
+	}
+	// notify.Wait() must return promptly (sleeping loop was cancelled, not waiting 5s)
+	done := make(chan struct{})
+	go func() { notify.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("notify.Wait blocked: old sleeping runDelivery was not cancelled on retry")
+	}
+	mu.Lock()
+	gotCalls := calls
+	mu.Unlock()
+	if gotCalls != 2 {
+		t.Fatalf("calls = %d, want 2 (1 failed + 1 retried)", gotCalls)
 	}
 }
 

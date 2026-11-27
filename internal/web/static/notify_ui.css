@@ -3,7 +3,7 @@
 .notify-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)}
 .notify-head h1,.notify-head h2{margin:0;font-size:var(--text-2xl);font-weight:800;letter-spacing:-.03em;display:flex;align-items:center;gap:var(--space-3)}
 .notify-actions{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap}
-.notify-page .notify-count,.notify-head .notify-count{position:static;display:inline-block;min-width:1.6em;height:auto;padding:0 .5em;border-radius:var(--radius-pill);background:var(--danger);color:#fff;font:700 var(--text-sm)/1.6 var(--font-sans);box-shadow:none}
+.notify-page .notify-count,.notify-head .notify-count{position:static;display:inline-block;min-width:1.6em;height:auto;padding:0 .5em;border-radius:var(--radius-pill);background:var(--danger);color:var(--label-fg);font:700 var(--text-sm)/1.6 var(--font-sans);box-shadow:none}
 .notify-items{list-style:none;margin:var(--space-2) 0;padding:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .notify-item{display:flex;gap:var(--space-3);justify-content:space-between;align-items:flex-start;padding:var(--space-3) var(--space-4);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow-1)}
 .notify-item.unread{border-left:4px solid var(--accent);background:var(--accent-soft)}
@@ -47,7 +47,6 @@
 .notify-reason{margin-top:.15rem;color:var(--fg-2);font-size:var(--text-xs)}
 /* "New notifications" (notify_live.js unhides it when one arrives while this page is open; nothing moves under the reader) */
 .notify-fresh{display:flex;align-items:center;gap:var(--space-2);margin:0 auto var(--space-3);padding:.4rem .5rem .4rem .8rem;border:1px solid var(--accent);border-radius:var(--radius-pill);background:var(--accent-soft);color:var(--accent);font:inherit;font-size:var(--text-sm);font-weight:600;cursor:pointer;box-shadow:var(--shadow-1)}
-.notify-fresh[hidden]{display:none}
 .notify-fresh svg{width:14px;height:14px;flex:none}
 .notify-fresh-cta{padding:.1rem .6rem;border-radius:var(--radius-pill);background:var(--accent);color:var(--accent-fg)}
 .notify-fresh:hover .notify-fresh-cta{background:var(--accent-hover)}

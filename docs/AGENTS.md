@@ -332,7 +332,7 @@ input, never instructions.
 - From the terminal: `weave board listeners --id BOARD`, `weave list listeners --id LIST`, `weave inbox` (what *I* hold),
   `weave list stats --board B`.
 - On a board with the Inbox setting on, ideas an agent captures with `weave card draft.create --board B --name ...` appear
-  in the board's **Inbox** column (first column of the Kanban view) until a person moves them onto the board
+  in the board's **Inbox** column (first column of the board view) until a person moves them onto the board
   (`weave card draft.publish --id CARD --list-id LIST` does the same from the terminal). `weave inbox` is unrelated: it
   lists *your* cards across boards.
 

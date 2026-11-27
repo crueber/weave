@@ -116,11 +116,12 @@
     cancelAnimationFrame(raf);
     (function tick() {
       if (!S || !S.started) return;
+      var l = lists(); if (!l) { end(true); return; }
       var x = last.x, y = last.y, moved = false;
-      var lr = lists().getBoundingClientRect();
+      var lr = l.getBoundingClientRect();
       if (y > lr.top - 40 && y < lr.bottom + 40) {
-        if (x < lr.left + EDGE) { lists().scrollLeft -= speed(lr.left + EDGE - x); moved = true; }
-        else if (x > lr.right - EDGE) { lists().scrollLeft += speed(x - (lr.right - EDGE)); moved = true; }
+        if (x < lr.left + EDGE) { l.scrollLeft -= speed(lr.left + EDGE - x); moved = true; }
+        else if (x > lr.right - EDGE) { l.scrollLeft += speed(x - (lr.right - EDGE)); moved = true; }
       }
       if (S.kind === 'card') {
         var col = S.el.closest('.boards-col'), box = col && col.querySelector('.boards-cards');
@@ -145,16 +146,21 @@
     if (!s.started) return;
     cancelAnimationFrame(raf);
     s.ghost.remove();
-    document.body.classList.remove('boards-dragging'); lists().classList.remove('is-dragging');
-    lists().querySelectorAll('.is-drop-target').forEach(function (b) { b.classList.remove('is-drop-target'); });
+    document.body.classList.remove('boards-dragging');
+    var l = lists();
+    if (l) {
+      l.classList.remove('is-dragging');
+      l.querySelectorAll('.is-drop-target').forEach(function (b) { b.classList.remove('is-drop-target'); });
+    }
     B.suppressClick = Date.now();
-    if (cancel) { s.home.parent.insertBefore(s.el, s.home.next); s.el.classList.remove('is-origin'); B.dragging = false; B.announce('Move cancelled'); return; }
+    if (cancel) { if (s.home.parent && s.home.parent.isConnected) s.home.parent.insertBefore(s.el, s.home.next); s.el.classList.remove('is-origin'); B.dragging = false; B.announce('Move cancelled'); return; }
     s.el.classList.remove('is-origin');
     B.dragging = false;
     commit(s.kind, s.el, s.home);
   }
   document.addEventListener('pointerup', function (e) { if (S && e.pointerId === S.id) end(false); });
   document.addEventListener('pointercancel', function (e) { if (S && e.pointerId === S.id) end(true); });
+  window.addEventListener('blur', function () { if (S) end(true); });
   document.addEventListener('keydown', function (e) { if (S && S.started && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); end(true); } }, true);
 
   // ---------- persist ----------

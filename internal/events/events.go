@@ -195,7 +195,11 @@ func sval(m map[string]any, k string) string {
 	return s
 }
 
-var noise = []string{"card", "actionId", "originId", "actionAt", CardLevel, PlacementLists, "cardId", "boardId", "fromListId", "toListId", "listId"}
+var noise = map[string]bool{
+	"card": true, "actionId": true, "originId": true, "actionAt": true,
+	CardLevel: true, PlacementLists: true,
+	"cardId": true, "boardId": true, "fromListId": true, "toListId": true, "listId": true,
+}
 
 // Build assembles the envelope for an op event (call after the mutation committed). For a card event the card is
 // the snapshot on ev.BoardID (notify.Record calls Build once per board of the event, with that board's event).
@@ -239,18 +243,10 @@ func Build(e *ops.Env, ev ops.Event) Envelope {
 	}
 	env.Data = map[string]any{}
 	for k, v := range d {
-		skip := false
-		for _, n := range noise {
-			if k == n {
-				skip = true
-			}
+		if noise[k] || (k == "id" && ev.CardID != "" && v == ev.CardID) {
+			continue // routing/envelope fields and card events' duplicate id
 		}
-		if k == "id" && ev.CardID != "" && v == ev.CardID {
-			skip = true // card events: the card id is already cardId
-		}
-		if !skip {
-			env.Data[k] = v
-		}
+		env.Data[k] = v
 	}
 	return env
 }

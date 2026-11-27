@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 
@@ -83,6 +84,10 @@ func BaseGroups(e *ops.Env, projectID string) ([]BaseGroup, error) {
 		idx[g.ID] = len(out)
 		out = append(out, g)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 	frows, err := e.DB.QueryContext(e.Ctx, `SELECT f.id,f.base_group_id,f.name,f.type,COALESCE(f.options,''),f.position,f.show_on_front_of_card
 		FROM custom_fields f JOIN base_custom_field_groups g ON g.id=f.base_group_id WHERE g.project_id=? ORDER BY f.position,f.id`, projectID)
@@ -105,6 +110,57 @@ func BaseGroups(e *ops.Env, projectID string) ([]BaseGroup, error) {
 		}
 	}
 	return out, frows.Err()
+}
+
+func loadBaseGroup(e *ops.Env, groupID string) (BaseGroup, error) {
+	var g BaseGroup
+	err := e.DB.QueryRowContext(e.Ctx, `SELECT id,project_id,COALESCE(name,''),created_at FROM base_custom_field_groups WHERE id=?`, groupID).
+		Scan(&g.ID, &g.ProjectID, &g.Name, &g.CreatedAt)
+	if err != nil {
+		if db.IsNoRows(err) {
+			return g, ops.NotFound("base custom field group")
+		}
+		return g, err
+	}
+	g.Fields = []BaseField{}
+	frows, err := e.DB.QueryContext(e.Ctx, `SELECT id,base_group_id,name,type,COALESCE(options,''),position,show_on_front_of_card
+		FROM custom_fields WHERE base_group_id=? ORDER BY position,id`, groupID)
+	if err != nil {
+		return g, err
+	}
+	defer frows.Close()
+	for frows.Next() {
+		var f BaseField
+		var opts string
+		if err := frows.Scan(&f.ID, &f.GroupID, &f.Name, &f.Type, &opts, &f.Position, &f.ShowOnFrontOfCard); err != nil {
+			return g, err
+		}
+		f.Options = []string{}
+		if opts != "" {
+			_ = json.Unmarshal([]byte(opts), &f.Options)
+		}
+		g.Fields = append(g.Fields, f)
+	}
+	return g, frows.Err()
+}
+
+func loadBaseField(e *ops.Env, fieldID string) (BaseField, error) {
+	var f BaseField
+	var opts string
+	err := e.DB.QueryRowContext(e.Ctx, `SELECT id,base_group_id,name,type,COALESCE(options,''),position,show_on_front_of_card
+		FROM custom_fields WHERE id=? AND base_group_id IS NOT NULL`, fieldID).
+		Scan(&f.ID, &f.GroupID, &f.Name, &f.Type, &opts, &f.Position, &f.ShowOnFrontOfCard)
+	if err != nil {
+		if db.IsNoRows(err) {
+			return f, ops.NotFound("base custom field")
+		}
+		return f, err
+	}
+	f.Options = []string{}
+	if opts != "" {
+		_ = json.Unmarshal([]byte(opts), &f.Options)
+	}
+	return f, nil
 }
 
 func groupProject(e *ops.Env, groupID string) (string, error) {
@@ -149,16 +205,6 @@ func cleanOptions(t string, opts []string) (string, error) {
 	return string(b), nil
 }
 
-func getGroup(e *ops.Env, projectID, groupID string) BaseGroup {
-	gs, _ := BaseGroups(e, projectID)
-	for _, g := range gs {
-		if g.ID == groupID {
-			return g
-		}
-	}
-	return BaseGroup{}
-}
-
 func init() {
 	ops.Register(ops.Op{Name: "project.fieldgroup.list", Summary: "List base custom field groups (with fields) of a project", Method: "GET",
 		Path: "/projects/{id}/base-custom-field-groups", UI: "GET /ui/projects/{id}/settings/fields"},
@@ -171,14 +217,20 @@ func init() {
 				return BaseGroup{}, err
 			}
 			n := strings.TrimSpace(in.Name)
-			if n == "" || len(n) > 128 {
+			if n == "" {
 				return BaseGroup{}, ops.Invalid("name is required (max 128 characters)")
+			}
+			if err := ops.CheckLen("name", n, 128); err != nil {
+				return BaseGroup{}, err
 			}
 			gid := db.NewID()
 			if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO base_custom_field_groups(id,project_id,name,created_at) VALUES(?,?,?,?)`, gid, in.ID, n, db.Now()); err != nil {
 				return BaseGroup{}, err
 			}
-			g := getGroup(e, in.ID, gid)
+			g, err := loadBaseGroup(e, gid)
+			if err != nil {
+				return BaseGroup{}, err
+			}
 			publish(e, "baseCustomFieldGroup.created", in.ID, g)
 			return g, nil
 		})
@@ -194,13 +246,19 @@ func init() {
 				return BaseGroup{}, err
 			}
 			n := strings.TrimSpace(in.Name)
-			if n == "" || len(n) > 128 {
+			if n == "" {
 				return BaseGroup{}, ops.Invalid("name is required (max 128 characters)")
+			}
+			if err := ops.CheckLen("name", n, 128); err != nil {
+				return BaseGroup{}, err
 			}
 			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE base_custom_field_groups SET name=? WHERE id=?`, n, in.ID); err != nil {
 				return BaseGroup{}, err
 			}
-			g := getGroup(e, pid, in.ID)
+			g, err := loadBaseGroup(e, in.ID)
+			if err != nil {
+				return BaseGroup{}, err
+			}
 			publish(e, "baseCustomFieldGroup.updated", pid, g)
 			return g, nil
 		})
@@ -233,8 +291,11 @@ func init() {
 				return BaseField{}, err
 			}
 			n := strings.TrimSpace(in.Name)
-			if n == "" || len(n) > 128 {
+			if n == "" {
 				return BaseField{}, ops.Invalid("name is required (max 128 characters)")
+			}
+			if err := ops.CheckLen("name", n, 128); err != nil {
+				return BaseField{}, err
 			}
 			t := in.Type
 			if t == "" {
@@ -247,14 +308,23 @@ func init() {
 			if err != nil {
 				return BaseField{}, err
 			}
-			var max float64
-			_ = e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(MAX(position),0) FROM custom_fields WHERE base_group_id=?`, in.ID).Scan(&max)
 			fid := db.NewID()
-			if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO custom_fields(id,base_group_id,name,type,options,position,show_on_front_of_card) VALUES(?,?,?,?,?,?,?)`,
-				fid, in.ID, n, t, nullStr(opts), max+db.PositionGap, in.ShowOnFrontOfCard); err != nil {
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				var max float64
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COALESCE(MAX(position),0) FROM custom_fields WHERE base_group_id=?`, in.ID).Scan(&max); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(e.Ctx, `INSERT INTO custom_fields(id,base_group_id,name,type,options,position,show_on_front_of_card) VALUES(?,?,?,?,?,?,?)`,
+					fid, in.ID, n, t, nullStr(opts), max+db.PositionGap, in.ShowOnFrontOfCard)
+				return err
+			})
+			if err != nil {
 				return BaseField{}, err
 			}
-			f := findField(e, pid, fid)
+			f, err := loadBaseField(e, fid)
+			if err != nil {
+				return BaseField{}, err
+			}
 			publish(e, "baseCustomField.created", pid, f)
 			return f, nil
 		})
@@ -269,11 +339,17 @@ func init() {
 			if err := authz.RequireProject(e, pid, authz.Manage); err != nil {
 				return BaseField{}, err
 			}
-			f := findField(e, pid, in.ID)
+			f, err := loadBaseField(e, in.ID)
+			if err != nil {
+				return BaseField{}, err
+			}
 			if in.Name != nil {
 				n := strings.TrimSpace(*in.Name)
-				if n == "" || len(n) > 128 {
+				if n == "" {
 					return f, ops.Invalid("name is required (max 128 characters)")
+				}
+				if err := ops.CheckLen("name", n, 128); err != nil {
+					return f, err
 				}
 				f.Name = n
 			}
@@ -300,7 +376,10 @@ func init() {
 				f.Name, f.Type, nullStr(opts), f.ShowOnFrontOfCard, f.Position, in.ID); err != nil {
 				return f, err
 			}
-			f = findField(e, pid, in.ID)
+			f, err = loadBaseField(e, in.ID)
+			if err != nil {
+				return BaseField{}, err
+			}
 			publish(e, "baseCustomField.updated", pid, f)
 			return f, nil
 		})
@@ -321,16 +400,4 @@ func init() {
 			publish(e, "baseCustomField.deleted", pid, map[string]string{"id": in.ID})
 			return DeleteOut{in.ID}, nil
 		})
-}
-
-func findField(e *ops.Env, projectID, fieldID string) BaseField {
-	gs, _ := BaseGroups(e, projectID)
-	for _, g := range gs {
-		for _, f := range g.Fields {
-			if f.ID == fieldID {
-				return f
-			}
-		}
-	}
-	return BaseField{}
 }

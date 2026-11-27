@@ -111,13 +111,13 @@ func checkOwnerTarget(e *ops.Env, userID string) error {
 // remains on the board or the caller manages the project (a project manager or admin). Every project keeps at
 // least one manager, so a board is never left without someone who can manage it; the rule stops an owner from
 // locking themselves out by accident.
-func checkOwnerLeaves(e *ops.Env, m Member) error {
+func checkOwnerLeaves(e *ops.Env, q querier, m Member) error {
 	if m.Role != authz.RoleOwner {
 		return nil
 	}
 	var pid string
 	var others int
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT project_id,(SELECT COUNT(*) FROM board_memberships WHERE board_id=? AND role=? AND id<>?) FROM boards WHERE id=?`,
+	_ = q.QueryRowContext(e.Ctx, `SELECT project_id,(SELECT COUNT(*) FROM board_memberships WHERE board_id=? AND role=? AND id<>?) FROM boards WHERE id=?`,
 		m.BoardID, authz.RoleOwner, m.ID, m.BoardID).Scan(&pid, &others)
 	if others > 0 || authz.ProjectLevel(e, pid) >= authz.Manage {
 		return nil
@@ -203,11 +203,6 @@ func registerMemberOps() {
 				return m, err
 			}
 		}
-		if role != authz.RoleOwner {
-			if err := checkOwnerLeaves(e, m); err != nil {
-				return m, err
-			}
-		}
 		var cc any
 		if role == authz.RoleViewer {
 			if in.CanComment != nil {
@@ -216,7 +211,24 @@ func registerMemberOps() {
 				cc = boolInt(*m.CanComment)
 			}
 		}
-		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE board_memberships SET role=?,can_comment=? WHERE id=?`, role, cc, in.ID); err != nil {
+		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			var curRole string
+			if err := tx.QueryRowContext(e.Ctx, `SELECT role FROM board_memberships WHERE id=?`, in.ID).Scan(&curRole); err != nil {
+				if err == sql.ErrNoRows {
+					return ops.NotFound("membership")
+				}
+				return err
+			}
+			m.Role = curRole
+			if role != authz.RoleOwner {
+				if err := checkOwnerLeaves(e, tx, m); err != nil {
+					return err
+				}
+			}
+			_, err := tx.ExecContext(e.Ctx, `UPDATE board_memberships SET role=?,can_comment=? WHERE id=?`, role, cc, in.ID)
+			return err
+		})
+		if err != nil {
 			return m, err
 		}
 		emit(e, "boardMembershipUpdate", "boardMembership.updated", m.BoardID, map[string]any{"id": in.ID, "role": role})
@@ -234,10 +246,18 @@ func registerMemberOps() {
 				return m, err
 			}
 		}
-		if err := checkOwnerLeaves(e, m); err != nil {
-			return m, err
-		}
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			var curRole string
+			if err := tx.QueryRowContext(e.Ctx, `SELECT role FROM board_memberships WHERE id=?`, in.ID).Scan(&curRole); err != nil {
+				if err == sql.ErrNoRows {
+					return ops.NotFound("membership")
+				}
+				return err
+			}
+			m.Role = curRole
+			if err := checkOwnerLeaves(e, tx, m); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(e.Ctx, `DELETE FROM board_memberships WHERE id=?`, in.ID); err != nil {
 				return err
 			}

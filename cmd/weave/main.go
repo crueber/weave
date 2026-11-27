@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,20 +16,15 @@ import (
 	"github.com/crueber/weave/internal/cli/opsbridge"
 	"github.com/crueber/weave/internal/config"
 	"github.com/crueber/weave/internal/db"
-	"github.com/crueber/weave/internal/domain/admin"
 	"github.com/crueber/weave/internal/domain/auth"
 	"github.com/crueber/weave/internal/realtime"
 	"github.com/crueber/weave/internal/server"
-	"github.com/crueber/weave/internal/version"
 
 	_ "github.com/crueber/weave/internal/all"
 )
 
 func main() {
 	opsbridge.Install()
-	if version.Version == "dev" && admin.Version != "dev" {
-		version.Version = admin.Version // images stamp only admin.Version
-	}
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		if err := serve(); err != nil {
 			fmt.Fprintln(os.Stderr, "weave:", err)
@@ -58,10 +54,15 @@ func main() {
 // distroless has no curl). Exit 0 healthy, 1 otherwise.
 func healthcheck() int {
 	addr := config.Load().Addr
-	if strings.HasPrefix(addr, ":") {
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		addr = net.JoinHostPort(host, port)
+	} else if strings.HasPrefix(addr, ":") {
 		addr = "127.0.0.1" + addr
 	}
-	c := http.Client{Timeout: 4 * time.Second}
+	c := http.Client{Timeout: 4 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	resp, err := c.Get("http://" + addr + "/healthz")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "unhealthy:", err)
@@ -84,6 +85,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	defer d.Close()
 	s := &server.Server{Cfg: cfg, DB: d, Hub: realtime.New(), Svc: map[string]any{"config": cfg}}
 	for _, h := range server.Hooks {
 		if err := h(s); err != nil {
@@ -97,14 +99,24 @@ func serve() error {
 	// open SSE streams must end on shutdown, or Shutdown would wait for them forever
 	base, stopStreams := context.WithCancel(context.Background())
 	srv := &http.Server{Addr: cfg.Addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second, BaseContext: func(net.Listener) context.Context { return base }}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	shutdownDone := make(chan struct{})
 	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
+		defer close(shutdownDone)
+		select {
+		case <-sigCh:
+			stopStreams()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(ctx)
+		case <-base.Done():
+		}
+	}()
+	defer func() {
+		signal.Stop(sigCh)
 		stopStreams()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(ctx)
+		<-shutdownDone
 	}()
 	fmt.Println("weave listening on", cfg.Addr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
@@ -118,26 +130,30 @@ func serve() error {
 // opens the database directly via WEAVE_DATA_DIR and never goes through HTTP.
 func mintKey(args []string) int {
 	var email, role string
+	usage := func() int {
+		fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|boardUser|worker|guest]")
+		return 2
+	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--email":
-			i++
-			if i < len(args) {
-				email = args[i]
+			if i+1 >= len(args) {
+				return usage()
 			}
+			i++
+			email = args[i]
 		case "--role":
-			i++
-			if i < len(args) {
-				role = args[i]
+			if i+1 >= len(args) {
+				return usage()
 			}
+			i++
+			role = args[i]
 		default:
-			fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|boardUser|worker|guest]")
-			return 2
+			return usage()
 		}
 	}
 	if email == "" {
-		fmt.Fprintln(os.Stderr, "usage: weave admin mint-key --email EMAIL [--role admin|boardUser|worker|guest]")
-		return 2
+		return usage()
 	}
 	cfg := config.Load()
 	d, err := db.Open(cfg.DataDir + "/weave.db")
@@ -151,7 +167,10 @@ func mintKey(args []string) int {
 		fmt.Fprintln(os.Stderr, "weave:", err)
 		return 1
 	}
-	fmt.Printf("{\"item\":{\"key\":%q,\"prefix\":%q}}\n", out.Key, out.Prefix)
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"item": map[string]string{"key": out.Key, "prefix": out.Prefix}}); err != nil {
+		fmt.Fprintln(os.Stderr, "weave:", err)
+		return 1
+	}
 	return 0
 }
 

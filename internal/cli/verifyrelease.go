@@ -8,14 +8,16 @@ import (
 	"github.com/crueber/weave/internal/relsign"
 )
 
+var verifyReleaseFlags = []FlagSpec{{Name: "pubkey"}}
+
 func init() {
-	registerSpec("verify-release", []FlagSpec{{Name: "pubkey"}}, cmdVerifyRelease)
+	registerSpec("verify-release", verifyReleaseFlags, cmdVerifyRelease)
 }
 
 // cmdVerifyRelease checks the signature over a release's SHA256SUMS.txt. It is also what
 // install.ps1 runs (PowerShell has no ed25519). It does not check file hashes: use sha256sum -c.
 func cmdVerifyRelease(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "pubkey"}})
+	p, err := a.parse(args, verifyReleaseFlags)
 	if err != nil {
 		return a.fail(err)
 	}

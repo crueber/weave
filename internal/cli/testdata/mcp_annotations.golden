@@ -250,4 +250,3 @@ weave_webhook_list GET readOnly,idempotent
 weave_webhook_retry POST 
 weave_webhook_test POST 
 weave_webhook_update PATCH idempotent
-weave_whoami GET readOnly,idempotent

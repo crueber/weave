@@ -1,5 +1,5 @@
 {{define "topbar-page"}}{{with .Data}}{{template "boards_crumbs" dict "Board" .Board "ProjectName" .ProjectName}}{{template "boards_views" dict "Board" .Board "View" "calendar" "PageURL" (print "/boards/" .Board.ID) "Query" ""}}{{end}}{{end}}
-{{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script>
+{{define "page"}}{{$d := .Data}}<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/extras_card.css"><script src="/static/cards_ui.js" defer></script><script src="/static/cards_place.js" defer></script><script src="/static/extras_card.js" defer></script>
 <div id="cards-cal" class="cards-cal" data-board="{{$d.BoardID}}">
   <div class="cards-cal-head">
     <a href="/boards/{{$d.BoardID}}">&larr; Board</a>
@@ -8,7 +8,7 @@
     <a href="/boards/{{$d.BoardID}}/calendar?month={{$d.Next}}" aria-label="Next month">&rsaquo;</a>
     <a href="/boards/{{$d.BoardID}}/calendar">Today</a>
     <a href="/boards/{{$d.BoardID}}/map">Map</a>
-    {{if $d.Inbox}}<a class="cards-inbox-link" href="/boards/{{$d.BoardID}}?view=kanban" title="The Inbox is the first column of the Kanban view">Inbox ({{$d.Inbox}})</a>{{end}}
+    {{if $d.Inbox}}<a class="cards-inbox-link" href="/boards/{{$d.BoardID}}?view=kanban" title="The Inbox is the first column of the board view">Inbox ({{$d.Inbox}})</a>{{end}}
   </div>
   <div class="cards-cal-body">
     <div class="cards-cal-grid" role="grid">

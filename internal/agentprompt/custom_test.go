@@ -45,7 +45,7 @@ func TestDefaultsUseOnlyKnownTokens(t *testing.T) {
 }
 
 func TestExpandIsOnePassAndLiteral(t *testing.T) {
-	vals := map[string]string{"a": "{b}", "b": "B", "empty": ""}
+	vals := map[string]string{"a": "{b}", "b": "B", "empty": "", "multi": "x\ny"}
 	cases := map[string]string{
 		"x {a} y":                      "x {b} y",                      // expansions are not rescanned
 		"{b}{b}":                       "BB",                           //
@@ -55,6 +55,10 @@ func TestExpandIsOnePassAndLiteral(t *testing.T) {
 		"one\n{empty}\ntwo":            "one\ntwo",    // a line that is only an empty token is dropped
 		"one\n{empty} \ntwo":           "one\n \ntwo", // ...but only when it is the whole line
 		"one {empty}\ntwo":             "one \ntwo",
+		"one\r\n{empty}\r\ntwo":        "one\r\ntwo", // CRLF standalone empty token dropped
+		"one\r\n  {b}\r\ntwo":          "one\r\n  B\r\ntwo",
+		"one\r\n  {multi}\r\ntwo":      "one\r\n  x\n  y\r\ntwo",
+		"one\r\n{empty} \r\ntwo":       "one\r\n \r\ntwo",
 		"{b":                           "{b",
 		"tail {":                       "tail {",
 	}

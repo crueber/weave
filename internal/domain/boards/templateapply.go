@@ -120,7 +120,7 @@ func templateApply(e *ops.Env, in TemplateApplyIn) (TemplateApplyOut, error) {
 	if !in.DryRun && !in.Confirm {
 		return TemplateApplyOut{}, ops.Invalid("applying a template moves every card of the board (and by default removes the old columns) and cannot be undone automatically: preview it with dryRun, export the board, then resend with confirm=true")
 	}
-	t, err := loadTemplate(e, in.TemplateID, true)
+	t, err := loadTemplate(e, in.TemplateID, true, in.IncludeSampleCards)
 	if err != nil {
 		return TemplateApplyOut{}, err
 	}
@@ -162,9 +162,117 @@ type applyEvents struct {
 	moved    []Landing // card -> the column it left
 	target   string
 	samples  []Landing
-	labels   []string
+	labels   []Label
 	landing  LandResult
 	settings bool
+}
+
+type movingCard struct {
+	id, from string
+	closed   bool
+}
+
+func planTemplateColumns(ib impBoard) (cols []impList, target int, err error) {
+	for _, l := range ib.Lists {
+		if l.Type == "archive" || l.Type == "trash" {
+			continue
+		}
+		cols = append(cols, l)
+	}
+	target = -1
+	for i, l := range cols {
+		if l.Type != "closed" {
+			target = i
+			break
+		}
+	}
+	if len(cols) == 0 {
+		return nil, -1, ops.Invalid("this template has no columns")
+	}
+	if target < 0 {
+		return nil, -1, ops.Invalid("this template has no column that keeps cards open (every column closes cards), so the board's cards would all be closed: pick another template")
+	}
+	return cols, target, nil
+}
+
+func loadExistingCols(ctx context.Context, tx *sql.Tx, boardID string) ([]oldCol, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(name,''),type,wip_limit,archive_after,COALESCE(description,'')<>'' FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position, id`, boardID)
+	if err != nil {
+		return nil, err
+	}
+	var existing []oldCol
+	for rows.Next() {
+		var c oldCol
+		if err := rows.Scan(&c.id, &c.name, &c.typ, &c.wip, &c.keep, &c.brief); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		existing = append(existing, c)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return existing, rows.Err()
+}
+
+func loadMovingCards(ctx context.Context, tx *sql.Tx, boardID string) ([]movingCard, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT c.id,p.list_id,c.is_closed FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 AND l.board_id=? AND l.type IN ('active','closed') ORDER BY l.position, l.id, p.position, c.id`, boardID, boardID)
+	if err != nil {
+		return nil, err
+	}
+	var move []movingCard
+	for rows.Next() {
+		var m movingCard
+		if err := rows.Scan(&m.id, &m.from, &m.closed); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		move = append(move, m)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return move, rows.Err()
+}
+
+func mergeCustomFields(ctx context.Context, tx *sql.Tx, boardID string, ib impBoard, includeSamples bool, wc writtenCards, out *TemplateApplyOut) error {
+	if len(ib.FieldGroups) == 0 || ImportCustomFields == nil || ExportCustomFields == nil {
+		return nil
+	}
+	have, _, err := ExportCustomFields(ctx, tx, boardID, false)
+	if err != nil {
+		return err
+	}
+	taken := map[string]bool{}
+	for _, g := range have {
+		if g.Card == "" {
+			taken[labelKey(g.Name)] = true
+		}
+	}
+	var add []FieldGroupDoc
+	for _, g := range ib.FieldGroups {
+		if g.Card != "" { // a card-level group travels with its sample card only
+			if includeSamples {
+				add = append(add, g)
+			}
+			continue
+		}
+		if strings.TrimSpace(g.Name) == "" {
+			continue
+		}
+		if taken[labelKey(g.Name)] {
+			out.FieldGroupsSkipped = append(out.FieldGroupsSkipped, g.Name)
+			continue
+		}
+		taken[labelKey(g.Name)] = true
+		out.FieldGroupsAdded = append(out.FieldGroupsAdded, g.Name)
+		add = append(add, g)
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	return ImportCustomFields(ctx, tx, boardID, add, wc.values, wc.ids)
 }
 
 func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID string, useProject, canProjectLabels bool) (TemplateApplyOut, applyEvents, error) {
@@ -178,25 +286,9 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	ib := t.ib
 
 	// ---- the template's columns and the target ----
-	var cols []impList
-	for _, l := range ib.Lists {
-		if l.Type == "archive" || l.Type == "trash" {
-			continue
-		}
-		cols = append(cols, l)
-	}
-	target := -1
-	for i, l := range cols {
-		if l.Type != "closed" {
-			target = i
-			break
-		}
-	}
-	if len(cols) == 0 {
-		return out, ev, ops.Invalid("this template has no columns")
-	}
-	if target < 0 {
-		return out, ev, ops.Invalid("this template has no column that keeps cards open (every column closes cards), so the board's cards would all be closed: pick another template")
+	cols, target, err := planTemplateColumns(ib)
+	if err != nil {
+		return out, ev, err
 	}
 	if target > 0 {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("The template's first column, %s, closes cards: the cards move to %s, the first column that keeps them open.", cols[0].Name, cols[target].Name))
@@ -207,20 +299,10 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	if err != nil {
 		return out, ev, err
 	}
-	var existing []oldCol
-	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(name,''),type,wip_limit,archive_after,COALESCE(description,'')<>'' FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position, id`, boardID)
+	existing, err := loadExistingCols(ctx, tx, boardID)
 	if err != nil {
 		return out, ev, err
 	}
-	for rows.Next() {
-		var c oldCol
-		if err := rows.Scan(&c.id, &c.name, &c.typ, &c.wip, &c.keep, &c.brief); err != nil {
-			rows.Close()
-			return out, ev, err
-		}
-		existing = append(existing, c)
-	}
-	rows.Close()
 	if removeOld {
 		for _, c := range existing {
 			out.ColumnsRemoved = append(out.ColumnsRemoved, c.name)
@@ -245,26 +327,10 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	}
 
 	// the cards that move, in board order (old column order, then position)
-	type moving struct {
-		id, from string
-		closed   bool
-	}
-	var move []moving
-	// every card placed on this board (whichever board is its home), with this board's column and position
-	rows, err = tx.QueryContext(ctx, `SELECT c.id,p.list_id,c.is_closed FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
-		WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 AND l.board_id=? AND l.type IN ('active','closed') ORDER BY l.position, l.id, p.position, c.id`, boardID, boardID)
+	move, err := loadMovingCards(ctx, tx, boardID)
 	if err != nil {
 		return out, ev, err
 	}
-	for rows.Next() {
-		var m moving
-		if err := rows.Scan(&m.id, &m.from, &m.closed); err != nil {
-			rows.Close()
-			return out, ev, err
-		}
-		move = append(move, m)
-	}
-	rows.Close()
 	out.CardsMoved = len(move)
 	for _, m := range move {
 		if m.closed {
@@ -294,14 +360,16 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 		cols[target].ArchiveAfter = 0
 	}
 
-	// ---- columns: template ones at 1..n, existing ones after them in their order (until they are removed) ----
+	// ---- columns: template ones at 1..n, existing ones after them only when kept ----
 	wl, err := writeLists(ctx, tx, boardID, cols, now, func(i int, _ impList) float64 { return float64(i+1) * db.PositionGap })
 	if err != nil {
 		return out, ev, err
 	}
-	for j, c := range existing {
-		if _, err := tx.ExecContext(ctx, `UPDATE lists SET position=? WHERE id=?`, float64(len(cols)+j+1)*db.PositionGap, c.id); err != nil {
-			return out, ev, err
+	if !removeOld {
+		for j, c := range existing {
+			if _, err := tx.ExecContext(ctx, `UPDATE lists SET position=? WHERE id=?`, float64(len(cols)+j+1)*db.PositionGap, c.id); err != nil {
+				return out, ev, err
+			}
 		}
 	}
 	for i, l := range cols {
@@ -323,35 +391,15 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	}
 
 	// ---- move the cards: appended to the target in board order, one UPDATE per chunk ----
-	lands := make([]Landing, 0, len(move))
-	for i := 0; i < len(move); i += archiveChunk {
-		chunk := move[i:min(i+archiveChunk, len(move))]
-		in := "(?" + strings.Repeat(",?", len(chunk)-1) + ")"
-		args := make([]any, 0, 3+5*len(chunk))
-		args = append(args, targetID, now)
-		for _, m := range chunk {
-			args = append(args, m.id, m.from)
-		}
-		for k, m := range chunk {
-			args = append(args, m.id, float64(i+k+1)*db.PositionGap)
-		}
-		args = append(args, boardID)
-		ids := make([]any, 0, len(chunk))
-		for _, m := range chunk {
-			ids = append(ids, m.id)
-		}
-		// the cards' placements on this board move (the mirror updates the cards columns), then updated_at
-		if _, err := tx.ExecContext(ctx, `UPDATE card_placements SET list_id=?,list_changed_at=?,prev_list_id=CASE card_id`+strings.Repeat(" WHEN ? THEN ?", len(chunk))+
-			` END,position=CASE card_id`+strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END WHERE board_id=? AND card_id IN `+in, append(args, ids...)...); err != nil {
-			return out, ev, err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE cards SET updated_at=? WHERE id IN `+in, append([]any{now}, ids...)...); err != nil {
-			return out, ev, err
-		}
-	}
-	for _, m := range move {
-		lands = append(lands, Landing{CardID: m.id, ListID: targetID})
+	moves := make([]placementMove, len(move))
+	lands := make([]Landing, len(move))
+	for i, m := range move {
+		moves[i] = placementMove{CardID: m.id, FromListID: m.from, Position: float64(i+1) * db.PositionGap}
+		lands[i] = Landing{CardID: m.id, ListID: targetID}
 		ev.moved = append(ev.moved, Landing{CardID: m.id, ListID: m.from})
+	}
+	if err := movePlacements(ctx, tx, boardID, targetID, now, moves); err != nil {
+		return out, ev, err
 	}
 	if _, err := LandedKeepClosed(ctx, tx, lands...); err != nil {
 		return out, ev, err
@@ -385,10 +433,8 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	// ---- sample cards ----
 	var wc writtenCards
 	if len(samples) > 0 {
-		base := map[string]float64{}
-		for _, id := range wl.order {
-			base[id] = maxPos(ctx, tx, "card_placements", "list_id=?", id)
-		}
+		// Only targetID can already hold cards (moved cards or re-parked drafts/templates); all other template columns are empty.
+		base := map[string]float64{targetID: maxPos(ctx, tx, "card_placements", "list_id=?", targetID)}
 		if wc, err = writeCards(e, tx, boardID, samples, wl, labels, nowT, now, base); err != nil {
 			return out, ev, err
 		}
@@ -403,41 +449,8 @@ func writeApply(e *ops.Env, tx *sql.Tx, in TemplateApplyIn, t tpl, projectID str
 	}
 
 	// ---- custom-field groups: only added; a same-named board group skips the template's whole group ----
-	if len(ib.FieldGroups) > 0 && ImportCustomFields != nil && ExportCustomFields != nil {
-		have, _, err := ExportCustomFields(ctx, tx, boardID, false)
-		if err != nil {
-			return out, ev, err
-		}
-		taken := map[string]bool{}
-		for _, g := range have {
-			if g.Card == "" {
-				taken[labelKey(g.Name)] = true
-			}
-		}
-		var add []FieldGroupDoc
-		for _, g := range ib.FieldGroups {
-			if g.Card != "" { // a card-level group travels with its sample card only
-				if in.IncludeSampleCards {
-					add = append(add, g)
-				}
-				continue
-			}
-			if strings.TrimSpace(g.Name) == "" {
-				continue
-			}
-			if taken[labelKey(g.Name)] {
-				out.FieldGroupsSkipped = append(out.FieldGroupsSkipped, g.Name)
-				continue
-			}
-			taken[labelKey(g.Name)] = true
-			out.FieldGroupsAdded = append(out.FieldGroupsAdded, g.Name)
-			add = append(add, g)
-		}
-		if len(add) > 0 {
-			if err := ImportCustomFields(ctx, tx, boardID, add, wc.values, wc.ids); err != nil {
-				return out, ev, err
-			}
-		}
+	if err := mergeCustomFields(ctx, tx, boardID, ib, in.IncludeSampleCards, wc, &out); err != nil {
+		return out, ev, err
 	}
 
 	// ---- board settings: only when asked, never the agent prompt ----
@@ -633,9 +646,19 @@ func mergeLabels(e *ops.Env, tx *sql.Tx, boardID, projectID string, useProject, 
 		return "(unnamed " + color + ")"
 	}
 	labels := map[string]string{}
+	var labelPos, groupPos float64
+	if len(ib.Labels) > 0 {
+		if useProject {
+			labelPos = maxPos(ctx, tx, "labels", "project_id=? AND board_id IS NULL", projectID)
+		} else {
+			labelPos = maxPos(ctx, tx, "labels", "board_id=?", boardID)
+			groupPos = maxPos(ctx, tx, "label_groups", "board_id=?", boardID)
+		}
+	}
 	for _, l := range ib.Labels {
 		color := importLabelColor(l)
-		named := strings.TrimSpace(l.Name) != ""
+		trimmed := strings.TrimSpace(l.Name)
+		named := trimmed != ""
 		var match string
 		if named {
 			match = byName[labelKey(l.Name)]
@@ -652,33 +675,44 @@ func mergeLabels(e *ops.Env, tx *sql.Tx, boardID, projectID string, useProject, 
 			continue
 		}
 		id := db.NewID()
+		labelPos += db.PositionGap
+		created := Label{ID: id, Color: color, Position: labelPos, CreatedAt: now}
+		if named {
+			nameCopy := trimmed
+			created.Name = &nameCopy
+		}
 		if useProject {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO labels(id,project_id,name,color,position,created_at) VALUES(?,?,?,?,?,?)`, id, projectID, nullStr(strings.TrimSpace(l.Name)), color,
-				appendPos(ctx, tx, "labels", "project_id=? AND board_id IS NULL", projectID), now); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO labels(id,project_id,name,color,position,created_at) VALUES(?,?,?,?,?,?)`, id, projectID, nullStr(trimmed), color, labelPos, now); err != nil {
 				return nil, err
 			}
+			pid := projectID
+			created.ProjectID = &pid
 		} else {
 			var grp any
 			if g, ok := tplGroup[l.Group]; ok && strings.TrimSpace(g.Name) != "" {
+				gname := strings.TrimSpace(g.Name)
 				gid := groupByName[labelKey(g.Name)]
 				if gid == "" {
 					gid = db.NewID()
-					if _, err := tx.ExecContext(ctx, `INSERT INTO label_groups(id,board_id,name,single_select,position) VALUES(?,?,?,?,?)`, gid, boardID, strings.TrimSpace(g.Name), boolInt(g.SingleSelect),
-						appendPos(ctx, tx, "label_groups", "board_id=?", boardID)); err != nil {
+					groupPos += db.PositionGap
+					if _, err := tx.ExecContext(ctx, `INSERT INTO label_groups(id,board_id,name,single_select,position) VALUES(?,?,?,?,?)`, gid, boardID, gname, boolInt(g.SingleSelect), groupPos); err != nil {
 						return nil, err
 					}
 					groupByName[labelKey(g.Name)] = gid
-					out.LabelGroupsAdded = append(out.LabelGroupsAdded, strings.TrimSpace(g.Name))
+					out.LabelGroupsAdded = append(out.LabelGroupsAdded, gname)
 				}
 				grp = gid
+				gidCopy := gid
+				created.GroupID = &gidCopy
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO labels(id,board_id,group_id,name,color,position,created_at) VALUES(?,?,?,?,?,?,?)`, id, boardID, grp, nullStr(strings.TrimSpace(l.Name)), color,
-				appendPos(ctx, tx, "labels", "board_id=?", boardID), now); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO labels(id,board_id,group_id,name,color,position,created_at) VALUES(?,?,?,?,?,?,?)`, id, boardID, grp, nullStr(trimmed), color, labelPos, now); err != nil {
 				return nil, err
 			}
+			bid := boardID
+			created.BoardID = &bid
 		}
 		labels[l.Key] = id
-		ev.labels = append(ev.labels, id)
+		ev.labels = append(ev.labels, created)
 		out.LabelsAdded = append(out.LabelsAdded, display(l, color))
 		// a second template label with the same name (or unnamed colour) reuses this one
 		if named {
@@ -784,10 +818,8 @@ func emitApply(e *ops.Env, boardID string, out TemplateApplyOut, ev applyEvents)
 	for _, id := range ev.samples { // id: the sample card and its column
 		emitCard(e, "cardCreate", "card.created", "", boardID, id.CardID, map[string]any{"listId": id.ListID, "auto": "applyTemplate", "templateId": out.TemplateID, "quiet": true})
 	}
-	for _, id := range ev.labels {
-		if l, err := scanLabel(e.DB.QueryRowContext(e.Ctx, `SELECT `+labelCols+` FROM labels WHERE id=?`, id)); err == nil {
-			emitLabel(e, "labelCreate", "label.created", l)
-		}
+	for _, l := range ev.labels {
+		emitLabel(e, "labelCreate", "label.created", l)
 	}
 	EmitAutoArchived(e, ev.landing)
 	emit(e, "boardUpdate", "board.updated", boardID, map[string]any{"id": boardID, "appliedTemplate": out.TemplateName, "templateId": out.TemplateID,

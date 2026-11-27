@@ -5,7 +5,7 @@
 
 {{define "x-toggle"}}<h3 class="x-h"><button type="button" class="x-toggle" data-sec-toggle aria-expanded="true"><span class="x-chev" aria-hidden="true"></span>{{.title}}</button></h3>{{end}}
 
-{{define "tasks"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "tasks"}}{{$d := .Data}}
 <div class="x-sec" id="x-tasks" data-sec="tasks" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Checklists")}}
   {{if $d.TasksTotal}}<span class="x-count" title="Items completed">{{$d.TasksDone}}/{{$d.TasksTotal}}</span>{{end}}
@@ -68,7 +68,7 @@
   <button class="primary">Add list</button></form>{{end}}{{end}}
 </div>{{end}}
 
-{{define "comments"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "comments"}}{{$d := .Data}}
 <div class="x-sec x-comments" id="x-comments" data-sec="comments" data-count="{{$d.Comments.Total}}" hx-target="this" hx-swap="outerHTML">
 <h3 class="sr-only">Comments <span>({{$d.Comments.Total}})</span></h3>
 {{if not $d.Comments.CanComment}}<p class="x-muted">You do not have permission to comment.</p>{{end}}
@@ -89,7 +89,7 @@
 {{if $d.HasMore}}<button class="x-more-btn" hx-get="/ui/cards/{{$d.CardID}}/comments?limit={{$d.NextLimit}}">Show older comments</button>{{end}}
 </div>{{end}}
 
-{{define "attachments"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "attachments"}}{{$d := .Data}}
 <div class="x-sec" id="x-attachments" data-sec="attachments" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Attachments")}}
   {{if $d.Files}}<span class="x-count">{{len $d.Files}}</span>{{end}}
@@ -138,7 +138,7 @@
 </form>{{end}}{{end}}
 
 {{/* Read-only callers get nothing (and the card sheet hides the empty section) when there is nothing to read. */}}
-{{define "fields"}}{{$d := .Data}}{{if or $d.CanEdit $d.Groups}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "fields"}}{{$d := .Data}}{{if or $d.CanEdit $d.Groups}}
 <div class="x-sec" id="x-fields" data-sec="fields" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Custom fields")}}
   <div class="x-actions">{{if $d.CanEdit}}<details class="x-pop x-addgroup"><summary class="x-addbtn">+ Group</summary><div class="x-popbody">
@@ -180,7 +180,7 @@
     {{range $r := $g.Rows}}<tr data-id="{{$r.ID}}"{{if $d.CanEdit}} draggable="true"{{end}}><td class="x-grip" aria-hidden="true">::</td>
       {{range $f := $g.Fields}}<td>{{template "x-cell" (xDict "d" $d "g" $g "f" $f "r" $r)}}</td>{{end}}
       <td>{{if $d.CanEdit}}<button class="x-rowdel" aria-label="Remove row" title="Remove row" hx-post="/ui/custom-field-rows/{{$r.ID}}/delete" hx-confirm="Delete this row?">&times;<span class="sr-only">Remove</span></button>{{end}}</td></tr>
-    {{else}}<tr><td colspan="{{len $g.Fields}}" class="x-muted">No rows.</td></tr>{{end}}
+    {{else}}<tr><td colspan="{{add1 (add1 (len $g.Fields))}}" class="x-muted">No rows.</td></tr>{{end}}
     </tbody></table></div>
   {{if $d.CanEdit}}<button class="x-addrow" hx-post="/ui/cards/{{$d.CardID}}/custom-field-groups/{{$g.ID}}/rows">+ Add row</button>{{end}}
   {{else}}
@@ -191,7 +191,7 @@
 </div>
 </div>{{end}}{{end}}
 
-{{define "time"}}{{$d := .Data}}{{$t := $d.Time}}{{if or $d.CanEdit $t.Entries $t.Running}}<link rel="stylesheet" href="/static/extras_card.css"><script src="/static/extras_card.js"></script>
+{{define "time"}}{{$d := .Data}}{{$t := $d.Time}}{{if or $d.CanEdit $t.Entries $t.Running}}
 <div class="x-sec" id="x-time" data-sec="time" hx-target="this" hx-swap="outerHTML">
 <header class="x-head">{{template "x-toggle" (xDict "title" "Time tracking")}}</header>
 <div class="x-timer{{if $t.Running}} is-running{{end}}">
@@ -214,7 +214,7 @@
 </details>
 </div>{{end}}{{end}}
 
-{{define "activity"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "activity"}}{{$d := .Data}}
 <div class="x-sec x-act" id="x-activity" data-sec="activity" hx-target="this" hx-swap="outerHTML">
 <h3 class="sr-only">Activity</h3>
 <ul class="x-activity">
@@ -224,7 +224,7 @@
 {{if $d.HasMore}}<button class="x-more-btn" hx-get="/ui/cards/{{$d.CardID}}/activity?limit={{$d.NextLimit}}">Show more</button>{{end}}
 </div>{{end}}
 
-{{define "board-activity"}}{{$d := .Data}}<link rel="stylesheet" href="/static/extras_card.css">
+{{define "board-activity"}}{{$d := .Data}}
 <div class="x-sec" id="x-board-activity" hx-target="this" hx-swap="outerHTML">
 <h3>Board activity</h3>
 <ul class="x-activity">

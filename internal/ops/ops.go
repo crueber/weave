@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -135,10 +137,12 @@ const (
 	AuthAdmin              // admin role only
 )
 
-// Stream is returned by download ops.
+// Stream is returned by download ops. Callers may supply either Data or Reader
+// (if Reader is non-nil, the server streams from it and closes it).
 type Stream struct {
 	Name, ContentType string
 	Data              []byte
+	Reader            io.ReadCloser
 }
 
 var (
@@ -195,9 +199,14 @@ func Call(e *Env, name string, in any) (any, error) {
 // Typed is Call with a concrete output type.
 func Typed[Out any](e *Env, name string, in any) (Out, error) {
 	var zero Out
-	// Handlers take a pointer to In; accept either In or *In.
-	rv := reflect.ValueOf(in)
-	if rv.Kind() != reflect.Ptr {
+	if in == nil {
+		o := Get(name)
+		if o == nil {
+			return zero, fmt.Errorf("unknown op %s", name)
+		}
+		in = reflect.New(o.In).Interface()
+	} else if rv := reflect.ValueOf(in); rv.Kind() != reflect.Ptr {
+		// Handlers take a pointer to In; accept either In or *In.
 		p := reflect.New(rv.Type())
 		p.Elem().Set(rv)
 		in = p.Interface()
@@ -206,7 +215,13 @@ func Typed[Out any](e *Env, name string, in any) (Out, error) {
 	if err != nil {
 		return zero, err
 	}
-	out, _ := v.(Out)
+	if v == nil {
+		return zero, nil
+	}
+	out, ok := v.(Out)
+	if !ok {
+		return zero, fmt.Errorf("op %s returned %T, want %T", name, v, zero)
+	}
 	return out, nil
 }
 
@@ -218,7 +233,7 @@ func authorize(o *Op, e *Env) error {
 		if e.User == nil {
 			return e.unauthorized()
 		}
-		if e.User.Role != "admin" {
+		if e.User.Role != "admin" || e.User.IsAgent {
 			return Forbidden()
 		}
 	default:
@@ -338,6 +353,9 @@ func (o *Op) Bind(r *http.Request) (any, error) {
 		if err := r.ParseMultipartForm(multipartMemory); err != nil {
 			return nil, bindErr(err, "invalid multipart body")
 		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
+		}
 	default:
 		if err := r.ParseForm(); err != nil {
 			var mb *http.MaxBytesError
@@ -346,6 +364,7 @@ func (o *Op) Bind(r *http.Request) (any, error) {
 			}
 		}
 	}
+	q := r.URL.Query()
 	for i := 0; i < o.In.NumField(); i++ {
 		f := o.In.Field(i)
 		if !f.IsExported() {
@@ -358,8 +377,8 @@ func (o *Op) Bind(r *http.Request) (any, error) {
 		case f.Tag.Get("path") != "":
 			raw, have = r.PathValue(f.Tag.Get("path")), true
 		case f.Tag.Get("query") != "":
-			raw = r.URL.Query().Get(f.Tag.Get("query"))
-			have = r.URL.Query().Has(f.Tag.Get("query"))
+			qk := f.Tag.Get("query")
+			raw, have = q.Get(qk), q.Has(qk)
 		case f.Type == reflect.TypeOf((*File)(nil)):
 			if r.MultipartForm != nil {
 				if fh, ok := r.MultipartForm.File[jsonName(f)]; ok && len(fh) > 0 {
@@ -367,10 +386,14 @@ func (o *Op) Bind(r *http.Request) (any, error) {
 					if err != nil {
 						return nil, Invalid("cannot read upload")
 					}
-					buf, err := io.ReadAll(io.LimitReader(fl, o.bodyLimit()+1))
+					limit := o.bodyLimit()
+					buf, err := io.ReadAll(io.LimitReader(fl, limit+1))
 					fl.Close()
 					if err != nil {
 						return nil, Invalid("cannot read upload")
+					}
+					if int64(len(buf)) > limit {
+						return nil, TooLarge("request body too large (limit " + fmt.Sprint(limit) + " bytes)")
 					}
 					fv.Set(reflect.ValueOf(&File{Name: fh[0].Filename, ContentType: fh[0].Header.Get("Content-Type"), Data: buf}))
 				}
@@ -392,11 +415,21 @@ func (o *Op) Bind(r *http.Request) (any, error) {
 		}
 		if have {
 			if err := setScalar(fv, raw); err != nil {
-				return nil, Invalid(fmt.Sprintf("field %s: %v", f.Name, err))
+				return nil, Invalid(fmt.Sprintf("field %s: %v", wireName(f), err))
 			}
 		}
 	}
 	return in.Interface(), o.validate(in.Elem())
+}
+
+func wireName(f reflect.StructField) string {
+	if p := f.Tag.Get("path"); p != "" {
+		return p
+	}
+	if q := f.Tag.Get("query"); q != "" {
+		return q
+	}
+	return jsonName(f)
 }
 
 func (o *Op) validate(v reflect.Value) error {
@@ -404,18 +437,11 @@ func (o *Op) validate(v reflect.Value) error {
 		f := o.In.Field(i)
 		if f.Tag.Get("required") == "true" || f.Tag.Get("path") != "" {
 			if v.Field(i).IsZero() {
-				return Invalid("missing required field " + o.Schema().fieldName(f))
+				return Invalid("missing required field " + wireName(f))
 			}
 		}
 	}
 	return nil
-}
-
-func (s Schema) fieldName(f reflect.StructField) string {
-	if p := f.Tag.Get("path"); p != "" {
-		return p
-	}
-	return jsonName(f)
 }
 
 func setScalar(v reflect.Value, raw string) error {
@@ -433,15 +459,15 @@ func setScalar(v reflect.Value, raw string) error {
 	case reflect.Bool:
 		v.SetBool(raw == "true" || raw == "1" || raw == "on")
 	case reflect.Int, reflect.Int64, reflect.Int32:
-		var n int64
-		if _, err := fmt.Sscan(raw, &n); err != nil {
+		n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, v.Type().Bits())
+		if err != nil {
 			return err
 		}
 		v.SetInt(n)
 	case reflect.Float64:
-		var n float64
-		if _, err := fmt.Sscan(raw, &n); err != nil {
-			return err
+		n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+			return errors.New("invalid number")
 		}
 		v.SetFloat(n)
 	default:
@@ -468,22 +494,28 @@ func CallMap(e *Env, name string, args map[string]any) (any, error) {
 		if !f.IsExported() {
 			continue
 		}
-		n := f.Tag.Get("path")
-		if n == "" {
-			n = f.Tag.Get("query")
-		}
-		if n == "" {
-			n = jsonName(f)
-		}
+		n := wireName(f)
 		v, ok := args[n]
-		if !ok {
+		if !ok || v == nil {
+			continue
+		}
+		fv := in.Elem().Field(i)
+		rv := reflect.ValueOf(v)
+		if rv.Type().AssignableTo(fv.Type()) {
+			fv.Set(rv)
+			continue
+		}
+		if fv.Kind() == reflect.Ptr && rv.Type().AssignableTo(fv.Type().Elem()) {
+			p := reflect.New(fv.Type().Elem())
+			p.Elem().Set(rv)
+			fv.Set(p)
 			continue
 		}
 		b, err := json.Marshal(v)
 		if err != nil {
 			return nil, Invalid(fmt.Sprintf("field %s: %v", n, err))
 		}
-		if err := json.Unmarshal(b, in.Elem().Field(i).Addr().Interface()); err != nil {
+		if err := json.Unmarshal(b, fv.Addr().Interface()); err != nil {
 			return nil, Invalid(fmt.Sprintf("field %s: %v", n, err))
 		}
 	}

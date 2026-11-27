@@ -89,12 +89,25 @@ func memberAdd(e *ops.Env, in MemberIn) (Card, error) {
 		return Card{}, err
 	}
 	boardID := a.BoardID
-	member := false // a member of a board the card is on (one the caller can see)
+	if len(a.Boards) == 0 {
+		return Card{}, ops.Invalid("user is not a member of this board")
+	}
+	boards := make([]any, 0, len(a.Boards))
 	for b := range a.Boards {
-		if boardMemberIDs(e.Ctx, e.DB, b)[in.UserID] {
-			member = true
-			break
-		}
+		boards = append(boards, b)
+	}
+	ph := inPlaceholders(len(boards))
+	args := make([]any, 0, 1+3*len(boards))
+	args = append(args, in.UserID)
+	args = append(args, boards...)
+	args = append(args, boards...)
+	args = append(args, boards...)
+	var member bool // a member of a board the card is on (one the caller can see)
+	if err := e.DB.QueryRowContext(e.Ctx, `SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+		EXISTS(SELECT 1 FROM board_memberships bm WHERE bm.user_id=u.id AND bm.board_id IN (`+ph+`)) OR
+		EXISTS(SELECT 1 FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE gm.user_id=u.id AND bm.board_id IN (`+ph+`)) OR
+		EXISTS(SELECT 1 FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id WHERE pm.user_id=u.id AND b.id IN (`+ph+`))))`, args...).Scan(&member); err != nil {
+		return Card{}, err
 	}
 	if !member {
 		return Card{}, ops.Invalid("user is not a member of this board")
@@ -103,13 +116,16 @@ func memberAdd(e *ops.Env, in MemberIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
+	n, _ := res.RowsAffected()
+	if n > 0 {
 		autoWatch(e.Ctx, e.DB, in.ID, in.UserID, "") // being added to a card watches it (never over a mute; not for agents)
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
+	}
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
+	if err == nil && n > 0 {
 		emit(e, "cardMembershipCreate", "card.member.added", boardID, in.ID, map[string]any{"userId": in.UserID, "card": c})
 	}
-	return loadCardOn(e, e.DB, in.ID, boardID)
+	return c, err
 }
 
 func memberRemove(e *ops.Env, in MemberRemoveIn) (Card, error) {
@@ -121,12 +137,15 @@ func memberRemove(e *ops.Env, in MemberRemoveIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
+	n, _ := res.RowsAffected()
+	if n > 0 {
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
+	}
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
+	if err == nil && n > 0 {
 		emit(e, "cardMembershipDelete", "card.member.removed", boardID, in.ID, map[string]any{"userId": in.UserID, "card": c})
 	}
-	return loadCardOn(e, e.DB, in.ID, boardID)
+	return c, err
 }
 
 func labelAdd(e *ops.Env, in LabelIn) (Card, error) {
@@ -197,12 +216,15 @@ func labelRemove(e *ops.Env, in LabelRemoveIn) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
+	n, _ := res.RowsAffected()
+	if n > 0 {
 		_, _ = e.DB.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), in.ID)
-		c, _ := loadCardOn(e, e.DB, in.ID, boardID)
+	}
+	c, err := loadCardOn(e, e.DB, in.ID, boardID)
+	if err == nil && n > 0 {
 		emitScoped(e, "", "cardLabelDelete", "card.label.removed", boardID, in.ID, map[string]any{"labelId": in.LabelID, "card": c}, labelBoards(e, in.ID, in.LabelID))
 	}
-	return loadCardOn(e, e.DB, in.ID, boardID)
+	return c, err
 }
 
 // ---- options for the card modal (lists, members, labels the caller may pick from)
@@ -340,7 +362,8 @@ func cardOptions(e *ops.Env, in OptionsIn) (Options, error) {
 func optionsPeople(e *ops.Env, o Options, boardID string) (Options, error) {
 	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT u.id,u.name,COALESCE(u.username,'') FROM users u WHERE u.deleted_at IS NULL AND u.is_deactivated=0 AND (
 		u.id IN (SELECT user_id FROM board_memberships WHERE board_id=?1 AND user_id IS NOT NULL) OR
-		u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1)) ORDER BY u.name`, boardID); err == nil {
+		u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1) OR
+		u.id IN (SELECT pm.user_id FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id WHERE b.id=?1)) ORDER BY u.name`, boardID); err == nil {
 		for rows.Next() {
 			var u UserOpt
 			_ = rows.Scan(&u.ID, &u.Name, &u.Username)

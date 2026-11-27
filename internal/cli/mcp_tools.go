@@ -69,7 +69,7 @@ func mcpDestructive(o *Op) bool {
 		return true
 	}
 	switch firstVerb(o) {
-	case "archive", "trash", "delete", "clear", "revoke", "purge", "reset":
+	case "archive", "trash":
 		return true
 	}
 	return false
@@ -176,8 +176,8 @@ func mcpInputSchema(o *Op) map[string]any {
 		}
 		s := mcpFieldSchema(f)
 		if f.Name == "limit" && o.Method == "GET" {
-			s["description"] = strings.TrimSpace(fmt.Sprint(s["description"], fmt.Sprintf(" (default %d here)", mcpDefaultListLimit)))
-			s["description"] = strings.TrimPrefix(s["description"].(string), "<nil> ")
+			desc, _ := s["description"].(string)
+			s["description"] = strings.TrimSpace(fmt.Sprintf("%s (default %d here)", desc, mcpDefaultListLimit))
 		}
 		props[f.Name] = s
 		if f.Required {

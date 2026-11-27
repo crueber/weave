@@ -43,15 +43,17 @@ type App struct {
 	Timeout time.Duration
 	DryRun  bool
 	Yes     bool
+	NoColor bool
 
 	catalog   *Catalog
 	self      *Identity
-	candCache map[string][]Candidate
+	candCache map[string]candEntry
 	pre       struct{ url, token, profile string }
 	ctx       context.Context
 
-	// listener and agent workers resolve names and read the catalog concurrently
+	// listener and agent workers resolve names, write streams and read the catalog concurrently
 	catMu, candMu, selfMu sync.Mutex
+	outMu, errMu          sync.Mutex
 	refreshed             bool
 	warnOnce, tokenOnce   sync.Once
 }
@@ -83,7 +85,7 @@ func (a *App) scanPre(args []string) []string {
 		case "url", "token", "profile":
 			if !eq {
 				if i+1 >= len(args) {
-					return args
+					return args[i:]
 				}
 				v = args[i+1]
 				i++
@@ -98,7 +100,7 @@ func (a *App) scanPre(args []string) []string {
 			}
 			i++
 		case "no-color":
-			os.Setenv("NO_COLOR", "1")
+			a.NoColor = true
 			i++
 		default:
 			return args[i:]
@@ -254,7 +256,7 @@ func (a *App) configure(p *Parsed, ownsTimeout bool) error {
 	if old.URL != a.Cfg.URL {
 		a.catalog, a.self, a.candCache = nil, nil, nil
 	}
-	o := OutOpts{Format: "json", Fields: parseFields(p.Str("fields")), JQ: p.Str("jq")}
+	o := OutOpts{Format: "json", FormatSet: p.Has("output") || p.Bool("json") || p.Bool("quiet"), Fields: parseFields(p.Str("fields")), JQ: p.Str("jq")}
 	if f := p.Str("output"); f != "" {
 		switch f {
 		case "json", "ndjson", "table", "ids", "quiet":
@@ -277,7 +279,7 @@ func (a *App) configure(p *Parsed, ownsTimeout bool) error {
 	a.DryRun = p.Bool("dry-run") || os.Getenv("WEAVE_DRY_RUN") == "1"
 	a.Yes = p.Bool("yes")
 	if p.Bool("no-color") {
-		os.Setenv("NO_COLOR", "1")
+		a.NoColor = true
 	}
 	return nil
 }

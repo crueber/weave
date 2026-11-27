@@ -21,7 +21,6 @@
 .ls-closes-opts{display:flex;flex-direction:column}
 .ls-closes-val{display:inline-flex;align-items:center;gap:.3em}
 .ls-closes-val .closed-mark-ico{flex:none;color:var(--success)}
-.cm-chips .cards-badge-closed[hidden]{display:none}
 .cards-badge-closed .closed-mark-ico{flex:none}
 .ls-closes-confirm:empty{display:none}
 .cm .cards-popbody.ls-closes{max-height:min(34rem,80vh)}

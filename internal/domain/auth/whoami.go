@@ -60,9 +60,14 @@ func init() {
 		if err := rows.Err(); err != nil {
 			return out, err
 		}
+		ids := make([]string, len(out.Boards))
+		for i, b := range out.Boards {
+			ids[i] = b.ID
+		}
+		lv := authz.BoardLevels(e, ids)
 		kept := out.Boards[:0]
 		for _, b := range out.Boards {
-			if l := authz.BoardLevel(e, b.ID); l >= authz.View {
+			if l := lv[b.ID]; l >= authz.View {
 				b.Role = levelName(l)
 				kept = append(kept, b)
 			}

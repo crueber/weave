@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"sort"
 	"strings"
 	"time"
@@ -64,7 +63,7 @@ type impBoard struct {
 	Color         string // normalised #rrggbb or ""
 	CardColorMode string // pill|fill or ""
 	AgentPrompt   string // the board's own agent prompt text (normalised), "" = default
-	View          string // default view; "" = kanban
+	View          string // default view; "" = the board view (stored as kanban)
 	Flags         impFlags
 	Stated        map[string]bool // settings the document actually names (board.template.apply only applies those)
 	Lists         []impList
@@ -199,6 +198,9 @@ func importBoard(e *ops.Env, in ImportIn) (Board, error) {
 	if name == "" {
 		name = "Imported board"
 	}
+	if err := ops.CheckLen("name", name, ops.MaxNameLen); err != nil {
+		return Board{}, err
+	}
 	return createImported(e, in.ProjectID, ib, importOpts{Name: name, Source: in.Format, Event: map[string]any{"imported": true}})
 }
 
@@ -285,14 +287,14 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 		return err
 	}
 	// The file's closed state is kept (a card closed in place, an archived closed card); cards that land in a
-	// closed-type column are closed whatever the file says. Files without isClosed import as open elsewhere.
-	if _, err := Landed(ctx, tx, wc.closedLands...); err != nil {
+	// closed-type column are closed whatever the file says. Use LandedKeepClosed here so closed+capped columns are
+	// not trimmed twice; the unique loop over wl.order below trims every capped column once.
+	if _, err := LandedKeepClosed(ctx, tx, wc.closedLands...); err != nil {
 		return err
 	}
 	// A column with auto-archive keeps its newest N cards from the start (all cards arrive at once: the top of the
 	// column counts as oldest). The board is new, so nobody watches it yet: no per-card events are sent.
-	for _, l := range ib.Lists {
-		id := wl.ids[l.Key]
+	for _, id := range wl.order {
 		if n, ok := wl.capped[id]; ok {
 			if _, err := trimColumn(ctx, tx, id, n, nil); err != nil {
 				return err
@@ -345,6 +347,10 @@ func writeImportLabels(ctx context.Context, tx *sql.Tx, boardID, projectID strin
 		}
 	}
 	labels := map[string]string{}
+	var projPos float64
+	if useProject && len(ib.Labels) > 0 {
+		projPos = maxPos(ctx, tx, "labels", "project_id=? AND board_id IS NULL", projectID)
+	}
 	for i, l := range ib.Labels {
 		color := importLabelColor(l)
 		// With project-wide labels, reuse a matching project label by name+colour or create one.
@@ -353,8 +359,8 @@ func writeImportLabels(ctx context.Context, tx *sql.Tx, boardID, projectID strin
 			err := tx.QueryRowContext(ctx, `SELECT id FROM labels WHERE project_id=? AND board_id IS NULL AND COALESCE(name,'')=? AND color=?`, projectID, l.Name, color).Scan(&id)
 			if err == sql.ErrNoRows {
 				id = db.NewID()
-				_, err = tx.ExecContext(ctx, `INSERT INTO labels(id,project_id,name,color,position,created_at) VALUES(?,?,?,?,?,?)`, id, projectID, nullStr(l.Name), color,
-					appendPos(ctx, tx, "labels", "project_id=? AND board_id IS NULL", projectID), now)
+				projPos += db.PositionGap
+				_, err = tx.ExecContext(ctx, `INSERT INTO labels(id,project_id,name,color,position,created_at) VALUES(?,?,?,?,?,?)`, id, projectID, nullStr(l.Name), color, projPos, now)
 			}
 			if err != nil {
 				return nil, err
@@ -437,6 +443,32 @@ func writeCards(e *ops.Env, tx *sql.Tx, boardID string, cards []impCard, w *writ
 	ctx := e.Ctx
 	out := writtenCards{ids: map[string]string{}, values: map[string][]FieldValueDoc{}}
 	emails := map[string]string{}
+	// When appending onto columns that already hold cards (base != nil), shift any column whose template cards have
+	// non-positive positions so they always land strictly after base[lid] while preserving their relative order.
+	var shift map[string]float64
+	if base != nil {
+		minPos := map[string]float64{}
+		hasMin := map[string]bool{}
+		for ci, c := range cards {
+			lid, ok := w.ids[c.ListKey]
+			if !ok {
+				lid = w.first
+			}
+			pos := c.Pos
+			if pos == 0 {
+				pos = float64(ci+1) * db.PositionGap
+			}
+			if !hasMin[lid] || pos < minPos[lid] {
+				minPos[lid], hasMin[lid] = pos, true
+			}
+		}
+		shift = map[string]float64{}
+		for lid, mp := range minPos {
+			if mp <= 0 {
+				shift[lid] = -mp + db.PositionGap
+			}
+		}
+	}
 	for ci, c := range cards {
 		lid, ok := w.ids[c.ListKey]
 		if !ok {
@@ -452,7 +484,9 @@ func writeCards(e *ops.Env, tx *sql.Tx, boardID string, cards []impCard, w *writ
 		if pos == 0 {
 			pos = float64(ci+1) * db.PositionGap
 		}
-		pos += base[lid]
+		if base != nil {
+			pos += shift[lid] + base[lid]
+		}
 		cid := db.NewID()
 		var due any
 		var done any
@@ -809,7 +843,7 @@ func exportBoard(e *ops.Env, in ExportIn) (*ops.Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	doc, err := buildExport(e.Ctx, e.DB, b)
+	doc, err := buildExport(e.Ctx, e.DB, b, exportOpts{includeCards: true, includeActivity: true})
 	if err != nil {
 		return nil, err
 	}
@@ -835,7 +869,14 @@ func exportBoard(e *ops.Env, in ExportIn) (*ops.Stream, error) {
 	return nil, ops.Invalid("format must be json or csv")
 }
 
-func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
+// exportOpts controls which card-level data buildExport loads. Templates skip activity (members/comments) and, when
+// sample cards are not requested, skip cards/tasks/values altogether.
+type exportOpts struct {
+	includeCards    bool
+	includeActivity bool
+}
+
+func buildExport(ctx context.Context, d querier, b Board, opts exportOpts) (*exportDoc, error) {
 	doc := &exportDoc{Format: "weave-board", Version: 1, Board: map[string]any{"name": b.Name, "defaultView": b.DefaultView, "cardColorMode": b.CardColorMode,
 		"alwaysDisplayCardCreator": b.AlwaysDisplayCardCreator, "expandTaskListsByDefault": b.ExpandTaskListsByDefault,
 		"showCardCounter": b.ShowCardCounter, "showCardAges": b.ShowCardAges, "hasInbox": b.HasInbox}}
@@ -851,20 +892,36 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 	}
 	for rows.Next() {
 		var l exportList
-		_ = rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.ArchiveAfter)
+		if err := rows.Scan(&l.ID, &l.Type, &l.Position, &l.Name, &l.Color, &l.Description, &l.WIPLimit, &l.ArchiveAfter); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		doc.Lists = append(doc.Lists, l)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	rows, err = d.QueryContext(ctx, `SELECT id,name,single_select FROM label_groups WHERE board_id=? ORDER BY position`, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var g exportGroup
-		_ = rows.Scan(&g.ID, &g.Name, &g.SingleSelect)
+		if err := rows.Scan(&g.ID, &g.Name, &g.SingleSelect); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		doc.Groups = append(doc.Groups, g)
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	rows, err = d.QueryContext(ctx, `SELECT l.id,COALESCE(l.name,''),l.color,COALESCE(l.group_id,'') FROM labels l WHERE l.board_id=?1 OR (l.id IN
 		(SELECT cl.label_id FROM card_labels cl JOIN card_placements p ON p.card_id=cl.card_id WHERE p.board_id=?1) AND `+db.LabelOnBoard("l", "?1")+`) ORDER BY l.position`, b.ID)
 	if err != nil {
@@ -872,84 +929,116 @@ func buildExport(ctx context.Context, d querier, b Board) (*exportDoc, error) {
 	}
 	for rows.Next() {
 		var l exportLabel
-		_ = rows.Scan(&l.ID, &l.Name, &l.Color, &l.GroupID)
+		if err := rows.Scan(&l.ID, &l.Name, &l.Color, &l.GroupID); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		doc.Labels = append(doc.Labels, l)
 	}
-	rows.Close()
-	rows, err = d.QueryContext(ctx, `SELECT c.id,p.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(p.position,0)
-		FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, c.id`, b.ID)
-	if err != nil {
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	idx := map[string]int{}
-	for rows.Next() {
-		var c exportCard
-		_ = rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.IsClosed, &c.Position)
-		idx[c.ID] = len(doc.Cards)
-		doc.Cards = append(doc.Cards, c)
-	}
-	rows.Close()
-	each := func(q string, fn func(id, a, b string, c bool)) error {
-		rs, err := d.QueryContext(ctx, q, b.ID)
+	if opts.includeCards {
+		rows, err = d.QueryContext(ctx, `SELECT c.id,p.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(p.position,0)
+			FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, c.id`, b.ID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		defer rs.Close()
-		for rs.Next() {
-			var id, a, bb string
-			var c bool
-			_ = rs.Scan(&id, &a, &bb, &c)
-			fn(id, a, bb, c)
+		for rows.Next() {
+			var c exportCard
+			if err := rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.IsClosed, &c.Position); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			idx[c.ID] = len(doc.Cards)
+			doc.Cards = append(doc.Cards, c)
 		}
-		return rs.Err()
-	}
-	if err := each(`SELECT cl.card_id,cl.label_id,'',0 FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id
-		WHERE p.board_id=?1 AND `+db.LabelOnBoard("l", "?1")+` ORDER BY cl.card_id, cl.label_id`, func(id, a, _ string, _ bool) {
-		if i, ok := idx[id]; ok {
-			doc.Cards[i].LabelIDs = append(doc.Cards[i].LabelIDs, a)
+		if err := rows.Close(); err != nil {
+			return nil, err
 		}
-	}); err != nil {
-		return nil, err
-	}
-	if err := each(`SELECT cm.card_id,u.email,'',0 FROM card_memberships cm JOIN users u ON u.id=cm.user_id JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=?`, func(id, a, _ string, _ bool) {
-		if i, ok := idx[id]; ok {
-			doc.Cards[i].MemberEmails = append(doc.Cards[i].MemberEmails, a)
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
-	}); err != nil {
-		return nil, err
-	}
-	tlIdx := map[string][2]int{}
-	tlRows, err := d.QueryContext(ctx, `SELECT tl.card_id,tl.id,tl.name,tl.show_on_front_of_card,tl.hide_completed_tasks FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY tl.position`, b.ID)
-	if err != nil {
-		return nil, err
-	}
-	for tlRows.Next() {
-		var cardID, tlid, name string
-		var front, hide bool
-		_ = tlRows.Scan(&cardID, &tlid, &name, &front, &hide)
-		if i, ok := idx[cardID]; ok {
-			doc.Cards[i].TaskLists = append(doc.Cards[i].TaskLists, exportTaskList{Name: name, ShowOnFront: front, HideCompleted: hide})
-			tlIdx[tlid] = [2]int{i, len(doc.Cards[i].TaskLists) - 1}
+		each := func(q string, fn func(id, a, b string, c bool)) error {
+			rs, err := d.QueryContext(ctx, q, b.ID)
+			if err != nil {
+				return err
+			}
+			defer rs.Close()
+			for rs.Next() {
+				var id, a, bb string
+				var c bool
+				if err := rs.Scan(&id, &a, &bb, &c); err != nil {
+					return err
+				}
+				fn(id, a, bb, c)
+			}
+			return rs.Err()
 		}
-	}
-	tlRows.Close()
-	if err := each(`SELECT t.task_list_id,t.name,'',t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY t.position`, func(tlid, name, _ string, done bool) {
-		if p, ok := tlIdx[tlid]; ok {
-			tl := &doc.Cards[p[0]].TaskLists[p[1]]
-			tl.Tasks = append(tl.Tasks, exportTask{name, done})
+		if err := each(`SELECT cl.card_id,cl.label_id,'',0 FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id
+			WHERE p.board_id=?1 AND `+db.LabelOnBoard("l", "?1")+` ORDER BY cl.card_id, cl.label_id`, func(id, a, _ string, _ bool) {
+			if i, ok := idx[id]; ok {
+				doc.Cards[i].LabelIDs = append(doc.Cards[i].LabelIDs, a)
+			}
+		}); err != nil {
+			return nil, err
 		}
-	}); err != nil {
-		return nil, err
-	}
-	if err := each(`SELECT cm.card_id,cm.text,cm.created_at,0 FROM comments cm JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=? ORDER BY cm.created_at`, func(id, text, at string, _ bool) {
-		if i, ok := idx[id]; ok {
-			doc.Cards[i].Comments = append(doc.Cards[i].Comments, exportComment{Text: text, CreatedAt: at})
+		if opts.includeActivity {
+			if err := each(`SELECT cm.card_id,u.email,'',0 FROM card_memberships cm JOIN users u ON u.id=cm.user_id JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=?`, func(id, a, _ string, _ bool) {
+				if i, ok := idx[id]; ok {
+					doc.Cards[i].MemberEmails = append(doc.Cards[i].MemberEmails, a)
+				}
+			}); err != nil {
+				return nil, err
+			}
 		}
-	}); err != nil {
-		return nil, err
+		tlIdx := map[string][2]int{}
+		tlRows, err := d.QueryContext(ctx, `SELECT tl.card_id,tl.id,tl.name,tl.show_on_front_of_card,tl.hide_completed_tasks FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY tl.position`, b.ID)
+		if err != nil {
+			return nil, err
+		}
+		for tlRows.Next() {
+			var cardID, tlid, name string
+			var front, hide bool
+			if err := tlRows.Scan(&cardID, &tlid, &name, &front, &hide); err != nil {
+				tlRows.Close()
+				return nil, err
+			}
+			if i, ok := idx[cardID]; ok {
+				doc.Cards[i].TaskLists = append(doc.Cards[i].TaskLists, exportTaskList{Name: name, ShowOnFront: front, HideCompleted: hide})
+				tlIdx[tlid] = [2]int{i, len(doc.Cards[i].TaskLists) - 1}
+			}
+		}
+		if err := tlRows.Close(); err != nil {
+			return nil, err
+		}
+		if err := tlRows.Err(); err != nil {
+			return nil, err
+		}
+		if err := each(`SELECT t.task_list_id,t.name,'',t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id WHERE p.board_id=? ORDER BY t.position`, func(tlid, name, _ string, done bool) {
+			if p, ok := tlIdx[tlid]; ok {
+				tl := &doc.Cards[p[0]].TaskLists[p[1]]
+				tl.Tasks = append(tl.Tasks, exportTask{name, done})
+			}
+		}); err != nil {
+			return nil, err
+		}
+		if opts.includeActivity {
+			if err := each(`SELECT cm.card_id,cm.text,cm.created_at,0 FROM comments cm JOIN card_placements p ON p.card_id=cm.card_id WHERE p.board_id=? ORDER BY cm.created_at`, func(id, text, at string, _ bool) {
+				if i, ok := idx[id]; ok {
+					doc.Cards[i].Comments = append(doc.Cards[i].Comments, exportComment{Text: text, CreatedAt: at})
+				}
+			}); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if ExportCustomFields != nil {
-		groups, values, err := ExportCustomFields(ctx, d, b.ID, true)
+		groups, values, err := ExportCustomFields(ctx, d, b.ID, opts.includeCards)
 		if err != nil {
 			return nil, err
 		}
@@ -969,7 +1058,7 @@ func exportCSV(doc *exportDoc) []byte {
 	listName := map[string]string{}
 	for _, l := range doc.Lists {
 		n := l.Name
-		if n == "" {
+		if n == "" && len(l.Type) > 0 {
 			n = strings.ToUpper(l.Type[:1]) + l.Type[1:]
 		}
 		listName[l.ID] = n
@@ -991,7 +1080,6 @@ func exportCSV(doc *exportDoc) []byte {
 		_ = w.Write([]string{listName[c.ListID], c.Name, c.Description, c.DueDate, done, strings.Join(ls, ";"), strings.Join(c.MemberEmails, ";")})
 	}
 	w.Flush()
-	_, _ = io.Discard.Write(nil)
 	return buf.Bytes()
 }
 

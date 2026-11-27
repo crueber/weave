@@ -94,32 +94,56 @@ func BoardLevel(e *ops.Env, boardID string) Level {
 	return best
 }
 
+// idChunk bounds the number of ids bound in a single SQLite IN (...) clause.
+const idChunk = 500
+
+func dedupeIDs(ids []string) []string {
+	if len(ids) <= 1 {
+		return ids
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // BoardLevels is BoardLevel for many boards in a constant number of queries (same rules; unknown ids are absent).
 // Pages that summarise many boards at once (the project page tiles, board.stats) use it so the cost does not grow
 // with the number of boards.
 func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 	out := map[string]Level{}
+	boardIDs = dedupeIDs(boardIDs)
 	if len(boardIDs) == 0 {
 		return out
 	}
-	in, args := placeholders(boardIDs)
 	type row struct {
 		project string
 		public  bool
 	}
-	boards := map[string]row{}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,project_id,is_public FROM boards WHERE id IN (`+in+`)`, args...)
-	if err != nil {
+	boards := make(map[string]row, len(boardIDs))
+	for i := 0; i < len(boardIDs); i += idChunk {
+		in, args := placeholders(boardIDs[i:min(i+idChunk, len(boardIDs))])
+		rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,project_id,is_public FROM boards WHERE id IN (`+in+`)`, args...)
+		if err != nil {
+			return out
+		}
+		for rows.Next() {
+			var id string
+			var r row
+			if rows.Scan(&id, &r.project, &r.public) == nil {
+				boards[id] = r
+			}
+		}
+		rows.Close()
+	}
+	if len(boards) == 0 {
 		return out
 	}
-	for rows.Next() {
-		var id string
-		var r row
-		if rows.Scan(&id, &r.project, &r.public) == nil {
-			boards[id] = r
-		}
-	}
-	rows.Close()
 	if e.User == nil {
 		for id, r := range boards {
 			if r.public {
@@ -138,26 +162,36 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 		}
 		rows.Close()
 	}
-	best := map[string]Level{}
-	margs := append(append([]any{}, args...), e.User.UserID, e.User.UserID)
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT board_id, role, can_comment FROM board_memberships WHERE board_id IN (`+in+`) AND
-		(user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, margs...); err == nil {
-		for rows.Next() {
-			var id, role string
-			var cc *bool
-			if rows.Scan(&id, &role, &cc) != nil {
-				continue
-			}
-			if l := MembershipLevel(role, cc); l > best[id] {
-				best[id] = l
-			}
-		}
-		rows.Close()
-	}
+	var unmanaged []string
 	for id, r := range boards {
-		switch {
-		case managed[r.project]:
+		if managed[r.project] {
 			out[id] = Manage
+		} else {
+			unmanaged = append(unmanaged, id)
+		}
+	}
+	best := map[string]Level{}
+	for i := 0; i < len(unmanaged); i += idChunk {
+		in, args := placeholders(unmanaged[i:min(i+idChunk, len(unmanaged))])
+		margs := append(append([]any{}, args...), e.User.UserID, e.User.UserID)
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT board_id, role, can_comment FROM board_memberships WHERE board_id IN (`+in+`) AND
+			(user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, margs...); err == nil {
+			for rows.Next() {
+				var id, role string
+				var cc *bool
+				if rows.Scan(&id, &role, &cc) != nil {
+					continue
+				}
+				if l := MembershipLevel(role, cc); l > best[id] {
+					best[id] = l
+				}
+			}
+			rows.Close()
+		}
+	}
+	for _, id := range unmanaged {
+		r := boards[id]
+		switch {
 		case best[id] != None:
 			out[id] = best[id]
 		case r.public:
@@ -168,30 +202,33 @@ func BoardLevels(e *ops.Env, boardIDs []string) map[string]Level {
 }
 
 // ViewersAmong returns the users among userIDs who can view the board (BoardLevel >= View for each of them), in one
-// query whatever the number of users. Same rules as BoardLevel, applied to the stored account: the user must exist, not
+// query per 500 users. Same rules as BoardLevel, applied to the stored account: the user must exist, not
 // be deleted and not be deactivated; then a manager of the board's project, a direct or group board membership,
 // or a public board. The notification planner uses it to drop watchers who lost access.
 func ViewersAmong(e *ops.Env, boardID string, userIDs []string) map[string]bool {
 	out := map[string]bool{}
+	userIDs = dedupeIDs(userIDs)
 	if len(userIDs) == 0 {
 		return out
 	}
-	in, args := placeholders(userIDs)
-	q := `SELECT u.id FROM users u JOIN boards b ON b.id=? WHERE u.id IN (` + in + `) AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
-		b.is_public=1 OR
-		EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
-		EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
-			(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))`
-	rows, err := e.DB.QueryContext(e.Ctx, q, append([]any{boardID}, args...)...)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			out[id] = true
+	for i := 0; i < len(userIDs); i += idChunk {
+		in, args := placeholders(userIDs[i:min(i+idChunk, len(userIDs))])
+		q := `SELECT u.id FROM users u JOIN boards b ON b.id=? WHERE u.id IN (` + in + `) AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+			b.is_public=1 OR
+			EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
+			EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
+				(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))`
+		rows, err := e.DB.QueryContext(e.Ctx, q, append([]any{boardID}, args...)...)
+		if err != nil {
+			return out
 		}
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				out[id] = true
+			}
+		}
+		rows.Close()
 	}
 	return out
 }
@@ -297,17 +334,19 @@ const (
 	BoardCreationMembers = "members" // also any project member who may create projects
 )
 
-// CanCreateBoard is the one rule for every path that creates a board in a project (blank board, template,
-// import) and for the buttons and gallery that lead there: project Manage (a project manager) always; with
-// the project's boardCreation set to members, also any project member (ProjectLevel >= View, i.e. a board
-// membership in the project) who may create projects (CanCreateProject: a human admin/boardUser; never workers,
-// guests or agents).
-func CanCreateBoard(e *ops.Env, projectID string) bool {
-	l := ProjectLevel(e, projectID)
-	if l >= Manage {
+// CanCreateBoardWith evaluates CanCreateBoard from an already-known ProjectLevel and projects.board_creation value.
+func CanCreateBoardWith(e *ops.Env, level Level, policy string) bool {
+	if level >= Manage {
 		return true
 	}
-	if l < View || !CanCreateProject(e) {
+	return level >= View && CanCreateProject(e) && policy == BoardCreationMembers
+}
+
+func canCreateBoardAt(e *ops.Env, projectID string, level Level) bool {
+	if level >= Manage {
+		return true
+	}
+	if level < View || !CanCreateProject(e) {
 		return false
 	}
 	var policy string
@@ -315,13 +354,23 @@ func CanCreateBoard(e *ops.Env, projectID string) bool {
 	return policy == BoardCreationMembers
 }
 
+// CanCreateBoard is the one rule for every path that creates a board in a project (blank board, template,
+// import) and for the buttons and gallery that lead there: project Manage (a project manager) always; with
+// the project's boardCreation set to members, also any project member (ProjectLevel >= View, i.e. a board
+// membership in the project) who may create projects (CanCreateProject: a human admin/boardUser; never workers,
+// guests or agents).
+func CanCreateBoard(e *ops.Env, projectID string) bool {
+	return canCreateBoardAt(e, projectID, ProjectLevel(e, projectID))
+}
+
 // RequireCreateBoard is CanCreateBoard as an error: not_found when the caller cannot see the project at all
 // (hiding its existence), forbidden when they can see it but may not create boards there.
 func RequireCreateBoard(e *ops.Env, projectID string) error {
-	if ProjectLevel(e, projectID) == None {
+	l := ProjectLevel(e, projectID)
+	if l == None {
 		return ops.NotFound("project")
 	}
-	if !CanCreateBoard(e, projectID) {
+	if !canCreateBoardAt(e, projectID, l) {
 		return ops.Forbidden()
 	}
 	return nil
@@ -329,19 +378,16 @@ func RequireCreateBoard(e *ops.Env, projectID string) error {
 
 // RoomAllowed decides whether the caller may subscribe to an SSE room.
 func RoomAllowed(e *ops.Env, room string) bool {
-	var kind, id string
-	for i := 0; i < len(room); i++ {
-		if room[i] == ':' {
-			kind, id = room[:i], room[i+1:]
+	kind, id, ok := strings.Cut(room, ":")
+	if ok {
+		switch kind {
+		case "board":
+			return BoardLevel(e, id) >= View
+		case "project":
+			return ProjectLevel(e, id) >= View
+		case "user":
+			return e.User != nil && e.User.UserID == id
 		}
-	}
-	switch kind {
-	case "board":
-		return BoardLevel(e, id) >= View
-	case "project":
-		return ProjectLevel(e, id) >= View
-	case "user":
-		return e.User != nil && e.User.UserID == id
 	}
 	return room == "global" && e.User != nil
 }

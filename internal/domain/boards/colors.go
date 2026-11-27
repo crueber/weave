@@ -25,6 +25,44 @@ import (
 
 var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+// Colors are the label / list colour names accepted by Weave (Planka palette).
+var Colors = []string{"muddy-grey", "autumn-leafs", "morning-sky", "antique-blue", "egg-yellow", "desert-sand", "dark-granite",
+	"fresh-salad", "lagoon-blue", "midnight-blue", "light-orange", "pumpkin-orange", "light-concrete", "sunny-grass", "navy-blue",
+	"lilac-eyes", "apricot-red", "orange-peel", "silver-glint", "bright-moss", "deep-ocean", "summer-sky", "berry-red", "light-cocoa",
+	"grey-stone", "tank-green", "coral-green", "sugar-plum", "pink-tulip", "shady-rust", "wet-rock", "wet-moss", "turquoise-sea",
+	"lavender-fields", "piggy-red", "light-mud", "gun-metal", "modern-green", "french-coast", "sweet-lilac", "red-burgundy", "pirate-gold"}
+
+var colorHex = map[string]string{
+	"muddy-grey": "#8a8f98", "autumn-leafs": "#b4572d", "morning-sky": "#8ec5e6", "antique-blue": "#5b7f95", "egg-yellow": "#f2d04c",
+	"desert-sand": "#d9bc8c", "dark-granite": "#4b535c", "fresh-salad": "#7cc576", "lagoon-blue": "#2e9bb8", "midnight-blue": "#1f3a6e",
+	"light-orange": "#f5a65b", "pumpkin-orange": "#e8741e", "light-concrete": "#c3c7cc", "sunny-grass": "#a6d142", "navy-blue": "#26407a",
+	"lilac-eyes": "#a98bd0", "apricot-red": "#ee7d6a", "orange-peel": "#f59a2c", "silver-glint": "#aeb6bf", "bright-moss": "#5fae3d",
+	"deep-ocean": "#1b5e86", "summer-sky": "#58b4e8", "berry-red": "#c8324a", "light-cocoa": "#a98672", "grey-stone": "#7d858e",
+	"tank-green": "#4f6b3c", "coral-green": "#3fa88a", "sugar-plum": "#8c4a7d", "pink-tulip": "#ee86b4", "shady-rust": "#8c4b2f",
+	"wet-rock": "#566370", "wet-moss": "#5d7a4f", "turquoise-sea": "#2bc3c0", "lavender-fields": "#9b95e0", "piggy-red": "#f29aa5",
+	"light-mud": "#b9a58a", "gun-metal": "#3a4249", "modern-green": "#2f9e6a", "french-coast": "#4a7fd1", "sweet-lilac": "#c9a6e8",
+	"red-burgundy": "#8a1f33", "pirate-gold": "#c9951f",
+}
+
+// validColor accepts exactly #rrggbb, a Planka palette name or a Weave preset name.
+func validColor(c string) bool {
+	_, ok := ResolveColor(c)
+	return ok
+}
+
+// colorStr extracts a colour string from a string or *string template argument.
+func colorStr(c any) string {
+	switch v := c.(type) {
+	case string:
+		return v
+	case *string:
+		if v != nil {
+			return *v
+		}
+	}
+	return ""
+}
+
 // Preset is a named palette colour: a mid-tone that stays legible as a flat 3px bar in
 // both themes and is only ever used as a tint (12-22%) over large surfaces.
 type Preset struct{ Name, Label, Hex string }
@@ -130,16 +168,7 @@ func ChipLabels(mode string, labels []TileLabel) []TileLabel {
 // colorVarAttr renders ` <extra> style="--name:#rrggbb"` from a validated colour, or ""
 // when c does not resolve. Only the validated hex ever reaches the attribute.
 func colorVarAttr(name, extra string, c any) template.HTMLAttr {
-	var s string
-	switch v := c.(type) {
-	case string:
-		s = v
-	case *string:
-		if v != nil {
-			s = *v
-		}
-	}
-	h, ok := ResolveColor(s)
+	h, ok := ResolveColor(colorStr(c))
 	if !ok {
 		return ""
 	}
@@ -230,16 +259,7 @@ func init() {
 		"boardsChipLabels": func(t Tile, p *PageData) []TileLabel { return ChipLabels(p.Board.CardColorMode, t.Labels) },
 		"boardsPresets":    func() []Preset { return Presets },
 		"boardsHexOf": func(c any) string {
-			var s string
-			switch v := c.(type) {
-			case string:
-				s = v
-			case *string:
-				if v != nil {
-					s = *v
-				}
-			}
-			h, _ := ResolveColor(s)
+			h, _ := ResolveColor(colorStr(c))
 			return h
 		},
 	})

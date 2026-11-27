@@ -8,7 +8,10 @@
   function current() { return document.hidden ? 'away' : (Date.now() - last > 5 * 60 * 1000 ? 'idle' : 'online'); }
   function beat() {
     state = current();
-    if (window.htmx) htmx.ajax('POST', '/ui/presence', { values: { state: state }, swap: 'none', headers: { 'X-Weave-Background': '1' } });
+    if (window.htmx) {
+      var req = htmx.ajax('POST', '/ui/presence', { values: { state: state }, swap: 'none', headers: { 'X-Weave-Background': '1' } });
+      if (req && req.catch) req.catch(function () {});
+    }
   }
   document.addEventListener('visibilitychange', beat);
   addEventListener('pagehide', function () { navigator.sendBeacon && navigator.sendBeacon('/ui/presence', new URLSearchParams({ state: 'offline' })); });

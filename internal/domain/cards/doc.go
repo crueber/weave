@@ -28,7 +28,7 @@
 // are registered by boards).
 //
 // Contract with boards: card rows with is_draft=1 or is_template=1 must be excluded from
-// list/kanban rendering (card.list already does). Card tiles open the modal with
+// list/board-view rendering (card.list already does). Card tiles open the modal with
 // hx-get="/ui/cards/{id}" hx-target="#modal". The modal lazy-loads /ui/cards/{id}/tasks,
 // /comments, /attachments, /fields, /time and /activity (cardextras). Realtime events:
 // card.created|updated|deleted|moved|member.added|member.removed|label.added|label.removed|editing.

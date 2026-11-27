@@ -9,7 +9,7 @@
   function names(text) {
     return String(text).replace(/\r/g, '\n').split('\n').map(function (l) { return l.trim().replace(/^[-*•]\s*/, ''); }).filter(Boolean);
   }
-  function autosize(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px'; }
+  function autosize(ta) { window.Weave ? Weave.grow(ta, 240) : (ta.style.height = 'auto', ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px'); }
 
   function closeComposer(c, o) {
     if (!c.classList.contains('is-open')) return;
@@ -131,10 +131,11 @@
 
   // ---- events ----
   document.addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest('[data-open],[data-close]');
+    var t = e.target.closest && e.target.closest('.boards-composer [data-open], .boards-composer [data-close]');
     if (!t) return;
-    if (t.matches('[data-open]')) { e.preventDefault(); open(compOf(t)); }
-    else { e.preventDefault(); closeComposer(compOf(t), { focus: true }); }
+    var c = compOf(t); if (!c) return;
+    if (t.matches('[data-open]')) { e.preventDefault(); open(c); }
+    else { e.preventDefault(); closeComposer(c, { focus: true }); }
   });
   document.addEventListener('keydown', function (e) {
     var ta = e.target.closest && e.target.closest('[data-composer-input]'); if (!ta) return;

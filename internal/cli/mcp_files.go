@@ -294,6 +294,13 @@ func (gf *guardedFile) Close() {
 	gf.root.Close()
 }
 
+func errCause(err error) error {
+	if u := errors.Unwrap(err); u != nil {
+		return u
+	}
+	return err
+}
+
 // openUpload resolves, checks and opens p for reading at most limit bytes.
 func (g *fileGuard) openUpload(p string, limit int64) (*guardedFile, error) {
 	abs, err := g.absOf(p)
@@ -308,7 +315,7 @@ func (g *fileGuard) openUpload(p string, limit int64) (*guardedFile, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, refuse("not_found", "no such file: %s", p)
 		}
-		return nil, refuse("validation", "cannot resolve %s: %v", p, errors.Unwrap(err))
+		return nil, refuse("validation", "cannot resolve %s: %v", p, errCause(err))
 	}
 	res = filepath.Clean(res)
 	if g.denied(res) {
@@ -345,10 +352,10 @@ func (g *fileGuard) openUpload(p string, limit int64) (*guardedFile, error) {
 	if g.afterStat != nil {
 		g.afterStat()
 	}
-	f, err := r.OpenFile(rel, os.O_RDONLY|openNoBlock, 0)
+	f, err := r.OpenFile(rel, os.O_RDONLY|openNoBlock|openNoFollow, 0)
 	if err != nil {
 		r.Close()
-		return nil, refuse("validation", "cannot open %s: %v", p, errors.Unwrap(err))
+		return nil, refuse("validation", "cannot open %s: %v", p, errCause(err))
 	}
 	fst, err := f.Stat()
 	if err != nil || !fst.Mode().IsRegular() || !os.SameFile(st, fst) {
@@ -426,7 +433,8 @@ func (g *fileGuard) openSave(p string, overwrite bool) (*os.File, *os.Root, stri
 	if err != nil {
 		return nil, nil, "", refuse("validation", "cannot open root %s: %v", root, err)
 	}
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL | openNoFollow
+	var existing os.FileInfo
 	if st, err := r.Lstat(rel); err == nil {
 		switch {
 		case st.Mode()&os.ModeSymlink != 0:
@@ -439,12 +447,29 @@ func (g *fileGuard) openSave(p string, overwrite bool) (*os.File, *os.Root, stri
 			r.Close()
 			return nil, nil, "", refuse("conflict", "%s already exists; pass overwrite:true to replace it", target)
 		}
-		flags = os.O_WRONLY | os.O_TRUNC
+		existing = st
+		flags = os.O_WRONLY | openNoFollow | openNoBlock
+	}
+	if g.afterStat != nil {
+		g.afterStat()
 	}
 	f, err := r.OpenFile(rel, flags, 0o644)
 	if err != nil {
 		r.Close()
-		return nil, nil, "", refuse("conflict", "cannot create %s: %v", target, errors.Unwrap(err))
+		return nil, nil, "", refuse("conflict", "cannot create %s: %v", target, errCause(err))
+	}
+	if existing != nil {
+		fst, err := f.Stat()
+		if err != nil || !fst.Mode().IsRegular() || !os.SameFile(existing, fst) {
+			f.Close()
+			r.Close()
+			return nil, nil, "", refuse("forbidden", "%s changed while it was being opened; refused", target)
+		}
+		if err := f.Truncate(0); err != nil {
+			f.Close()
+			r.Close()
+			return nil, nil, "", refuse("error", "cannot truncate %s: %v", target, errCause(err))
+		}
 	}
 	_ = f.Chmod(0o644) // an overwritten file never keeps an executable bit
 	return f, r, target, nil

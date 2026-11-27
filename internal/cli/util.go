@@ -3,11 +3,12 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -87,8 +88,7 @@ func parseDur(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
-	var n float64
-	if _, err := fmt.Sscan(s, &n); err == nil {
+	if n, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
 		return time.Duration(n * float64(time.Second)), nil
 	}
 	return 0, &APIError{Code: "usage", Message: "invalid duration " + s + " (try 30s, 15m, 2h)"}

@@ -83,17 +83,27 @@ func applyScope(c *web.Ctx) {
 // webhook on a project the admin cannot see keeps its scope through a neutral option (its name stays hidden).
 func scopeChoices(c *web.Ctx, hooks []WebhookOut) (projects, boards []scopeOpt) {
 	e := c.Env
+	uid := ""
+	if e.User != nil {
+		uid = e.User.UserID
+	}
 	var pids []string
 	pname := map[string]string{}
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,name FROM projects ORDER BY name COLLATE NOCASE, id`); err == nil {
-		for rows.Next() {
-			var o scopeOpt
-			if rows.Scan(&o.ID, &o.Name) == nil {
-				pids = append(pids, o.ID)
-				pname[o.ID] = o.Name
+	if uid != "" {
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT p.id,p.name FROM projects p WHERE
+			EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=p.id AND pm.user_id=?) OR
+			EXISTS(SELECT 1 FROM boards b JOIN board_memberships m ON m.board_id=b.id WHERE b.project_id=p.id AND
+				(m.user_id=? OR m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?)))
+			ORDER BY p.name COLLATE NOCASE, p.id LIMIT 500`, uid, uid, uid); err == nil {
+			for rows.Next() {
+				var o scopeOpt
+				if rows.Scan(&o.ID, &o.Name) == nil {
+					pids = append(pids, o.ID)
+					pname[o.ID] = o.Name
+				}
 			}
+			rows.Close()
 		}
-		rows.Close()
 	}
 	plv := authz.ProjectLevels(e, pids)
 	seen := map[string]bool{}
@@ -111,15 +121,21 @@ func scopeChoices(c *web.Ctx, hooks []WebhookOut) (projects, boards []scopeOpt) 
 	}
 	var bids []string
 	bname := map[string]string{}
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT b.id,p.name||' / '||b.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.is_template=0 ORDER BY p.name,b.position,b.name`); err == nil {
-		for rows.Next() {
-			var o scopeOpt
-			if rows.Scan(&o.ID, &o.Name) == nil {
-				bids = append(bids, o.ID)
-				bname[o.ID] = o.Name
+	if uid != "" {
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT b.id,p.name||' / '||b.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.is_template=0 AND (
+			EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=?) OR
+			EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND m.role='owner' AND
+				(m.user_id=? OR m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))))
+			ORDER BY p.name,b.position,b.name LIMIT 500`, uid, uid, uid); err == nil {
+			for rows.Next() {
+				var o scopeOpt
+				if rows.Scan(&o.ID, &o.Name) == nil {
+					bids = append(bids, o.ID)
+					bname[o.ID] = o.Name
+				}
 			}
+			rows.Close()
 		}
-		rows.Close()
 	}
 	blv := authz.BoardLevels(e, bids)
 	for _, id := range bids {

@@ -84,18 +84,22 @@ type QuickData struct {
 	CanRemove bool
 }
 
-// shell builds the page data a fragment needs (permissions, board, labels) without loading any cards.
-func shell(c *web.Ctx, boardID string) (*PageData, error) {
+// shell builds the page data a fragment needs (permissions, board, labels) and returns the board's finite lists
+// without loading any cards, reusing d.Labels and d.Lists from board.get.
+func shell(c *web.Ctx, boardID string) (*PageData, []List, error) {
 	d, err := ops.Typed[BoardDetail](c.Env, "board.get", BoardGetIn{ID: boardID})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	caps := authz.Board(c.Env, boardID)
-	pd := &PageData{Board: d.Board, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, PageURL: "/boards/" + boardID, View: "kanban"}
-	if pd.Labels, err = labelsOf(c.Env, boardID); err != nil {
-		return nil, err
+	pd := &PageData{Board: d.Board, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, Labels: d.Labels, PageURL: "/boards/" + boardID, View: "kanban"}
+	lists := make([]List, 0, len(d.Lists))
+	for _, l := range d.Lists {
+		if isFinite(l.Type) {
+			lists = append(lists, l)
+		}
 	}
-	return pd, nil
+	return pd, lists, nil
 }
 
 // splitNames turns form values (possibly multi-line pastes) into trimmed, non-empty titles.
@@ -140,17 +144,13 @@ func boardOfCard(c *web.Ctx, cardID string) (string, error) {
 	return a.BoardID, err
 }
 
-// tilesFor loads the tiles of the given cards (in board order).
-func tilesFor(c *web.Ctx, pd *PageData, ids []string) ([]Tile, error) {
-	lists, err := listsOf(c.Env, pd.Board.ID, true)
-	if err != nil {
-		return nil, err
-	}
+// tilesFor loads the tiles of the given cards (in board order), reusing lists from shell.
+func tilesFor(c *web.Ctx, pd *PageData, lists []List, ids []string) ([]Tile, error) {
 	idx := map[string]int{}
 	for i, l := range lists {
 		idx[l.ID] = i
 	}
-	return loadTilesOnly(c.Env, pd.Board, idx, lists, ids)
+	return loadTilesOnly(c.Env, pd.Board, pd.Caps.Level, idx, lists, ids)
 }
 
 // backToBoard is the progressive-enhancement answer to a plain (non-htmx) form post.
@@ -213,11 +213,11 @@ func registerQuick() {
 		if !c.IsHTMX() {
 			return backToBoard(c, l.BoardID)
 		}
-		pd, err := shell(c, l.BoardID)
+		pd, lists, err := shell(c, l.BoardID)
 		if err != nil {
 			return err
 		}
-		tiles, err := tilesFor(c, pd, ids)
+		tiles, err := tilesFor(c, pd, lists, ids)
 		if err != nil {
 			return err
 		}
@@ -267,11 +267,7 @@ func registerQuick() {
 		if !c.IsHTMX() {
 			return backToBoard(c, boardID)
 		}
-		d, err := ops.Typed[BoardDetail](c.Env, "board.get", BoardGetIn{ID: boardID})
-		if err != nil {
-			return err
-		}
-		pd, err := loadPage(c.Env, d.Board, url.Values{}, false)
+		pd, lists, err := shell(c, boardID)
 		if err != nil {
 			return err
 		}
@@ -279,11 +275,17 @@ func registerQuick() {
 		for _, id := range ids {
 			want[id] = true
 		}
+		pattern := addCardPattern()
 		var cols []Column
-		for _, col := range pd.Columns {
-			if want[col.List.ID] {
-				cols = append(cols, col)
+		for _, l := range lists {
+			if !want[l.ID] {
+				continue
 			}
+			col := Column{List: l}
+			if pd.CanEdit && pattern != "" {
+				col.AddCardURL = replaceParams(pattern, l.ID)
+			}
+			cols = append(cols, col)
 		}
 		detail := map[string]any{"ids": ids, "count": len(ids)}
 		if failure != nil {
@@ -377,11 +379,11 @@ func renderTile(c *web.Ctx, id, block string) error {
 	if err != nil {
 		return err
 	}
-	pd, err := shell(c, boardID)
+	pd, lists, err := shell(c, boardID)
 	if err != nil {
 		return err
 	}
-	tiles, err := tilesFor(c, pd, []string{id})
+	tiles, err := tilesFor(c, pd, lists, []string{id})
 	if err != nil {
 		return err
 	}
@@ -405,7 +407,7 @@ func quickData(c *web.Ctx, id string) (QuickData, error) {
 	if err != nil {
 		return QuickData{}, err
 	}
-	pd, err := shell(c, boardID)
+	pd, lists, err := shell(c, boardID)
 	if err != nil {
 		return QuickData{}, err
 	}
@@ -413,7 +415,7 @@ func quickData(c *web.Ctx, id string) (QuickData, error) {
 	if !pd.CanEdit && !cc.CanEdit { // a worker edits the cards they are a member of
 		return QuickData{}, ops.Forbidden()
 	}
-	tiles, err := tilesFor(c, pd, []string{id})
+	tiles, err := tilesFor(c, pd, lists, []string{id})
 	if err != nil {
 		return QuickData{}, err
 	}

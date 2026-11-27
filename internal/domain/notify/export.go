@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"html/template"
+	"log"
 	"os"
 	"os/exec"
 	"regexp"
@@ -38,14 +39,14 @@ type exTaskList struct {
 type exComment struct{ User, Text, At string }
 type exField struct{ Group, Name, Value string }
 type exCard struct {
-	ID, Name, Description, Due, List string
-	Closed, DueDone                  bool
-	Labels                           []exLabel
-	Members                          []string
-	TaskLists                        []exTaskList
-	Comments                         []exComment
-	Attachments                      []string
-	Fields                           []exField
+	ID, Name, Description, Due, ListID, List string
+	Closed, DueDone                          bool
+	Labels                                   []exLabel
+	Members                                  []string
+	TaskLists                                []exTaskList
+	Comments                                 []exComment
+	Attachments                              []string
+	Fields                                   []exField
 }
 type exList struct {
 	Name  string
@@ -90,12 +91,21 @@ func slug(s string) string {
 // (db.LabelOnBoard). Every query is scoped by the placement alias p, so a card is loaded once per board.
 func loadCards(e *ops.Env, boardID, cardID string) ([]*exCard, error) {
 	where, args := "p.board_id=?", []any{boardID}
+	mainWhere := where
+	pJoin, cWhere := "", where
 	if cardID != "" {
 		where += " AND p.card_id=?"
+		mainWhere = where
+		cWhere = where
 		args = append(args, cardID)
+	} else {
+		// archived/trashed lists are not part of an export of the live board
+		mainWhere = where + " AND l.type NOT IN ('archive','trash')"
+		pJoin = " JOIN lists pl ON pl.id=p.list_id"
+		cWhere = where + " AND pl.type NOT IN ('archive','trash')"
 	}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(l.name,l.type),l.type
-	 FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id WHERE c.is_draft=0 AND c.is_template=0 AND `+where+` ORDER BY l.position, p.position`, args...)
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT c.id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,l.id,COALESCE(l.name,l.type)
+	 FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id WHERE c.is_draft=0 AND c.is_template=0 AND `+mainWhere+` ORDER BY l.position, p.position`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,93 +113,131 @@ func loadCards(e *ops.Env, boardID, cardID string) ([]*exCard, error) {
 	byID := map[string]*exCard{}
 	for rows.Next() {
 		c := &exCard{}
-		var ltype string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Due, &c.DueDone, &c.Closed, &c.List, &ltype); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Due, &c.DueDone, &c.Closed, &c.ListID, &c.List); err != nil {
 			rows.Close()
 			return nil, err
-		}
-		if ltype == "archive" || ltype == "trash" {
-			// archived/trashed lists are not part of an export of the live board
-			if cardID == "" {
-				continue
-			}
 		}
 		cards = append(cards, c)
 		byID[c.ID] = c
 	}
+	err = rows.Err()
 	rows.Close()
-	query := func(q string, fn func(scan func(...any) error)) {
+	if err != nil {
+		return nil, err
+	}
+	if len(cards) == 0 {
+		return cards, nil
+	}
+	query := func(q string, fn func(scan func(...any) error) error) error {
 		rs, err := e.DB.QueryContext(e.Ctx, q, args...)
 		if err != nil {
-			return
+			return err
 		}
 		defer rs.Close()
 		for rs.Next() {
-			fn(rs.Scan)
+			if err := fn(rs.Scan); err != nil {
+				return err
+			}
 		}
+		return rs.Err()
 	}
-	query(`SELECT cl.card_id,COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id WHERE `+where+` AND `+db.LabelOnBoard("l", "p.board_id")+` ORDER BY l.position`, func(s func(...any) error) {
+	if err := query(`SELECT cl.card_id,COALESCE(l.name,''),l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id JOIN card_placements p ON p.card_id=cl.card_id`+pJoin+` WHERE `+cWhere+` AND `+db.LabelOnBoard("l", "p.board_id")+` ORDER BY l.position`, func(s func(...any) error) error {
 		var id string
 		var l exLabel
-		_ = s(&id, &l.Name, &l.Color)
+		if err := s(&id, &l.Name, &l.Color); err != nil {
+			return err
+		}
 		if c := byID[id]; c != nil {
 			c.Labels = append(c.Labels, l)
 		}
-	})
-	query(`SELECT m.card_id,u.name FROM card_memberships m JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id WHERE `+where+` ORDER BY u.name`, func(s func(...any) error) {
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := query(`SELECT m.card_id,u.name FROM card_memberships m JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id`+pJoin+` WHERE `+cWhere+` ORDER BY u.name`, func(s func(...any) error) error {
 		var id, n string
-		_ = s(&id, &n)
+		if err := s(&id, &n); err != nil {
+			return err
+		}
 		if c := byID[id]; c != nil {
 			c.Members = append(c.Members, n)
 		}
-	})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	type tlref struct {
 		c *exCard
 		i int
 	}
 	tls := map[string]tlref{}
-	query(`SELECT tl.id,tl.card_id,tl.name FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id WHERE `+where+` ORDER BY tl.position`, func(s func(...any) error) {
+	if err := query(`SELECT tl.id,tl.card_id,tl.name FROM task_lists tl JOIN card_placements p ON p.card_id=tl.card_id`+pJoin+` WHERE `+cWhere+` ORDER BY tl.position`, func(s func(...any) error) error {
 		var id, cid, n string
-		_ = s(&id, &cid, &n)
+		if err := s(&id, &cid, &n); err != nil {
+			return err
+		}
 		if c := byID[cid]; c != nil {
 			c.TaskLists = append(c.TaskLists, exTaskList{Name: n})
 			tls[id] = tlref{c, len(c.TaskLists) - 1}
 		}
-	})
-	query(`SELECT t.task_list_id,t.name,t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id WHERE `+where+` ORDER BY t.position`, func(s func(...any) error) {
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := query(`SELECT t.task_list_id,t.name,t.is_completed FROM tasks t JOIN task_lists tl ON tl.id=t.task_list_id JOIN card_placements p ON p.card_id=tl.card_id`+pJoin+` WHERE `+cWhere+` ORDER BY t.position`, func(s func(...any) error) error {
 		var id string
 		var t exTask
-		_ = s(&id, &t.Name, &t.Done)
+		if err := s(&id, &t.Name, &t.Done); err != nil {
+			return err
+		}
 		if r, ok := tls[id]; ok {
 			r.c.TaskLists[r.i].Tasks = append(r.c.TaskLists[r.i].Tasks, t)
 		}
-	})
-	query(`SELECT m.card_id,COALESCE(u.name,'Unknown'),m.text,m.created_at FROM comments m LEFT JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id WHERE `+where+` ORDER BY m.created_at`, func(s func(...any) error) {
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := query(`SELECT m.card_id,COALESCE(u.name,'Unknown'),m.text,m.created_at FROM comments m LEFT JOIN users u ON u.id=m.user_id JOIN card_placements p ON p.card_id=m.card_id`+pJoin+` WHERE `+cWhere+` ORDER BY m.created_at`, func(s func(...any) error) error {
 		var id string
 		var cm exComment
-		_ = s(&id, &cm.User, &cm.Text, &cm.At)
+		if err := s(&id, &cm.User, &cm.Text, &cm.At); err != nil {
+			return err
+		}
 		if c := byID[id]; c != nil {
 			c.Comments = append(c.Comments, cm)
 		}
-	})
-	query(`SELECT a.card_id,a.name,COALESCE(a.url,'') FROM attachments a JOIN card_placements p ON p.card_id=a.card_id WHERE `+where+` ORDER BY a.created_at`, func(s func(...any) error) {
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := query(`SELECT a.card_id,a.name,COALESCE(a.url,'') FROM attachments a JOIN card_placements p ON p.card_id=a.card_id`+pJoin+` WHERE `+cWhere+` ORDER BY a.created_at`, func(s func(...any) error) error {
 		var id, n, u string
-		_ = s(&id, &n, &u)
+		if err := s(&id, &n, &u); err != nil {
+			return err
+		}
 		if c := byID[id]; c != nil {
 			if u != "" {
 				n += " (" + u + ")"
 			}
 			c.Attachments = append(c.Attachments, n)
 		}
-	})
-	query(`SELECT v.card_id,COALESCE(g.name,''),f.name,COALESCE(v.content,'') FROM custom_field_values v JOIN custom_fields f ON f.id=v.field_id JOIN custom_field_groups g ON g.id=v.group_id JOIN card_placements p ON p.card_id=v.card_id WHERE `+where+` ORDER BY g.position,f.position`, func(s func(...any) error) {
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := query(`SELECT v.card_id,COALESCE(g.name,bg.name,''),f.name,COALESCE(v.content,'') FROM custom_field_values v JOIN custom_fields f ON f.id=v.field_id JOIN custom_field_groups g ON g.id=v.group_id LEFT JOIN base_custom_field_groups bg ON bg.id=g.base_group_id JOIN card_placements p ON p.card_id=v.card_id`+pJoin+` WHERE `+cWhere+` AND (g.board_id IS NULL OR g.board_id=p.board_id) ORDER BY g.position,f.position`, func(s func(...any) error) error {
 		var id string
 		var f exField
-		_ = s(&id, &f.Group, &f.Name, &f.Value)
+		if err := s(&id, &f.Group, &f.Name, &f.Value); err != nil {
+			return err
+		}
 		if c := byID[id]; c != nil && f.Value != "" {
 			c.Fields = append(c.Fields, f)
 		}
-	})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	return cards, nil
 }
 
@@ -231,7 +279,7 @@ dl{margin:6px 0}dt{font-weight:600;float:left;margin-right:6px}dd{margin:0}
 // to a real PDF: HTML on stdin, PDF on stdout.
 func pdfCommand() string { return os.Getenv("WEAVE_PDF_CMD") }
 
-func finish(doc exDoc, format, base string) (*ops.Stream, error) {
+func finish(ctx context.Context, doc exDoc, format, base string) (*ops.Stream, error) {
 	switch format {
 	case "", "html", "pdf":
 	default:
@@ -246,14 +294,17 @@ func finish(doc exDoc, format, base string) (*ops.Stream, error) {
 	}
 	if format == "pdf" {
 		if cmd := strings.Fields(pdfCommand()); len(cmd) > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
-			c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
+			c := exec.CommandContext(pctx, cmd[0], cmd[1:]...)
 			c.Stdin = bytes.NewReader(buf.Bytes())
-			var out bytes.Buffer
+			var out, stderr bytes.Buffer
 			c.Stdout = &out
+			c.Stderr = &stderr
 			if err := c.Run(); err == nil && bytes.HasPrefix(out.Bytes(), []byte("%PDF")) {
 				return &ops.Stream{Name: base + ".pdf", ContentType: "application/pdf", Data: out.Bytes()}, nil
+			} else {
+				log.Printf("notify: pdf export command failed: %v (%s)", err, strings.TrimSpace(stderr.String()))
 			}
 			// engine failed: fall through to print-optimised HTML
 		}
@@ -280,15 +331,15 @@ func init() {
 			}
 			idx := map[string]int{}
 			for _, c := range cards {
-				i, ok := idx[c.List]
+				i, ok := idx[c.ListID]
 				if !ok {
 					i = len(doc.Lists)
-					idx[c.List] = i
+					idx[c.ListID] = i
 					doc.Lists = append(doc.Lists, exList{Name: c.List})
 				}
 				doc.Lists[i].Cards = append(doc.Lists[i].Cards, c)
 			}
-			return finish(doc, in.Format, slug(doc.Board))
+			return finish(e.Ctx, doc, in.Format, slug(doc.Board))
 		})
 	ops.Register(ops.Op{Name: "export.card", Summary: "Export a card as standalone HTML, or print-optimised HTML / PDF (see export.board)", Method: "GET", Path: "/export/cards/{id}", Binary: true, UI: "GET /export/cards/{id}"},
 		func(e *ops.Env, in ExportCardIn) (*ops.Stream, error) {
@@ -303,6 +354,6 @@ func init() {
 				return nil, ops.NotFound("card")
 			}
 			doc.Cards, doc.Title = cards, cards[0].Name
-			return finish(doc, in.Format, slug(cards[0].Name))
+			return finish(e.Ctx, doc, in.Format, slug(cards[0].Name))
 		})
 }

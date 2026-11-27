@@ -127,7 +127,6 @@ func newCatalog(src string, lists ...[]Op) *Catalog {
 			}
 		}
 	}
-	applyOverlay(c)
 	return c
 }
 
@@ -181,7 +180,7 @@ func (c *Catalog) LookupVerb(tag, verb string) *Op {
 	return nil
 }
 
-// MergedOps returns the full op list as the CLI sees it offline (given ops + contract overlay);
+// MergedOps returns the full op list as the CLI sees it offline;
 // used by the skill generator.
 func MergedOps(base []Op) []*Op { return newCatalog("merged", base).All() }
 
@@ -218,7 +217,7 @@ func schemaCachePath(url string) string {
 const schemaTTL = time.Hour
 
 // loadCatalog resolves the schema: server /_ops (cached on disk per server) -> local
-// registry (full binary) -> embedded snapshot, always topped up by the contract overlay.
+// registry (full binary) -> embedded snapshot.
 func (a *App) loadCatalog(ctx context.Context, offline, refresh bool) *Catalog {
 	a.catMu.Lock()
 	defer a.catMu.Unlock()
@@ -270,21 +269,23 @@ func (a *App) catalogFromServer(ctx context.Context, refresh bool) *Catalog {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.Cfg.URL, "/")+"/api/v1/_ops", nil)
-	if a.Cfg.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.Cfg.Token)
-	}
-	resp, err := a.httpClient(0).Do(req)
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.Cfg.URL, "/")+"/api/v1/_ops", nil)
 	if err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == 200 {
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-			if ops, ver := parseOps(b); len(ops) > 0 {
-				if ver == "" {
-					ver = resp.Header.Get("X-Weave-Version")
+		if a.Cfg.Token != "" {
+			req.Header.Set("Authorization", "Bearer "+a.Cfg.Token)
+		}
+		resp, err := a.httpClient(0).Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 {
+				b, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+				if ops, ver := parseOps(b); len(ops) > 0 {
+					if ver == "" {
+						ver = resp.Header.Get("X-Weave-Version")
+					}
+					a.writeCache(cacheFile{URL: a.Cfg.URL, Version: ver, FetchedAt: time.Now(), Ops: ops})
+					return newCatalog("server", ops)
 				}
-				a.writeCache(cacheFile{URL: a.Cfg.URL, Version: ver, FetchedAt: time.Now(), Ops: ops})
-				return newCatalog("server", ops)
 			}
 		}
 	}
@@ -308,8 +309,11 @@ func (a *App) writeCache(cf cacheFile) {
 	_ = atomicWrite(schemaCachePath(cf.URL), b, 0o600)
 }
 
-func (a *App) mustOp(name string) (*Op, error) {
-	cat := a.loadCatalog(context.Background(), false, false)
+func (a *App) mustOp(ctx context.Context, name string) (*Op, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cat := a.loadCatalog(ctx, false, false)
 	if o := cat.Get(name); o != nil {
 		return o, nil
 	}

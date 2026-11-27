@@ -95,7 +95,9 @@ func init() {
 				out = m
 			}
 		}
-		publish(e, "projectManager.created", in.ID, out)
+		pub := out
+		pub.Email = "" // project rooms are shared with non-admins
+		publish(e, "projectManager.created", in.ID, pub)
 		e.Hub.Publish(realtime.Event{Name: "projectManager.created", Room: "user:" + in.UserID, Data: out})
 		return out, nil
 	})
@@ -110,23 +112,36 @@ func init() {
 			if e.DB.QueryRowContext(e.Ctx, `SELECT user_id FROM project_managers WHERE id=? AND project_id=?`, in.ManagerID, in.ID).Scan(&userID) != nil {
 				return DeleteOut{}, ops.NotFound("project manager")
 			}
-			canRemoveOwner := authz.CanRemoveOwningManager(e, in.ID) // read before the write transaction
 			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 				var n int
-				_ = tx.QueryRow(`SELECT COUNT(*) FROM project_managers WHERE project_id=?`, in.ID).Scan(&n)
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM project_managers WHERE project_id=?`, in.ID).Scan(&n); err != nil {
+					return err
+				}
 				if n <= 1 {
 					return ops.Conflict("a project needs at least one manager")
 				}
 				var owner string
-				_ = tx.QueryRow(`SELECT COALESCE(owner_manager_id,'') FROM projects WHERE id=?`, in.ID).Scan(&owner)
-				if owner == in.ManagerID && !canRemoveOwner {
-					return ops.Forbidden() // the owning manager steps down themself; others only once that account is inactive
-				}
-				if _, err := tx.Exec(`DELETE FROM project_managers WHERE id=?`, in.ManagerID); err != nil {
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COALESCE(owner_manager_id,'') FROM projects WHERE id=?`, in.ID).Scan(&owner); err != nil {
 					return err
 				}
 				if owner == in.ManagerID {
-					_, err := tx.Exec(`UPDATE projects SET owner_manager_id=(SELECT id FROM project_managers WHERE project_id=? ORDER BY created_at,id LIMIT 1) WHERE id=?`, in.ID, in.ID)
+					var ouid, orole string
+					var deleted, deactivated, agent bool
+					oerr := tx.QueryRowContext(e.Ctx, `SELECT u.id,u.deleted_at IS NOT NULL,u.is_deactivated,u.is_agent,u.role FROM project_managers m
+						JOIN users u ON u.id=m.user_id WHERE m.id=?`, owner).Scan(&ouid, &deleted, &deactivated, &agent, &orole)
+					if oerr == nil && ouid != e.User.UserID && !deleted && !deactivated && !agent && orole != "guest" {
+						return ops.Forbidden() // the owning manager steps down themself; others only once that account is inactive
+					}
+				}
+				if _, err := tx.ExecContext(e.Ctx, `DELETE FROM project_managers WHERE id=?`, in.ManagerID); err != nil {
+					return err
+				}
+				if owner == in.ManagerID {
+					_, err := tx.ExecContext(e.Ctx, `UPDATE projects SET owner_manager_id=(
+						SELECT m.id FROM project_managers m JOIN users u ON u.id=m.user_id
+						WHERE m.project_id=?
+						ORDER BY (u.deleted_at IS NULL AND u.is_deactivated=0 AND u.is_agent=0 AND u.role<>'guest') DESC, m.created_at, m.id
+						LIMIT 1) WHERE id=?`, in.ID, in.ID)
 					return err
 				}
 				return nil

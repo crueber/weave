@@ -1,6 +1,6 @@
-## Weave kanban (the `weave` CLI)
+## Weave board (the `weave` CLI)
 
-Weave is a self-hosted kanban board. Humans use the browser; **agents and scripts use the `weave` CLI with an API key**.
+Weave is a self-hosted project management board. Humans use the browser; **agents and scripts use the `weave` CLI with an API key**.
 Use this whenever a task involves Weave boards, lists (columns), cards, comments, checklists or attachments, watching
 columns for work (a column's name and description are the brief), or the user mentions weave, `WEAVE_URL`, `WEAVE_TOKEN`,
 `weave listen`, `weave next` or `weave agent run`.

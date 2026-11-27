@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 
@@ -110,11 +111,29 @@ func RecordAction(e *ops.Env, ev ops.Event) (string, error) {
 	return id, err
 }
 
+func inPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return "?" + strings.Repeat(",?", n-1)
+}
+
 // place computes the REAL position for an item dropped between afterID and beforeID
 // within a scope (table + where clause). ok=false means "no repositioning requested".
-func place(ctx context.Context, q querier, table, scope string, scopeArgs []any, afterID, beforeID string, explicit *float64) (pos float64, ok bool, err error) {
+func place(ctx context.Context, q querier, table, scope string, scopeArgs []any, selfID, afterID, beforeID string, explicit *float64) (pos float64, ok bool, err error) {
 	if explicit != nil {
+		if math.IsNaN(*explicit) || math.IsInf(*explicit, 0) {
+			return 0, false, ops.Invalid("invalid position")
+		}
 		return *explicit, true, nil
+	}
+	if selfID != "" {
+		if afterID == selfID {
+			afterID = ""
+		}
+		if beforeID == selfID {
+			beforeID = ""
+		}
 	}
 	if afterID == "" && beforeID == "" {
 		return 0, false, nil
@@ -149,24 +168,59 @@ func place(ctx context.Context, q querier, table, scope string, scopeArgs []any,
 			}
 			return (p + n) / 2, true, nil
 		case afterID != "":
-			return p + db.PositionGap, true, nil
+			var o sql.NullFloat64
+			args := append([]any{p, selfID}, scopeArgs...)
+			_ = q.QueryRowContext(ctx, "SELECT MIN(position) FROM "+table+" WHERE position>? AND id<>? AND "+scope, args...).Scan(&o)
+			if !o.Valid {
+				return p + db.PositionGap, true, nil
+			}
+			if o.Float64-p >= 1 {
+				return (p + o.Float64) / 2, true, nil
+			}
+			if err = rebalance(ctx, q, table, scope, scopeArgs); err != nil {
+				return
+			}
 		default:
-			return n - db.PositionGap, true, nil
+			var o sql.NullFloat64
+			args := append([]any{n, selfID}, scopeArgs...)
+			_ = q.QueryRowContext(ctx, "SELECT MAX(position) FROM "+table+" WHERE position<? AND id<>? AND "+scope, args...).Scan(&o)
+			if !o.Valid {
+				if n >= 2 {
+					return n / 2, true, nil
+				}
+				if err = rebalance(ctx, q, table, scope, scopeArgs); err != nil {
+					return
+				}
+				continue
+			}
+			if n-o.Float64 >= 1 {
+				return (o.Float64 + n) / 2, true, nil
+			}
+			if err = rebalance(ctx, q, table, scope, scopeArgs); err != nil {
+				return
+			}
 		}
 	}
 	return 0, false, fmt.Errorf("reposition failed")
 }
 
 func rebalance(ctx context.Context, q querier, table, scope string, scopeArgs []any) error {
-	rows, err := q.QueryContext(ctx, "SELECT id FROM "+table+" WHERE "+scope+" ORDER BY position", scopeArgs...)
+	rows, err := q.QueryContext(ctx, "SELECT id FROM "+table+" WHERE "+scope+" ORDER BY position, id", scopeArgs...)
 	if err != nil {
 		return err
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
-		_ = rows.Scan(&id)
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
 	rows.Close()
 	for i, id := range ids {

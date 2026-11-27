@@ -34,7 +34,8 @@
 <script src="/static/boards_colors.js" defer></script>
 <script src="/static/boards_listsheet.js" defer></script>
 <script src="/static/boards_inbox.js" defer></script>
-<script src="/static/cards_place.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
+<script src="/static/cards_place.js" defer></script>
+<script src="/static/extras_card.js" defer></script>{{if .OpenList}}<div id="open-list" data-list="{{.OpenList}}" hidden></div>{{end}}{{end}}
 
 {{define "boards_help"}}<dialog id="boards-help" class="boards-help" aria-labelledby="boards-help-h">
   <form method="dialog" class="boards-help-close"><button class="boards-btn" aria-label="Close shortcuts">Close</button></form>
@@ -51,7 +52,7 @@
       <dt><kbd>c</kbd> <kbd>C</kbd></dt><dd>Add a card to the bottom / top of the list (<kbd>Enter</kbd> adds and keeps typing; paste lines for several)</dd>
       <dt><kbd>n</kbd></dt><dd>Add another list</dd>
       <dt><kbd>/</kbd></dt><dd>Filter cards</dd>
-      <dt><kbd>1</kbd>&ndash;<kbd>5</kbd></dt><dd>Kanban, List, Grid, Calendar, Map</dd>
+      <dt><kbd>1</kbd>&ndash;<kbd>5</kbd></dt><dd>Board, List, Grid, Calendar, Map</dd>
       <dt><kbd>?</kbd></dt><dd>Show this help</dd>
     </dl></section>
     <section><h3>Card actions</h3>

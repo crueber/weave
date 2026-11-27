@@ -7,10 +7,16 @@
   const ids = r => [...r.querySelectorAll('.bs-nav a[data-section]')].map(a => a.dataset.section);
   const absLinks = () => root()?.querySelectorAll('[data-link]').forEach(i => { if (i.value.startsWith('/')) i.value = location.origin + i.value; });
 
+  function syncPanels(r) {
+    r = r || root(); if (!r) return;
+    const id = r.dataset.active;
+    r.querySelectorAll('.bs-panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === id || p.id === 'set-' + id));
+  }
   function show(id, push) {
     const r = root(); if (!r) return;
     if (!ids(r).includes(id)) id = ids(r)[0];
     r.dataset.active = id;
+    syncPanels(r);
     r.querySelectorAll('.bs-nav a').forEach(a => a.dataset.section === id ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'));
     if (push) { const u = new URL(location.href); u.searchParams.set('section', id); u.hash = id; history.replaceState(null, '', u); }
   }
@@ -25,21 +31,20 @@
   }
   init();
   window.addEventListener('hashchange', () => show(fromURL(), false));
+  document.addEventListener('htmx:afterSwap', () => syncPanels());
   document.addEventListener('htmx:afterSettle', () => {
+    syncPanels();
     absLinks();
-    document.querySelectorAll('.bs-saved').forEach(m => setTimeout(() => m.remove(), 2500));
+    document.querySelectorAll('.bs-saved').forEach(m => {
+      if (m.dataset.fading) return;
+      m.dataset.fading = '1';
+      setTimeout(() => m.remove(), 2500);
+    });
   });
 
   document.addEventListener('click', e => {
     const a = e.target.closest?.('.bs-nav a[data-section]');
     if (a) { e.preventDefault(); show(a.dataset.section, true); return; }
-    const cp = e.target.closest?.('[data-copy]:not([data-copy^="#"])'); // "#selector" copies are handled by static/copy.js
-    if (cp) {
-      const input = document.getElementById(cp.dataset.copy); input.select();
-      const done = () => { const t = cp.dataset.label || (cp.dataset.label = cp.textContent); cp.textContent = 'Copied!'; setTimeout(() => cp.textContent = t, 1800); };
-      (navigator.clipboard ? navigator.clipboard.writeText(input.value) : Promise.reject()).then(done, () => { try { document.execCommand('copy'); done(); } catch (_) {} });
-      return;
-    }
     document.querySelectorAll('.bs-pop[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
     document.querySelectorAll('[data-combo]').forEach(c => { if (!c.contains(e.target)) closeCombo(c); });
   });

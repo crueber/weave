@@ -263,7 +263,7 @@ func TestProfilesAndLogin(t *testing.T) {
 		t.Fatal("remove")
 	}
 	// a failing whoami must not save
-	f.status("GET /api/v1/whoami", 401, "unauthorized", "bad key")
+	f.status("GET /api/v1/auth/whoami", 401, "unauthorized", "bad key")
 	f2 := f
 	_ = f2
 	// legacy config file is read as the default profile
@@ -378,7 +378,7 @@ func TestSchemaFromServerIsCachedAndPreferred(t *testing.T) {
 
 func TestSnapshotHasCoreOps(t *testing.T) {
 	cat := newCatalog("snapshot", SnapshotOps())
-	for _, n := range []string{"card.create", "card.move", "list.list", "comment.create", "card.claim", "card.next", "whoami", "board.tree"} {
+	for _, n := range []string{"card.create", "card.move", "list.list", "comment.create", "card.claim", "card.next", "auth.whoami", "board.tree"} {
 		if cat.Get(n) == nil {
 			t.Errorf("catalog lacks %s", n)
 		}

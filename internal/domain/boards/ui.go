@@ -15,32 +15,11 @@ import (
 	"github.com/crueber/weave/internal/web"
 )
 
-var colorHex = map[string]string{
-	"muddy-grey": "#8a8f98", "autumn-leafs": "#b4572d", "morning-sky": "#8ec5e6", "antique-blue": "#5b7f95", "egg-yellow": "#f2d04c",
-	"desert-sand": "#d9bc8c", "dark-granite": "#4b535c", "fresh-salad": "#7cc576", "lagoon-blue": "#2e9bb8", "midnight-blue": "#1f3a6e",
-	"light-orange": "#f5a65b", "pumpkin-orange": "#e8741e", "light-concrete": "#c3c7cc", "sunny-grass": "#a6d142", "navy-blue": "#26407a",
-	"lilac-eyes": "#a98bd0", "apricot-red": "#ee7d6a", "orange-peel": "#f59a2c", "silver-glint": "#aeb6bf", "bright-moss": "#5fae3d",
-	"deep-ocean": "#1b5e86", "summer-sky": "#58b4e8", "berry-red": "#c8324a", "light-cocoa": "#a98672", "grey-stone": "#7d858e",
-	"tank-green": "#4f6b3c", "coral-green": "#3fa88a", "sugar-plum": "#8c4a7d", "pink-tulip": "#ee86b4", "shady-rust": "#8c4b2f",
-	"wet-rock": "#566370", "wet-moss": "#5d7a4f", "turquoise-sea": "#2bc3c0", "lavender-fields": "#9b95e0", "piggy-red": "#f29aa5",
-	"light-mud": "#b9a58a", "gun-metal": "#3a4249", "modern-green": "#2f9e6a", "french-coast": "#4a7fd1", "sweet-lilac": "#c9a6e8",
-	"red-burgundy": "#8a1f33", "pirate-gold": "#c9951f",
-}
-
 func init() {
 	web.AddFuncs(template.FuncMap{
 		"add1": func(n int) int { return n + 1 },
 		"boardsColor": func(c any) string {
-			var s string
-			switch v := c.(type) {
-			case string:
-				s = v
-			case *string:
-				if v != nil {
-					s = *v
-				}
-			}
-			if h, ok := ResolveColor(s); ok {
+			if h, ok := ResolveColor(colorStr(c)); ok {
 				return h
 			}
 			return "#8a8f98"
@@ -69,6 +48,13 @@ func init() {
 				return 0
 			}
 			return a * 100 / b
+		},
+		// viewLabel is the visible name of a view type; the value stays "kanban" in URLs and data.
+		"viewLabel": func(v string) string {
+			if v == "kanban" {
+				return "board"
+			}
+			return v
 		},
 		"boardsHref": func(base, view, query string) template.URL {
 			q := url.Values{}
@@ -175,7 +161,7 @@ func registerUI() {
 				return nil
 			}
 		}
-		pd, err := loadPage(c.Env, d.Board, q, false)
+		pd, err := loadPage(c.Env, d, q, false)
 		if err != nil {
 			return err
 		}
@@ -186,7 +172,7 @@ func registerUI() {
 		if err != nil {
 			return err
 		}
-		pd, err := loadPage(c.Env, d.Board, c.R.URL.Query(), false)
+		pd, err := loadPage(c.Env, d, c.R.URL.Query(), false)
 		if err != nil {
 			return err
 		}
@@ -197,11 +183,10 @@ func registerUI() {
 		if err != nil {
 			return err
 		}
-		pd, err := loadPage(c.Env, d.Board, c.R.URL.Query(), true)
+		pd, err := loadPage(c.Env, d, c.R.URL.Query(), true)
 		if err != nil {
 			return err
 		}
-		pd.Members, pd.Saved = nil, nil
 		pd.PageURL = "/public/" + c.R.PathValue("token")
 		return c.Render("boards_public.html", pd)
 	})
@@ -211,7 +196,7 @@ func registerUI() {
 			c.Redirect("/boards/" + id)
 			return nil
 		}
-		sd, err := loadSettings(c, c.R.PathValue("id"))
+		sd, err := loadSettings(c, c.R.PathValue("id"), "")
 		if err != nil {
 			return err
 		}
@@ -350,9 +335,6 @@ func registerUI() {
 			if f, ok := out.(SavedFilter); ok {
 				b = f.BoardID
 			}
-			if b == "" {
-				b = c.R.FormValue("_board")
-			}
 			if c.R.FormValue("_ctx") == "settings" {
 				return renderSection(c, b, "boards_set_filters")
 			}
@@ -479,7 +461,9 @@ type LabelRow struct {
 // SettingsSection is one entry of the settings navigation.
 type SettingsSection struct{ ID, Title string }
 
-func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
+// loadSettings builds settings page data. section is "" for the full page, or a section block name
+// (boards_set_*) so section re-renders skip loading user.list, group.list, filtersOf and AgentCols when unused.
+func loadSettings(c *web.Ctx, boardID, section string) (*SettingsData, error) {
 	d, err := ops.Typed[BoardDetail](c.Env, "board.get", BoardGetIn{ID: boardID})
 	if err != nil {
 		return nil, err
@@ -488,24 +472,40 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 	if !caps.CanOpenSettings {
 		return nil, ops.NotFound("board") // public viewers do not get the settings fragments either
 	}
+	full := section == ""
 	sd := &SettingsData{Board: d.Board, Level: d.Level, Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, Members: d.Members, Labels: d.Labels, LabelGroups: d.LabelGroups,
 		Views: []string{"kanban", "grid", "list", "calendar", "map"}}
-	for i, l := range sd.Labels {
-		r := LabelRow{Label: l}
-		if i > 0 {
-			r.PrevID = sd.Labels[i-1].ID
+	if full || section == "boards_set_labels" || section == "boards_set_views" {
+		for i, l := range sd.Labels {
+			r := LabelRow{Label: l}
+			if i > 0 {
+				r.PrevID = sd.Labels[i-1].ID
+			}
+			if i+1 < len(sd.Labels) {
+				r.NextID = sd.Labels[i+1].ID
+			}
+			sd.LabelRows = append(sd.LabelRows, r)
 		}
-		if i+1 < len(sd.Labels) {
-			r.NextID = sd.Labels[i+1].ID
+	}
+	if full {
+		sd.Sections = settingsSections(caps)
+		sd.Active = "general"
+		if c.R != nil {
+			for _, s := range sd.Sections {
+				if c.R.URL.Query().Get("section") == s.ID {
+					sd.Active = s.ID
+				}
+			}
 		}
-		sd.LabelRows = append(sd.LabelRows, r)
 	}
-	sd.Sections = settingsSections(caps)
-	if caps.CanEditPrompt {
-		sd.Prompt = newPromptEdit(c.Env, agentprompt.ScopeBoard, d.Board.AgentPrompt)
-	}
-	if ls, err := listsOf(c.Env, boardID, true); err == nil {
-		for _, l := range ls {
+	if full || section == "boards_set_agents" {
+		if caps.CanEditPrompt {
+			sd.Prompt = newPromptEdit(c.Env, agentprompt.ScopeBoard, d.Board.AgentPrompt)
+		}
+		for _, l := range d.Lists {
+			if !isFinite(l.Type) {
+				continue
+			}
 			ac := AgentCol{List: l, Name: listName(l)}
 			if c.Env.Hub != nil {
 				for _, x := range c.Env.Hub.Listeners.ForList(l.ID) {
@@ -515,27 +515,26 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 			sd.AgentCols = append(sd.AgentCols, ac)
 		}
 	}
-	sd.Active = "general"
-	if c.R != nil {
-		for _, s := range sd.Sections {
-			if c.R.URL.Query().Get("section") == s.ID {
-				sd.Active = s.ID
+	if full || section == "boards_set_general" || section == "boards_set_labels" {
+		_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT name,use_project_labels FROM projects WHERE id=?`, d.Board.ProjectID).Scan(&sd.ProjectName, &sd.UseProjectLabels)
+	}
+	if full || section == "boards_set_members" {
+		if caps.CanRemoveSelfMember {
+			for _, m := range d.Members {
+				if m.UserID != nil && *m.UserID == c.Env.User.UserID {
+					sd.MyMemberID, sd.LeaveBlocked = m.ID, checkOwnerLeaves(c.Env, c.Env.DB, m) != nil
+				}
 			}
 		}
 	}
-	_, sd.UseProjectLabels = projectOfBoard(c.Env, boardID)
-	_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT name FROM projects WHERE id=?`, d.Board.ProjectID).Scan(&sd.ProjectName)
-	if caps.CanRemoveSelfMember {
-		for _, m := range d.Members {
-			if m.UserID != nil && *m.UserID == c.Env.User.UserID {
-				sd.MyMemberID, sd.LeaveBlocked = m.ID, checkOwnerLeaves(c.Env, m) != nil
-			}
+	if full || section == "boards_set_filters" {
+		if sd.Saved, err = filtersOf(c.Env, boardID); err != nil {
+			return nil, err
 		}
 	}
-	if sd.Saved, err = filtersOf(c.Env, boardID); err != nil {
-		return nil, err
-	}
-	if caps.CanManageMembers || caps.CanPublishTemplate {
+	needUsers := caps.CanManageMembers && (full || section == "boards_set_members")
+	needGroups := needUsers || (caps.CanPublishTemplate && (full || section == "boards_set_templates"))
+	if needUsers || needGroups {
 		in := map[string]bool{}
 		for _, m := range d.Members {
 			if m.UserID != nil {
@@ -548,27 +547,31 @@ func loadSettings(c *web.Ctx, boardID string) (*SettingsData, error) {
 		// People and groups come from the caller's own directory (user.list / group.list), so a board owner with a
 		// restricted directory (worker) only finds the accounts they already share a board with, and only admins
 		// see e-mail addresses.
-		if ul, err := ops.Typed[auth.UserList](c.Env, "user.list", auth.ListIn{}); err == nil {
-			for _, u := range ul.Items {
-				if u == nil || in[u.ID] || u.IsDeactivated {
-					continue
+		if needUsers {
+			if ul, err := ops.Typed[auth.UserList](c.Env, "user.list", auth.ListIn{}); err == nil {
+				for _, u := range ul.Items {
+					if u == nil || in[u.ID] || u.IsDeactivated {
+						continue
+					}
+					o := UserOpt{ID: u.ID, Name: u.Name, Email: u.Email}
+					if o.Email == "" && u.Username != nil && *u.Username != "" {
+						o.Email = "@" + *u.Username
+					}
+					sd.Users = append(sd.Users, o)
 				}
-				o := UserOpt{ID: u.ID, Name: u.Name, Email: u.Email}
-				if o.Email == "" && u.Username != nil && *u.Username != "" {
-					o.Email = "@" + *u.Username
-				}
-				sd.Users = append(sd.Users, o)
 			}
 		}
-		if gl, err := ops.Typed[auth.GroupList](c.Env, "group.list", auth.NoInput{}); err == nil {
-			for _, g := range gl.Items {
-				if g == nil {
-					continue
-				}
-				o := UserOpt{ID: g.ID, Name: g.Name}
-				sd.AllGroups = append(sd.AllGroups, o)
-				if !in[g.ID] {
-					sd.Groups = append(sd.Groups, o)
+		if needGroups {
+			if gl, err := ops.Typed[auth.GroupList](c.Env, "group.list", auth.NoInput{}); err == nil {
+				for _, g := range gl.Items {
+					if g == nil {
+						continue
+					}
+					o := UserOpt{ID: g.ID, Name: g.Name}
+					sd.AllGroups = append(sd.AllGroups, o)
+					if !in[g.ID] {
+						sd.Groups = append(sd.Groups, o)
+					}
 				}
 			}
 		}
@@ -602,7 +605,7 @@ func settingsSections(caps authz.BoardCaps) []SettingsSection {
 }
 
 func renderSectionSaved(c *web.Ctx, boardID, block string) error {
-	sd, err := loadSettings(c, boardID)
+	sd, err := loadSettings(c, boardID, block)
 	if err != nil {
 		return err
 	}
@@ -611,7 +614,7 @@ func renderSectionSaved(c *web.Ctx, boardID, block string) error {
 }
 
 func renderSection(c *web.Ctx, boardID, block string) error {
-	sd, err := loadSettings(c, boardID)
+	sd, err := loadSettings(c, boardID, block)
 	if err != nil {
 		return err
 	}
@@ -620,7 +623,7 @@ func renderSection(c *web.Ctx, boardID, block string) error {
 
 // ---- card drop ----
 
-// dropCard handles a card dragged on the kanban: it computes the new position
+// dropCard handles a card dragged in the board view: it computes the new position
 // from the neighbouring cards and delegates the move to the cards domain's
 // "card.move" op (bound through its own input tags).
 func dropCard(c *web.Ctx) error {

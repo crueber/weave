@@ -8,7 +8,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/crueber/weave/internal/domain/admin.Version=${VERSION}" \
+    -ldflags "-s -w -X github.com/crueber/weave/internal/version.Version=${VERSION}" \
     -o /out/weave ./cmd/weave
 # distroless has no shell/mkdir: pre-create the data dir owned by nonroot (uid 65532)
 RUN mkdir -p /out/data && chown 65532:65532 /out/data

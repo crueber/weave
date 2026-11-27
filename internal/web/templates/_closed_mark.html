@@ -1,10 +1,10 @@
 {{/* The closed mark: a round check (circle plus tick, one flat stroke icon) shown before the title of a closed card on
-   kanban and grid tiles, list-view rows, calendar chips, the public board and the share page; the card sheet uses it
+   board and grid tiles, list-view rows, calendar chips, the public board and the share page; the card sheet uses it
    inside its "Closed" badge. Inline SVG so it works without the board page's icon sprite (the sprite's #i-check is the
    checklist box: a different thing). Styles: .closed-mark in weave_ui.css (loaded by every page).
    Arg: true = include the screen-reader text "Closed: " (false where visible text already says "Closed"). */}}
 {{define "closed_mark"}}<span class="closed-mark" title="Closed">{{template "closed_mark_ico"}}{{if .}}<span class="sr-only">Closed: </span>{{end}}</span>{{end}}
 
 {{/* The bare glyph (aria-hidden, no title): for places that name it themselves, e.g. a column that closes cards that
-   land in it (kanban header indicator, column sheet, column menu, template preview). */}}
+   land in it (board-view header indicator, column sheet, column menu, template preview). */}}
 {{define "closed_mark_ico"}}<svg class="closed-mark-ico" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5.1 8.3l2 2 3.8-4.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>{{end}}

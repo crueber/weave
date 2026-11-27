@@ -12,7 +12,7 @@ import (
 	"github.com/crueber/weave/internal/ops"
 )
 
-// List is a board column. Types: active, closed (both shown on the kanban),
+// List is a board column. Types: active, closed (both shown in the board view),
 // archive and trash (system lists, position null).
 type List struct {
 	ID          string   `json:"id"`
@@ -265,7 +265,6 @@ func registerListOps() {
 		if !isFinite(l.Type) {
 			return l, ops.Forbidden()
 		}
-		oldType := l.Type
 		if in.Name != nil {
 			if *in.Name == "" {
 				return l, ops.Invalid("name must not be empty")
@@ -273,24 +272,19 @@ func registerListOps() {
 			if err := ops.CheckLen("name", *in.Name, ops.MaxNameLen); err != nil {
 				return l, err
 			}
-			l.Name = in.Name
 		}
+		var newColor *string
 		if in.Color != nil {
 			hex, err := NormalizeColor(*in.Color)
 			if err != nil {
 				return l, err
 			}
-			if hex == "" {
-				l.Color = nil
-			} else {
-				l.Color = &hex
+			if hex != "" {
+				newColor = &hex
 			}
 		}
-		if in.Type != nil {
-			if !isFinite(*in.Type) {
-				return l, ops.Invalid("type must be active or closed")
-			}
-			l.Type = *in.Type
+		if in.Type != nil && !isFinite(*in.Type) {
+			return l, ops.Invalid("type must be active or closed")
 		}
 		switch in.ExistingCards {
 		case "", "flip", "keep":
@@ -298,33 +292,62 @@ func registerListOps() {
 			return l, ops.Invalid("existingCards must be flip or keep")
 		}
 		keep := in.ExistingCards == "keep"
+		var newDesc *string
 		if in.Description != nil {
 			if err := ops.CheckLen("description", *in.Description, maxListDescLen); err != nil {
 				return l, err
 			}
-			if strings.TrimSpace(*in.Description) == "" {
-				l.Description = nil
-			} else {
-				l.Description = in.Description
+			if strings.TrimSpace(*in.Description) != "" {
+				newDesc = in.Description
 			}
 		}
+		var newWIP *int
 		if in.WIPLimit != nil {
-			if l.WIPLimit, err = checkWIP(*in.WIPLimit); err != nil {
+			if newWIP, err = checkWIP(*in.WIPLimit); err != nil {
 				return l, err
 			}
 		}
-		oldKeep := l.ArchiveAfter
+		var newKeep *int
 		if in.ArchiveAfter != nil {
-			if l.ArchiveAfter, err = checkArchiveAfter(*in.ArchiveAfter); err != nil {
+			if newKeep, err = checkArchiveAfter(*in.ArchiveAfter); err != nil {
 				return l, err
 			}
 		}
-		if in.Position != nil {
-			l.Position = in.Position
-		}
+		var oldType string
+		var oldKeep *int
 		var flipped, trimmed LandResult
 		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 			flipped, trimmed = LandResult{}, LandResult{}
+			var err error
+			l, err = GetList(e.Ctx, tx, in.ID)
+			if err != nil {
+				return err
+			}
+			if !isFinite(l.Type) {
+				return ops.Forbidden()
+			}
+			oldType, oldKeep = l.Type, l.ArchiveAfter
+			if in.Name != nil {
+				l.Name = in.Name
+			}
+			if in.Color != nil {
+				l.Color = newColor
+			}
+			if in.Type != nil {
+				l.Type = *in.Type
+			}
+			if in.Description != nil {
+				l.Description = newDesc
+			}
+			if in.WIPLimit != nil {
+				l.WIPLimit = newWIP
+			}
+			if in.ArchiveAfter != nil {
+				l.ArchiveAfter = newKeep
+			}
+			if in.Position != nil {
+				l.Position = in.Position
+			}
 			if _, err := tx.ExecContext(e.Ctx, `UPDATE lists SET name=?,color=?,type=?,position=?,description=?,wip_limit=?,archive_after=?,updated_at=? WHERE id=?`, l.Name, l.Color, l.Type, l.Position, l.Description, l.WIPLimit, l.ArchiveAfter, db.Now(), l.ID); err != nil {
 				return err
 			}
@@ -337,7 +360,7 @@ func registerListOps() {
 					return err
 				}
 				if len(p.IDs) > 0 && !in.ConfirmArchive {
-					return ops.Conflict(fmt.Sprintf("archiveAfter=%d would archive %s now (the column holds %d%s); resend with confirmArchive=true to archive them", *l.ArchiveAfter, cardsN(len(p.IDs)), p.Cards, skippedNote(p)))
+					return ops.Conflict(fmt.Sprintf("archiveAfter=%d would archive %s now (the column holds %d%s); resend with confirmArchive=true to archive them", *l.ArchiveAfter, plural(len(p.IDs), "card"), p.Cards, skippedNote(p)))
 				}
 				a, err := applyArchive(e.Ctx, tx, l.ID, *l.ArchiveAfter, p.IDs)
 				if err != nil {
@@ -353,7 +376,6 @@ func registerListOps() {
 			// A switch of the closing setting re-lands the column's cards (existingCards=flip, the default): switching
 			// to closed closes them, back to active re-opens them. With keep they stay as they are and the rule
 			// applies only to cards that land from now on.
-			var err error
 			flipped, err = relandList(e.Ctx, tx, l.ID)
 			return err
 		})
@@ -605,7 +627,7 @@ func registerListOps() {
 		if dst.ID == l.ID {
 			return ListMoveCardsOut{}, ops.Invalid("target list must differ")
 		}
-		moved, landed, err := moveAll(e, l.ID, dst.ID)
+		moved, landed, err := moveAll(e, l.BoardID, l.ID, dst.ID)
 		if err != nil {
 			return ListMoveCardsOut{}, err
 		}
@@ -618,37 +640,54 @@ func registerListOps() {
 	})
 }
 
-// moveAll appends every card of src to dst keeping order. The LandResult carries what dst's archive-after rule
-// archived (emit it with EmitAutoArchived after the moved events).
-func moveAll(e *ops.Env, srcID, dstID string) ([]string, LandResult, error) {
+// moveAllTx appends every non-draft, non-template card of src to dst keeping order inside tx.
+func moveAllTx(ctx context.Context, tx *sql.Tx, boardID, srcID, dstID string) ([]string, LandResult, error) {
+	base := maxPos(ctx, tx, "card_placements", "list_id=?", dstID)
+	rows, err := tx.QueryContext(ctx, `SELECT p.card_id FROM card_placements p JOIN cards c ON c.id=p.card_id
+		WHERE p.list_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, p.card_id`, srcID)
+	if err != nil {
+		return nil, LandResult{}, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, LandResult{}, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, LandResult{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, LandResult{}, err
+	}
+	if len(ids) == 0 {
+		return nil, LandResult{}, nil
+	}
+	now := db.Now()
+	moves := make([]placementMove, len(ids))
+	lands := make([]Landing, len(ids))
+	for i, id := range ids {
+		moves[i] = placementMove{CardID: id, FromListID: srcID, Position: base + float64(i+1)*db.PositionGap}
+		lands[i] = Landing{CardID: id, ListID: dstID}
+	}
+	if err := movePlacements(ctx, tx, boardID, dstID, now, moves); err != nil {
+		return nil, LandResult{}, err
+	}
+	res, err := Landed(ctx, tx, lands...) // into a closed column closes, into an active one re-opens, archive/trash keep
+	return ids, res, err
+}
+
+// moveAll appends every non-draft, non-template card of src to dst keeping order. The LandResult carries what dst's
+// archive-after rule archived (emit it with EmitAutoArchived after the moved events).
+func moveAll(e *ops.Env, boardID, srcID, dstID string) ([]string, LandResult, error) {
 	var ids []string
 	var res LandResult
 	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-		base := maxPos(e.Ctx, tx, "card_placements", "list_id=?", dstID)
-		rows, err := tx.QueryContext(e.Ctx, `SELECT card_id FROM card_placements WHERE list_id=? ORDER BY position, card_id`, srcID)
-		if err != nil {
-			return err
-		}
-		ids = nil
-		for rows.Next() {
-			var id string
-			_ = rows.Scan(&id)
-			ids = append(ids, id)
-		}
-		rows.Close()
-		now := db.Now()
-		lands := make([]Landing, 0, len(ids))
-		for i, id := range ids {
-			if _, err := tx.ExecContext(e.Ctx, `UPDATE card_placements SET list_id=?,prev_list_id=?,position=?,list_changed_at=? WHERE card_id=? AND list_id=?`,
-				dstID, srcID, base+float64(i+1)*db.PositionGap, now, id, srcID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, id); err != nil {
-				return err
-			}
-			lands = append(lands, Landing{CardID: id, ListID: dstID})
-		}
-		res, err = Landed(e.Ctx, tx, lands...) // into a closed column closes, into an active one re-opens, archive/trash keep
+		var err error
+		ids, res, err = moveAllTx(e.Ctx, tx, boardID, srcID, dstID)
 		return err
 	})
 	return ids, res, err
@@ -677,18 +716,63 @@ func retire(e *ops.Env, id, sysType string) (Deleted, error) {
 	if !isFinite(l.Type) {
 		return Deleted{}, ops.Forbidden()
 	}
-	dst, err := SystemList(e.Ctx, e.DB, l.BoardID, sysType)
-	if err != nil {
-		return Deleted{}, err
-	}
-	moved, _, err := moveAll(e, l.ID, dst) // into archive/trash: no archive-after rule there
+	var dst string
+	var moved []string
+	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		dst, moved = "", nil
+		var err error
+		dst, err = SystemList(e.Ctx, tx, l.BoardID, sysType)
+		if err != nil {
+			return err
+		}
+		moved, _, err = moveAllTx(e.Ctx, tx, l.BoardID, l.ID, dst) // into archive/trash: no archive-after rule there
+		if err != nil {
+			return err
+		}
+		// Drafts and card templates parked on this column are hidden from columns and never moved to archive/trash;
+		// re-park them onto another finite column (if one exists) so deleting the list does not cascade-delete them.
+		var parkID string
+		_ = tx.QueryRowContext(e.Ctx, `SELECT id FROM lists WHERE board_id=? AND type IN ('active','closed') AND id<>? ORDER BY position, id LIMIT 1`, l.BoardID, l.ID).Scan(&parkID)
+		if parkID != "" {
+			rows, err := tx.QueryContext(e.Ctx, `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.list_id=? AND (c.is_draft=1 OR c.is_template=1) ORDER BY p.position, c.id`, l.ID)
+			if err != nil {
+				return err
+			}
+			var parked []string
+			for rows.Next() {
+				var cid string
+				if err := rows.Scan(&cid); err != nil {
+					rows.Close()
+					return err
+				}
+				parked = append(parked, cid)
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if len(parked) > 0 {
+				base := maxPos(e.Ctx, tx, "card_placements", "list_id=?", parkID)
+				now := db.Now()
+				for i, cid := range parked {
+					if _, err := tx.ExecContext(e.Ctx, `UPDATE card_placements SET list_id=?,position=? WHERE card_id=? AND is_home=1`, parkID, base+float64(i+1)*db.PositionGap, cid); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, now, cid); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		_, err = tx.ExecContext(e.Ctx, `DELETE FROM lists WHERE id=?`, l.ID)
+		return err
+	})
 	if err != nil {
 		return Deleted{}, err
 	}
 	emitMoved(e, l.BoardID, l.ID, dst, sysType, moved)
-	if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM lists WHERE id=?`, l.ID); err != nil {
-		return Deleted{}, err
-	}
 	emit(e, "listDelete", "list.deleted", l.BoardID, map[string]any{"id": l.ID})
 	return Deleted{l.ID}, nil
 }

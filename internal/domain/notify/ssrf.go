@@ -126,6 +126,14 @@ func (p destPolicy) blockedIP(ip net.IP) (bool, string) {
 	return false, ""
 }
 
+func hostFromURL(u *url.URL) string {
+	h := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if h == "" && u.Opaque != "" { // scheme:host style
+		h = strings.ToLower(u.Opaque)
+	}
+	return h
+}
+
 // destinationHost extracts the host a shoutrrr URL points at: generic://host/path,
 // smtp://user:pw@host:587, ntfy://:tok@host, gotify://host/token, discord://token@id (the "host" of
 // token-style schemes is not dialled).
@@ -134,11 +142,7 @@ func destinationHost(raw string) string {
 	if err != nil {
 		return ""
 	}
-	h := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if h == "" && u.Opaque != "" { // scheme:host style
-		h = strings.ToLower(u.Opaque)
-	}
-	return h
+	return hostFromURL(u)
 }
 
 // dialsURLHost lists the shoutrrr schemes that connect to the host written in the URL. For the
@@ -153,41 +157,50 @@ type target struct {
 
 // destinationTargets are the hosts a URL can make the server connect to: the URL host and, for
 // schemes that take one from the query string (teams ?host=), that value.
-func destinationTargets(raw string) []target {
+func destinationTargets(raw string) ([]target, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil
+		return nil, ErrDestinationNotAllowed
 	}
 	scheme, _, _ := strings.Cut(strings.ToLower(u.Scheme), "+")
 	var out []target
-	if h := destinationHost(raw); h != "" {
+	if h := hostFromURL(u); h != "" {
 		out = append(out, target{h, dialsURLHost[scheme]})
 	}
-	for _, k := range []string{"host", "server", "url", "domain"} {
-		for _, v := range u.Query()[k] {
-			v = strings.TrimSpace(v)
-			if strings.Contains(v, "://") {
-				if pu, err := url.Parse(v); err == nil {
+	for qk, vals := range u.Query() {
+		switch strings.ToLower(qk) {
+		case "host", "server", "url", "domain":
+			for _, v := range vals {
+				v = strings.TrimSpace(v)
+				if strings.Contains(v, "://") {
+					pu, err := url.Parse(v)
+					if err != nil {
+						return nil, ErrDestinationNotAllowed
+					}
 					v = pu.Host
 				}
-			}
-			if h, _, err := net.SplitHostPort(v); err == nil {
-				v = h
-			}
-			if v = strings.ToLower(strings.Trim(strings.TrimSuffix(v, "."), "[]")); v != "" {
-				out = append(out, target{v, true})
+				if h, _, err := net.SplitHostPort(v); err == nil {
+					v = h
+				}
+				if v = strings.ToLower(strings.Trim(strings.TrimSuffix(v, "."), "[]")); v != "" {
+					out = append(out, target{v, true})
+				}
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // checkDestination enforces the policy for a shoutrrr URL. Hosts the sender dials fail closed when
 // they cannot be resolved (an attacker-run DNS server could otherwise time out our lookup and
 // answer the sender's); token-style services have no real host and are not refused for that.
 func checkDestination(ctx context.Context, raw string) error {
+	targets, err := destinationTargets(raw)
+	if err != nil {
+		return err
+	}
 	p := loadDestPolicy()
-	for _, t := range destinationTargets(raw) {
+	for _, t := range targets {
 		if p.hostAllowed(t.host) {
 			continue
 		}

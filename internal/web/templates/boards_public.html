@@ -5,7 +5,7 @@
   <header class="boards-head">
     <h1>{{.Board.Name}}</h1>
     <nav class="boards-views" aria-label="Board views">
-      <a href="{{boardsHref .PageURL "kanban" .Query}}"{{if eq .View "kanban"}} class="active"{{end}}>Kanban</a>
+      <a href="{{boardsHref .PageURL "kanban" .Query}}"{{if eq .View "kanban"}} class="active"{{end}}>Board</a>
       <a href="{{boardsHref .PageURL "list" .Query}}"{{if eq .View "list"}} class="active"{{end}}>List</a>
       <a href="{{boardsHref .PageURL "grid" .Query}}"{{if eq .View "grid"}} class="active"{{end}}>Grid</a>
     </nav>

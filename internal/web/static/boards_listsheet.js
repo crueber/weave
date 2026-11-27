@@ -7,12 +7,11 @@
 // The sheet reuses the card sheet's look (.cm-* classes) but its popovers, sections and description editor are handled here.
 (function () {
   if (window.ListSheet) return;
+  var W = window.Weave;
   var st = { id: '', board: '', pushed: false, fromPop: false, gone: false, escAt: 0 };
   function modal() { return document.getElementById('modal'); }
   function sheet() { return document.getElementById('list-sheet'); }
-  function toast(msg, err) { if (window.Boards && Boards.toast) Boards.toast(msg, { error: !!err }); }
-  function lsGet(k) { try { return localStorage.getItem(k); } catch (x) { return null; } }
-  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
+  function toast(msg, err) { W.toast(msg, { error: !!err }); }
   function q(sel) { var s = sheet(); return s && s.querySelector(sel); }
 
   var LS = window.ListSheet = {
@@ -48,13 +47,14 @@
   function onClose() {
     var id = st.id; if (!id) return;
     var board = st.board; st.id = '';
+    var search = (window.Boards && Boards.search) ? Boards.search() : location.search;
     if (st.gone) { // deleted/archived: leave no /lists/{id} entry behind (not even as a forward entry), so rewrite it in place
       st.gone = false; st.pushed = false;
-      history.replaceState(null, '', '/boards/' + board + location.search);
+      history.replaceState(null, '', '/boards/' + board + search);
     } else if (st.pushed) { st.pushed = false; history.back(); }
-    else if (location.pathname === '/lists/' + id && board) history.replaceState(null, '', '/boards/' + board + location.search);
+    else if (location.pathname === '/lists/' + id && board) history.replaceState(null, '', '/boards/' + board + search);
   }
-  if (modal()) modal().addEventListener('close', onClose);
+  document.addEventListener('close', function (e) { if (e.target === modal()) onClose(); }, true);
 
   // ---- open from the board ----
   document.addEventListener('click', function (e) {
@@ -91,7 +91,7 @@
   function applySecState() {
     var s = sheet(); if (!s) return;
     s.querySelectorAll('[data-ls-sec]').forEach(function (sec) {
-      var v = lsGet(secKey(sec.dataset.lsSec)), c = v === null ? sec.classList.contains('is-collapsed') : v === '1';
+      var v = W.ls.get(secKey(sec.dataset.lsSec)), c = v === null ? sec.classList.contains('is-collapsed') : v === '1';
       setCollapsed(sec, c);
     });
   }
@@ -109,7 +109,7 @@
     if (btn) btn.hidden = on || !ta.defaultValue;
     if (on) { grow(ta); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
   }
-  function grow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, Math.round(window.innerHeight * .45)) + 'px'; }
+  function grow(ta) { W.grow(ta, Math.round(window.innerHeight * 0.45)); }
   function cancelDesc() { var f = descForm(); if (!f) return; var ta = f.querySelector('textarea'); ta.value = ta.defaultValue; editDesc(false); var b = q('[data-ls-desc-edit]'); if (b) b.focus({ preventScroll: true }); }
   document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('[data-ls-desc-input]')) grow(e.target); });
   document.addEventListener('keydown', function (e) {
@@ -120,19 +120,13 @@
   // ---- clicks inside the sheet ----
   document.addEventListener('click', function (e) {
     var s = sheet(), t = e.target;
-    if (!s || !t.closest) return;
-    var m = modal();
-    if (m && m.open && t === m) { // backdrop (the dialog element itself is only hit outside its box)
-      var r = m.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) { m.close(); return; }
-    }
-    if (!s.contains(t)) return;
+    if (!s || !t.closest || !s.contains(t)) return;
     var nav = t.closest('[data-ls-nav]');
     if (nav) { if (!nav.disabled && nav.dataset.lsNav) LS.open(nav.dataset.lsNav); return; }
     var go = t.closest('[data-ls-goto]');
     if (go) { if (go.dataset.lsGoto !== s.dataset.list) LS.open(go.dataset.lsGoto); else closePops(); return; }
     var tg = t.closest('[data-ls-sec-toggle]');
-    if (tg) { var sec = tg.closest('[data-ls-sec]'); var c = !sec.classList.contains('is-collapsed'); lsSet(secKey(sec.dataset.lsSec), c ? '1' : '0'); setCollapsed(sec, c); return; }
+    if (tg) { var sec = tg.closest('[data-ls-sec]'); var c = !sec.classList.contains('is-collapsed'); W.ls.set(secKey(sec.dataset.lsSec), c ? '1' : '0'); setCollapsed(sec, c); return; }
     if (t.closest('[data-ls-desc-edit]')) { editDesc(true); return; }
     var dv = t.closest('[data-ls-desc-click]');
     if (dv && !t.closest('a') && !(window.getSelection && String(window.getSelection()))) { editDesc(true); return; }
@@ -162,7 +156,9 @@
     if (e.key !== 'Escape' || e.defaultPrevented || !LS.isOpen()) return;
     if (layerEsc()) { e.preventDefault(); e.stopPropagation(); st.escAt = Date.now(); }
   }, true);
-  if (modal()) modal().addEventListener('cancel', function (e) { if (LS.isOpen() && (Date.now() - st.escAt < 80 || layerEsc())) e.preventDefault(); });
+  document.addEventListener('cancel', function (e) {
+    if (e.target === modal() && LS.isOpen() && (Date.now() - st.escAt < 80 || layerEsc())) e.preventDefault();
+  }, true);
   // the title commits on Enter (the form submits natively) and on blur (change)
 
   // ---- keep the sheet consistent after a save ----

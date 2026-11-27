@@ -2,12 +2,8 @@ package auth
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -111,25 +107,6 @@ func secretKey(e *ops.Env) []byte {
 	return k[:]
 }
 
-func seal(key []byte, plain string) string {
-	blk, _ := aes.NewCipher(key)
-	g, _ := cipher.NewGCM(blk)
-	n := make([]byte, g.NonceSize())
-	_, _ = rand.Read(n)
-	return base64.StdEncoding.EncodeToString(g.Seal(n, n, []byte(plain), nil))
-}
-
-func unseal(key []byte, s string) (string, error) {
-	raw, err := base64.StdEncoding.DecodeString(s)
-	blk, _ := aes.NewCipher(key)
-	g, _ := cipher.NewGCM(blk)
-	if err != nil || len(raw) < g.NonceSize() {
-		return "", errors.New("bad ciphertext")
-	}
-	b, err := g.Open(nil, raw[:g.NonceSize()], raw[g.NonceSize():], nil)
-	return string(b), err
-}
-
 // ClientIP returns the caller address (X-Forwarded-For only when WEAVE_TRUST_PROXY=true).
 func ClientIP(e *ops.Env) string {
 	if e.Req == nil {
@@ -137,7 +114,8 @@ func ClientIP(e *ops.Env) string {
 	}
 	if cfgOf(e).TrustProxy {
 		if f := e.Req.Header.Get("X-Forwarded-For"); f != "" {
-			return strings.TrimSpace(strings.Split(f, ",")[0])
+			first, _, _ := strings.Cut(f, ",")
+			return strings.TrimSpace(first)
 		}
 	}
 	h, _, err := net.SplitHostPort(e.Req.RemoteAddr)
@@ -158,26 +136,37 @@ func userAgent(e *ops.Env) string {
 	return ua
 }
 
-// requestToken extracts the presented credential from a request.
-func requestToken(r *http.Request) (tok string, explicitKey bool) {
+type credSource int
+
+const (
+	credNone credSource = iota
+	credAPIKey
+	credBearer
+	credCookie
+)
+
+// requestToken extracts the presented credential and its source from a request.
+func requestToken(r *http.Request) (string, credSource) {
 	if k := r.Header.Get("X-API-Key"); k != "" {
-		return k, true
+		return k, credAPIKey
 	}
 	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
-		return strings.TrimSpace(h[7:]), false
+		if tok := strings.TrimSpace(h[7:]); tok != "" {
+			return tok, credBearer
+		}
 	}
-	if c, err := r.Cookie(CookieName); err == nil {
-		return c.Value, false
+	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
+		return c.Value, credCookie
 	}
-	return "", false
+	return "", credNone
 }
 
 func currentSessionID(e *ops.Env) string {
 	if e.Req == nil {
 		return ""
 	}
-	tok, explicit := requestToken(e.Req)
-	if tok == "" || explicit || strings.HasPrefix(tok, apiKeyPrefix) {
+	tok, src := requestToken(e.Req)
+	if tok == "" || src == credAPIKey || strings.HasPrefix(tok, apiKeyPrefix) {
 		return ""
 	}
 	var id string
@@ -186,12 +175,12 @@ func currentSessionID(e *ops.Env) string {
 }
 
 func authenticate(e *ops.Env, r *http.Request) *ops.Principal {
-	tok, explicit := requestToken(r)
+	tok, src := requestToken(r)
 	if tok == "" {
 		return nil
 	}
 	ctx := r.Context()
-	if explicit || strings.HasPrefix(tok, apiKeyPrefix) {
+	if src == credAPIKey || strings.HasPrefix(tok, apiKeyPrefix) {
 		var p ops.Principal
 		var keyID string
 		var keyExp, keyUsed sql.NullString
@@ -204,7 +193,7 @@ func authenticate(e *ops.Env, r *http.Request) *ops.Principal {
 			e.AuthMsg = "API key expired; generate a new one in Settings (an agent account: whoever created it rotates its key in Board settings > Agents)"
 			return nil
 		}
-		if p.IsAgent && !explicit && !strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
+		if p.IsAgent && src == credCookie {
 			return nil // agents use keys in headers only, never a browser (cookie) session
 		}
 		touchKey(e, r, keyID, keyUsed)

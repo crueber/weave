@@ -82,19 +82,19 @@ func clip(s string, n int) string {
 func init() {
 	ops.Register(ops.Op{Name: "comment.list", Summary: "List a card's comments, newest first", Method: "GET", Path: "/cards/{cardId}/comments",
 		Auth: ops.AuthPublic, UI: "GET /ui/cards/{id}/comments"}, func(e *ops.Env, in CommentsIn) (CommentsOut, error) {
-		board, err := authz.RequireCard(e, in.CardID, authz.View)
+		a, err := authz.CardAccessFor(e, in.CardID, "")
 		if err != nil {
 			return CommentsOut{}, err
 		}
-		level := authz.BoardLevel(e, board)
+		level := a.Level
 		limit := in.Limit
 		if limit <= 0 || limit > 200 {
 			limit = 50
 		}
 		q, args := commentSelect+` WHERE c.card_id=?`, []any{in.CardID}
 		if in.Before != "" {
-			q += ` AND (c.created_at,c.id) < (SELECT created_at,id FROM comments WHERE id=?)`
-			args = append(args, in.Before)
+			q += ` AND (c.created_at,c.id) < (SELECT created_at,id FROM comments WHERE id=? AND card_id=?)`
+			args = append(args, in.Before, in.CardID)
 		}
 		q += ` ORDER BY c.created_at DESC, c.id DESC LIMIT ?`
 		args = append(args, limit)
@@ -109,10 +109,14 @@ func init() {
 
 	ops.Register(ops.Op{Name: "comment.create", Summary: "Comment on a card (requires comment permission)", Method: "POST", Path: "/cards/{cardId}/comments",
 		UI: "POST /ui/cards/{cardId}/comments"}, func(e *ops.Env, in CommentCreateIn) (CommentItem, error) {
-		board, err := authz.RequireCard(e, in.CardID, authz.Comment)
+		a, err := authz.CardAccessFor(e, in.CardID, "")
 		if err != nil {
 			return CommentItem{}, err
 		}
+		if a.Level < authz.Comment {
+			return CommentItem{}, ops.Forbidden()
+		}
+		board := a.BoardID
 		text := strings.TrimSpace(in.Text)
 		if text == "" {
 			return CommentItem{}, ops.Invalid("text is required")
@@ -133,7 +137,7 @@ func init() {
 		}
 		cards.AutoWatchComment(e, in.CardID, e.User.UserID) // "Watch when I comment" (never over a mute)
 		emit(e, "commentCreate", board, in.CardID, "comment.created", map[string]any{"commentId": id, "text": clip(text, 2000)})
-		items, err := query(e.Ctx, e.DB, commentScanner(e, authz.BoardLevel(e, board)), commentSelect+` WHERE c.id=?`, id)
+		items, err := query(e.Ctx, e.DB, commentScanner(e, a.Level), commentSelect+` WHERE c.id=?`, id)
 		if err != nil || len(items) == 0 {
 			return CommentItem{}, err
 		}
@@ -155,6 +159,9 @@ func init() {
 		text := strings.TrimSpace(in.Text)
 		if text == "" {
 			return CommentItem{}, ops.Invalid("text is required")
+		}
+		if len(text) > 1<<20 {
+			return CommentItem{}, ops.Invalid("text too long")
 		}
 		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE comments SET text=?,updated_at=? WHERE id=?`, text, db.Now(), in.ID); err != nil {
 			return CommentItem{}, err

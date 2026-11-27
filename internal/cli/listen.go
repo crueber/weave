@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,7 +130,26 @@ func (a *App) defaultCursorFile(c *listenCfg) string {
 	return filepath.Join(configDir(), "cursors", safeName(a.Cfg.Profile)+"-"+shortHash(a.Cfg.URL+"|"+key)+".cursor")
 }
 
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	if l.w == nil {
+		return len(p), nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
 func (a *App) stderrf(format string, args ...any) {
+	if a.Stderr == nil {
+		return
+	}
+	a.errMu.Lock()
+	defer a.errMu.Unlock()
 	fmt.Fprintf(a.Stderr, "%s "+format+"\n", append([]any{time.Now().Format("15:04:05")}, args...)...)
 }
 
@@ -142,14 +163,7 @@ func (a *App) buildListener(c *listenCfg) *Listener {
 	}
 	l := &Listener{
 		App: a, Boards: c.boards, Lists: append(append([]string{}, c.lists...), c.extraLists...), Types: serverTypes, Since: c.since,
-		CursorFile: c.cursorFile, Heartbeat: c.heartbeat, AgentLabel: c.label,
-	}
-	if c.verbose {
-		l.Log = a.stderrf
-	} else {
-		l.Log = func(f string, args ...any) {
-			a.stderrf(f, args...)
-		}
+		CursorFile: c.cursorFile, Heartbeat: c.heartbeat, AgentLabel: c.label, Log: a.stderrf,
 	}
 	selfID := ""
 	if c.ignoreSelf {
@@ -205,21 +219,31 @@ func (a *App) buildListener(c *listenCfg) *Listener {
 
 // existingEvents returns synthetic card.existing envelopes for cards already in the watched lists.
 func (a *App) existingEvents(ctx context.Context, c *listenCfg) ([]Event, error) {
-	op, err := a.mustOp("card.list")
+	op, err := a.mustOp(ctx, "card.list")
 	if err != nil {
 		return nil, err
 	}
-	var out []Event
-	targets := map[string]string{} // list -> board
+	type listTarget struct{ list, board string }
+	var targets []listTarget
+	seenTarget := map[string]bool{}
 	for _, l := range append(append([]string{}, c.lists...), c.extraLists...) {
-		targets[l] = c.listBoard[l]
+		if !seenTarget[l] {
+			seenTarget[l] = true
+			targets = append(targets, listTarget{list: l, board: c.listBoard[l]})
+		}
 	}
 	if len(c.lists) == 0 { // whole boards
 		for _, b := range c.boards {
-			targets["*"+b] = b
+			k := "*" + b
+			if !seenTarget[k] {
+				seenTarget[k] = true
+				targets = append(targets, listTarget{list: k, board: b})
+			}
 		}
 	}
-	for l, b := range targets {
+	var out []Event
+	for _, tg := range targets {
+		l, b := tg.list, tg.board
 		if b == "" {
 			return nil, usageErr("--include-existing needs --board so cards can be listed")
 		}
@@ -240,7 +264,7 @@ func (a *App) existingEvents(ctx context.Context, c *listenCfg) ([]Event, error)
 			if lid == "" {
 				lid = strings.TrimPrefix(l, "*")
 			}
-			if len(c.lists) > 0 && !contains(c.lists, lid) && !contains(c.extraLists, lid) {
+			if len(c.lists) > 0 && !slices.Contains(c.lists, lid) && !slices.Contains(c.extraLists, lid) {
 				continue
 			}
 			env := map[string]any{"id": "", "type": "card.existing", "boardId": b, "listId": lid, "toListId": lid,
@@ -250,15 +274,6 @@ func (a *App) existingEvents(ctx context.Context, c *listenCfg) ([]Event, error)
 		}
 	}
 	return out, nil
-}
-
-func contains(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // ---- exec ----
@@ -302,6 +317,8 @@ func (a *App) childEnv(ev Event) []string {
 	return env
 }
 
+const maxTailBytes = 8192
+
 type tailBuf struct {
 	mu  sync.Mutex
 	buf []byte
@@ -310,10 +327,22 @@ type tailBuf struct {
 func (t *tailBuf) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.buf = append(t.buf, p...)
-	if len(t.buf) > 8192 {
-		t.buf = t.buf[len(t.buf)-8192:]
+	if len(p) >= maxTailBytes {
+		if cap(t.buf) != maxTailBytes {
+			t.buf = make([]byte, maxTailBytes)
+		} else {
+			t.buf = t.buf[:maxTailBytes]
+		}
+		copy(t.buf, p[len(p)-maxTailBytes:])
+		return len(p), nil
 	}
+	if len(t.buf)+len(p) <= maxTailBytes {
+		t.buf = append(t.buf, p...)
+		return len(p), nil
+	}
+	keep := maxTailBytes - len(p)
+	copy(t.buf, t.buf[len(t.buf)-keep:])
+	t.buf = append(t.buf[:keep], p...)
 	return len(p), nil
 }
 func (t *tailBuf) String() string {
@@ -345,7 +374,7 @@ func (a *App) runChild(ctx context.Context, es execSpec, ev Event, timeout time.
 		cmd.Stdin = bytes.NewReader(append(ev.marshal(), '\n'))
 	}
 	cmd.Stdout = stdout
-	cmd.Stderr = io.MultiWriter(a.Stderr, errTail)
+	cmd.Stderr = io.MultiWriter(&lockedWriter{mu: &a.errMu, w: a.Stderr}, errTail)
 	cmd.WaitDelay = 5 * time.Second
 	err := cmd.Run()
 	if err == nil {
@@ -387,6 +416,56 @@ func cmdWatch(a *App, args []string) int {
 	return a.runListen(p)
 }
 
+type runnerTiming struct {
+	ttl, execTimeout, grace, waitFor time.Duration
+	concurrency                      int
+}
+
+func parseRunnerTiming(p *Parsed, defTTL, defExecTimeout, defGrace time.Duration) (runnerTiming, error) {
+	rt := runnerTiming{ttl: defTTL, execTimeout: defExecTimeout, grace: defGrace, concurrency: 1}
+	var err error
+	if p.Has("ttl") {
+		if rt.ttl, err = parseDur(p.Str("ttl")); err != nil {
+			return rt, err
+		}
+	}
+	if p.Has("exec-timeout") {
+		if rt.execTimeout, err = parseDur(p.Str("exec-timeout")); err != nil {
+			return rt, err
+		}
+	}
+	if p.Has("grace") {
+		if rt.grace, err = parseDur(p.Str("grace")); err != nil {
+			return rt, err
+		}
+	}
+	if p.Has("timeout") {
+		if rt.waitFor, err = parseDur(p.Str("timeout")); err != nil {
+			return rt, err
+		}
+	}
+	if p.Has("concurrency") {
+		n, err := strconv.Atoi(strings.TrimSpace(p.Str("concurrency")))
+		if err != nil || n < 1 {
+			return rt, usageErr("--concurrency needs a positive integer")
+		}
+		rt.concurrency = n
+	}
+	return rt, nil
+}
+
+func (a *App) drainWorkers(wg *sync.WaitGroup, grace time.Duration, execCancel context.CancelFunc) {
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(grace):
+		a.stderrf("grace period over; stopping running commands")
+		execCancel()
+		<-finished
+	}
+}
+
 func (a *App) runListen(p *Parsed) int {
 	parent := a.ctx
 	cfg, err := a.resolveWatch(parent, splitMulti(p.All("board")), splitMulti(p.All("list")))
@@ -401,29 +480,9 @@ func (a *App) runListen(p *Parsed) int {
 	if err := a.fillListenCfg(cfg, p); err != nil {
 		return a.fail(err)
 	}
-	var ttl time.Duration
-	if p.Has("ttl") {
-		if ttl, err = parseDur(p.Str("ttl")); err != nil {
-			return a.fail(err)
-		}
-	}
-	execTimeout, _ := parseDur(p.Str("exec-timeout"))
-	grace := 30 * time.Second
-	if p.Has("grace") {
-		grace, _ = parseDur(p.Str("grace"))
-	}
-	var waitFor time.Duration
-	if p.Has("timeout") {
-		if waitFor, err = parseDur(p.Str("timeout")); err != nil {
-			return a.fail(err)
-		}
-	}
-	conc := 1
-	if p.Has("concurrency") {
-		fmt.Sscan(p.Str("concurrency"), &conc)
-		if conc < 1 {
-			conc = 1
-		}
+	rt, err := parseRunnerTiming(p, 0, 0, 30*time.Second)
+	if err != nil {
+		return a.fail(err)
 	}
 	execCmd := p.Str("exec")
 	onError := p.Str("on-error")
@@ -434,8 +493,8 @@ func (a *App) runListen(p *Parsed) int {
 	l := a.buildListener(cfg)
 	var count atomic.Int64
 	var wg sync.WaitGroup
-	var outMu sync.Mutex
-	sem := make(chan struct{}, conc)
+	sem := make(chan struct{}, rt.concurrency)
+	syncOut := &lockedWriter{mu: &a.outMu, w: a.Stdout}
 	execCtx, execCancel := context.WithCancel(context.Background())
 	defer execCancel()
 	once := p.Bool("once")
@@ -449,7 +508,7 @@ func (a *App) runListen(p *Parsed) int {
 			return
 		}
 		if claim {
-			if a.tryClaim(ctx, &ev, cfg, claimOpts{ttl: ttl, note: p.Str("claim-note"), moveTo: p.Str("claim-move-to")}) != claimYes {
+			if a.tryClaim(ctx, &ev, cfg, claimOpts{ttl: rt.ttl, note: p.Str("claim-note"), moveTo: p.Str("claim-move-to")}) != claimYes {
 				done()
 				return
 			}
@@ -459,9 +518,7 @@ func (a *App) runListen(p *Parsed) int {
 			return
 		}
 		if printEnv {
-			outMu.Lock()
-			fmt.Fprintln(a.Stdout, string(ev.marshal()))
-			outMu.Unlock()
+			_, _ = fmt.Fprintln(syncOut, string(ev.marshal()))
 		}
 		if execCmd == "" {
 			count.Add(1)
@@ -483,7 +540,7 @@ func (a *App) runListen(p *Parsed) int {
 			defer wg.Done()
 			defer func() { <-sem }()
 			tail := &tailBuf{}
-			code, err := a.runChild(execCtx, execSpec{shell: execCmd}, ev, execTimeout, a.Stdout, tail)
+			code, err := a.runChild(execCtx, execSpec{shell: execCmd}, ev, rt.execTimeout, syncOut, tail)
 			if err != nil || code != 0 {
 				msg := fmt.Sprintf("exec failed for %s %s (exit %d)", ev.Type, ev.CardID(), code)
 				if err != nil {
@@ -499,8 +556,8 @@ func (a *App) runListen(p *Parsed) int {
 		}()
 	}
 	var timedOut atomic.Bool
-	if waitFor > 0 {
-		t := time.AfterFunc(waitFor, func() { timedOut.Store(true); stop() })
+	if rt.waitFor > 0 {
+		t := time.AfterFunc(rt.waitFor, func() { timedOut.Store(true); stop() })
 		defer t.Stop()
 	}
 	if cfg.verbose {
@@ -508,21 +565,13 @@ func (a *App) runListen(p *Parsed) int {
 	}
 	err = l.Run(lctx)
 	// graceful drain of in-flight exec children
-	finished := make(chan struct{})
-	go func() { wg.Wait(); close(finished) }()
-	select {
-	case <-finished:
-	case <-time.After(grace):
-		a.stderrf("grace period over; stopping running commands")
-		execCancel()
-		<-finished
-	}
+	a.drainWorkers(&wg, rt.grace, execCancel)
 	if err != nil {
 		return a.fail(err)
 	}
 	if timedOut.Load() && count.Load() == 0 {
 		if isTTY(os.Stderr) {
-			a.stderrf("no matching event within %s", waitFor)
+			a.stderrf("no matching event within %s", rt.waitFor)
 		}
 		return ExitEmpty
 	}
@@ -544,6 +593,9 @@ func (a *App) fillListenCfg(cfg *listenCfg, p *Parsed) error {
 		d, err := parseDur(p.Str("heartbeat"))
 		if err != nil {
 			return err
+		}
+		if d < time.Second {
+			return usageErr("--heartbeat must be at least 1s")
 		}
 		cfg.heartbeat = d
 	}
@@ -629,11 +681,11 @@ func (a *App) tryClaim(ctx context.Context, ev *Event, cfg *listenCfg, o claimOp
 	cur := str(card, "listId")
 	boardID := firstNonEmpty(str(card, "boardId"), ev.BoardID())
 	switch {
-	case contains(cfg.lists, cur):
+	case slices.Contains(cfg.lists, cur):
 		if !a.claimable(ctx, card, true) {
 			return claimNo
 		}
-	case contains(cfg.extraLists, cur) && (ev.Type == "card.released" || ev.Type == "card.existing"):
+	case slices.Contains(cfg.extraLists, cur) && (ev.Type == "card.released" || ev.Type == "card.existing"):
 		// a stranded card: its lease expired in the claim-move-to list, so nothing else would pick it up again
 		if !a.claimable(ctx, card, false) {
 			return claimNo
@@ -709,11 +761,11 @@ func (a *App) listFull(ctx context.Context, boardID, listID string) bool {
 	if lim <= 0 {
 		return false
 	}
-	op, err := a.mustOp("card.list")
+	op, err := a.mustOp(ctx, "card.list")
 	if err != nil {
 		return false
 	}
-	r, err := a.fetchPaged(ctx, op, Params{"boardId": boardID, "listId": listID}, nil, 0, true)
+	r, err := a.fetchPaged(ctx, op, Params{"boardId": boardID, "listId": listID}, nil, lim, true)
 	if err != nil {
 		return false
 	}

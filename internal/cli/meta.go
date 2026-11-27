@@ -14,7 +14,7 @@ import (
 	"github.com/crueber/weave/internal/version"
 )
 
-const helpText = `weave - CLI for the Weave kanban server (built for agents and humans)
+const helpText = `weave - CLI for the Weave project management board server (built for agents and humans)
 
 Connect:
   weave login --url https://weave.example.com --token wk_...   verify and save a profile
@@ -83,8 +83,8 @@ func (a *App) cmdVersion(args []string) int {
 	}
 	item := map[string]any{"client": version.Version, "os": runtime.GOOS, "arch": runtime.GOARCH, "url": a.Cfg.URL}
 	code := 0
-	if p.Bool("check") || p.Bool("server") {
-		cat := a.loadCatalog(a.ctx, false, p.Bool("check"))
+	if p.Bool("check") {
+		cat := a.loadCatalog(a.ctx, false, true)
 		item["schemaSource"] = cat.Source
 		r, err := a.Do(a.ctx, "system.version", nil)
 		if err != nil {
@@ -105,7 +105,9 @@ func (a *App) cmdVersion(args []string) int {
 		fmt.Fprintf(a.Stdout, "weave %s (%s/%s)\n", version.Version, runtime.GOOS, runtime.GOARCH)
 		return 0
 	}
-	_ = a.emit(map[string]any{"item": item}, nil)
+	if err := a.emit(map[string]any{"item": item}, nil); err != nil {
+		return a.fail(err)
+	}
 	return code
 }
 
@@ -293,8 +295,12 @@ func cmdConfig(a *App, args []string) int {
 			fmt.Fprintln(a.Stdout, a.Cfg.Profile)
 		case "token":
 			t := a.Cfg.Token
-			if !p.Bool("show") && len(t) > 6 {
-				t = t[:4] + strings.Repeat("*", 8)
+			if !p.Bool("show") && t != "" {
+				if len(t) > 6 {
+					t = t[:4] + strings.Repeat("*", 8)
+				} else {
+					t = strings.Repeat("*", 8)
+				}
 			}
 			fmt.Fprintln(a.Stdout, t)
 		default:
@@ -323,9 +329,14 @@ func cmdDoctor(a *App, args []string) int {
 	}
 	add("profile", true, fmt.Sprintf("%s -> %s (token %s)", a.Cfg.Profile, a.Cfg.URL, map[bool]string{true: "set", false: "MISSING"}[a.Cfg.Token != ""]), a.Cfg.Token == "")
 	// connectivity + clock
-	hc := &http.Client{Timeout: 8 * time.Second, CheckRedirect: redirectPolicy(a.Cfg.Token != "")}
 	t0 := time.Now()
-	resp, err := hc.Get(strings.TrimRight(a.Cfg.URL, "/") + "/healthz")
+	hctx, hcancel := context.WithTimeout(a.ctx, 8*time.Second)
+	req, err := http.NewRequestWithContext(hctx, "GET", strings.TrimRight(a.Cfg.URL, "/")+"/healthz", nil)
+	var resp *http.Response
+	if err == nil {
+		resp, err = a.httpClient(8 * time.Second).Do(req)
+	}
+	hcancel()
 	if err != nil {
 		add("connectivity", false, err.Error(), false)
 	} else {
@@ -352,7 +363,7 @@ func cmdDoctor(a *App, args []string) int {
 	// version skew + schema source
 	if me != nil {
 		cat := a.loadCatalog(a.ctx, false, true)
-		add("schema", cat.Source != "snapshot" || true, "source: "+cat.Source+fmt.Sprintf(", %d ops", len(cat.All())), cat.Source != "server")
+		add("schema", true, "source: "+cat.Source+fmt.Sprintf(", %d ops", len(cat.All())), cat.Source != "server")
 		if r, err := a.Do(a.ctx, "system.version", nil); err == nil {
 			sv := str(itemOf(r.JSON()), "version")
 			skew := sv != "" && sv != version.Version && version.Version != "dev" && sv != "dev"
@@ -360,14 +371,18 @@ func cmdDoctor(a *App, args []string) int {
 		}
 		// SSE reachable
 		ctx, cancel := context.WithTimeout(a.ctx, 4*time.Second)
-		req, _ := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.Cfg.URL, "/")+"/events?heartbeat=1", nil)
-		req.Header.Set("Authorization", "Bearer "+a.Cfg.Token)
-		if r2, err := (&http.Client{CheckRedirect: redirectPolicy(true)}).Do(req); err != nil {
-			add("events", false, err.Error(), false)
+		req, rerr := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(a.Cfg.URL, "/")+"/events?heartbeat=1", nil)
+		if rerr != nil {
+			add("events", false, rerr.Error(), false)
 		} else {
-			add("events", r2.StatusCode == 200 && strings.HasPrefix(r2.Header.Get("Content-Type"), "text/event-stream"),
-				fmt.Sprintf("GET /events -> %d %s", r2.StatusCode, r2.Header.Get("Content-Type")), false)
-			r2.Body.Close()
+			req.Header.Set("Authorization", "Bearer "+a.Cfg.Token)
+			if r2, err := a.httpClient(0).Do(req); err != nil {
+				add("events", false, err.Error(), false)
+			} else {
+				add("events", r2.StatusCode == 200 && strings.HasPrefix(r2.Header.Get("Content-Type"), "text/event-stream"),
+					fmt.Sprintf("GET /events -> %d %s", r2.StatusCode, r2.Header.Get("Content-Type")), false)
+				r2.Body.Close()
+			}
 		}
 		cancel()
 	}
@@ -378,7 +393,9 @@ func cmdDoctor(a *App, args []string) int {
 		}
 	}
 	if a.Out.Format == "json" && !a.stdoutTTY() || a.Out.JQ != "" || a.Out.Format != "json" {
-		_ = a.emit(map[string]any{"items": checksToAny(checks), "ok": allOK}, nil)
+		if err := a.emit(map[string]any{"items": checksToAny(checks), "ok": allOK}, nil); err != nil {
+			return a.fail(err)
+		}
 	} else {
 		for _, c := range checks {
 			mark := "ok  "

@@ -1,11 +1,10 @@
-{{define "page"}}<div class="cards-fullpage"><p><a href="/boards/{{.Data.Card.BoardID}}">&larr; Back to board</a></p>{{template "cards_modal_body" .}}</div>{{end}}
+{{define "page"}}<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/extras_card.css"><script src="/static/cards_ui.js" defer></script><script src="/static/cards_place.js" defer></script><script src="/static/extras_card.js" defer></script><div class="cards-fullpage"><p><a href="/boards/{{.Data.Card.BoardID}}">&larr; Back to board</a></p>{{template "cards_modal_body" .}}</div>{{end}}
 
 {{/* The card sheet. Layout: top bar (crumb, saved, prev/next, actions, close) / title / status chips,
      then two columns: LEFT main (description, checklists, attachments, discussion) and RIGHT a compact
      properties rail (one labelled row per property, each editing in a small popover). Lazy sections keep
      their hx-get endpoints and ids; popovers are <details class="cards-pop" data-pop="..."> managed by cards_ui.js. */}}
 {{define "cards_modal_body"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}
-<link rel="stylesheet" href="/static/cards_modal.css"><script src="/static/cards_ui.js"></script><script src="/static/cards_place.js"></script>
 <div id="card-modal" class="cards-modal cm" hx-target="#card-modal" hx-swap="outerHTML" data-card="{{$c.ID}}" data-board="{{$c.BoardID}}" data-list-type="{{$o.ListType}}"{{if $edit}} data-can-edit="1"{{end}}{{if $c.IsClosed}} data-closed="1"{{end}}{{if $c.IsDraft}} data-draft="1"{{end}}{{if $c.IsTemplate}} data-template="1"{{end}}{{if $d.Multi}} data-multi="1"{{end}}{{if $d.Caps.CanPlace}} data-can-place="1"{{end}}{{if $d.Others}} data-others="{{$d.Others}}"{{end}} hx-vals='{"board":"{{$c.BoardID}}"}' aria-label="Card: {{$c.Name}}">
   {{/* hx-vals: every request of the sheet (fragments, edits, re-renders) carries the context board as "board"
        (web.Ctx.BoardHint); it is the RESOLVED board (card.get), never the raw ?board= of the request. */}}
@@ -46,7 +45,7 @@
   </header>
 
   <div class="cm-cols">
-    <main class="cm-main" id="cm-main" aria-label="Card content">
+    <div class="cm-main" id="cm-main" role="region" aria-label="Card content">
       {{template "cards_desc" .}}
       <section class="cm-sec" data-section="tasks" aria-label="Checklists"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/tasks" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
       <section class="cm-sec" data-section="attachments" aria-label="Attachments"><div class="cm-sec-body" hx-get="/ui/cards/{{$c.ID}}/attachments" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div></section>
@@ -58,7 +57,7 @@
         </div>
         <div class="cm-disc-body">
           <div role="tabpanel" id="cm-panel-comments" aria-labelledby="cm-tab-comments" data-section="comments" hx-get="/ui/cards/{{$c.ID}}/comments" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
-          <div role="tabpanel" id="cm-panel-activity" aria-labelledby="cm-tab-activity" data-section="activity" hidden hx-get="/ui/cards/{{$c.ID}}/activity" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
+          <div role="tabpanel" id="cm-panel-activity" aria-labelledby="cm-tab-activity" data-section="activity" hidden hx-get="/ui/cards/{{$c.ID}}/activity" hx-trigger="weave:load" hx-target="this" hx-swap="innerHTML"><div class="cards-skel" aria-hidden="true"><i></i><i></i><i></i></div></div>
         </div>
       </section>
       {{if $o.CanComment}}<div class="cm-dock" data-cap="card-comment">
@@ -71,7 +70,7 @@
           </div>
         </form>
       </div>{{end}}
-    </main>
+    </div>
 
     <div class="cm-rail">
     <aside class="cm-props" aria-label="Properties">
@@ -170,7 +169,7 @@
 {{define "cards_boards_live"}}{{$d := .Data}}<div data-boards-live data-board="{{$d.Card.BoardID}}"{{if $d.Multi}} data-multi="1"{{end}}{{if $d.Caps.CanPlace}} data-can-place="1"{{end}}>{{template "cards_crumb_board" .}}{{template "cards_boards_prop" .}}{{template "cards_menu" .}}</div>{{end}}
 
 {{/* one placement: the board name (and "home"), then its column and, for another project, the project */}}
-{{define "cards_board_lines"}}<span class="cm-bsw-t"><span class="cm-bsw-n">{{.BoardName}}</span><span class="cm-bsw-s"><span class="cm-sr">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></span>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{end}}
+{{define "cards_board_lines"}}<span class="cm-bsw-t"><span class="cm-bsw-n">{{.BoardName}}</span><span class="cm-bsw-s"><span class="sr-only">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></span>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{end}}
 
 {{/* properties rail: each property is a labelled row; empty ones collapse to a quiet "+ Add" */}}
 {{define "cards_props"}}{{$d := .Data}}{{$c := $d.Card}}{{$o := $d.Opts}}{{$edit := $o.CanEdit}}{{$r := cards_rec $c.Recurrence}}
@@ -222,7 +221,7 @@
           <label>Every <input name="interval" type="number" min="1" value="{{if $r}}{{$r.Interval}}{{else}}1{{end}}" class="cm-w4">
             <select name="freq">{{range $f := cards_freqs}}<option value="{{$f}}" {{if and $r (eq $r.Freq $f)}}selected{{end}}>{{$f}}</option>{{end}}</select></label>
           <label>Spawn next card when <select name="trigger"><option value="due" {{if and $r (eq $r.Trigger "due")}}selected{{end}}>the due date passes</option><option value="completed" {{if and $r (eq $r.Trigger "completed")}}selected{{end}}>the due date is completed</option></select></label>
-          <label>Weekly on {{range $i, $n := cards_weekdays}}<label class="cards-wd"><input type="checkbox" name="weekdays" value="{{$i}}" {{if and $r (cards_hasint $r.Weekdays $i)}}checked{{end}}>{{$n}}</label>{{end}}</label>
+          <div class="cm-wd-row" role="group" aria-label="Weekly on"><span>Weekly on</span><div>{{range $i, $n := cards_weekdays}}<label class="cards-wd"><input type="checkbox" name="weekdays" value="{{$i}}" {{if and $r (cards_hasint $r.Weekdays $i)}}checked{{end}}>{{$n}}</label>{{end}}</div></div>
           <label>Until <input type="date" name="until" value="{{if $r}}{{cards_date $r.Until}}{{end}}"></label>
           <label>Max occurrences <input type="number" name="count" min="0" value="{{if $r}}{{$r.Count}}{{end}}" class="cm-w5"></label>
           <button class="primary" {{if not $c.DueDate}}disabled title="Set a due date first"{{end}}>Save</button></form>
@@ -259,7 +258,7 @@
    boards, or on one when the caller may add it to another; otherwise an empty placeholder (the live refresh's target). */}}
 {{define "cards_boards_prop"}}{{$d := .Data}}{{$c := $d.Card}}{{if $d.ShowBoards}}<div class="cm-prop cm-prop-top" data-prop="boards" id="cm-boards-prop"><span class="cm-pl" id="cm-pl-boards">Boards</span>
   <div class="cm-pv cm-boardsbox">
-  <ul class="cm-boards" aria-labelledby="cm-pl-boards">{{range $d.Boards}}<li class="cm-board{{if .IsCtx}} is-ctx{{end}}"><span class="cm-board-r"><a href="/boards/{{.BoardID}}"{{if .IsCtx}} aria-current="true"{{end}} title="Open {{.BoardName}}">{{.BoardName}}</a>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{if .CanRemove}}<button type="button" class="cm-board-x" data-cap="card-remove-from-board" data-unplace="{{.BoardID}}" data-board-name="{{.BoardName}}" aria-label="Remove from {{.BoardName}}" title="Remove from {{.BoardName}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>{{end}}</span><span class="cm-bsw-s"><span class="cm-sr">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></li>{{end}}</ul>
+  <ul class="cm-boards" aria-labelledby="cm-pl-boards">{{range $d.Boards}}<li class="cm-board{{if .IsCtx}} is-ctx{{end}}"><span class="cm-board-r"><a href="/boards/{{.BoardID}}"{{if .IsCtx}} aria-current="true"{{end}} title="Open {{.BoardName}}">{{.BoardName}}</a>{{if .IsHome}}<span class="cm-home">home</span>{{end}}{{if .CanRemove}}<button type="button" class="cm-board-x" data-cap="card-remove-from-board" data-unplace="{{.BoardID}}" data-board-name="{{.BoardName}}" aria-label="Remove from {{.BoardName}}" title="Remove from {{.BoardName}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>{{end}}</span><span class="cm-bsw-s"><span class="sr-only">in column </span>{{.ListName}}{{if .ShowProject}} &middot; {{.ProjectName}}{{end}}</span></li>{{end}}</ul>
   {{if $d.Caps.CanPlace}}<span class="cm-board-addrow"><button type="button" class="cm-board-add" data-cap="card-add-to-board" data-place-open aria-haspopup="dialog" title="Add to another board (b)"><b aria-hidden="true">+</b> Add to board&hellip;</button>{{if not $d.Multi}}{{template "help_tip" dict "ID" (printf "cm-help-everywhere-%s" $c.ID) "Text" "Archive or delete the card to remove it everywhere."}}{{end}}</span>{{else if not $d.Multi}}{{template "help_tip" dict "ID" (printf "cm-help-everywhere-%s" $c.ID) "Text" "Archive or delete the card to remove it everywhere."}}{{end}}
   </div></div>{{else}}<div id="cm-boards-prop" hidden></div>{{end}}{{end}}
 
@@ -296,7 +295,7 @@
 
 {{define "cards_desc"}}{{$d := .Data}}{{$c := $d.Card}}
 <section id="card-desc" class="cm-desc" aria-labelledby="cm-desc-h" hx-target="#card-desc" hx-swap="outerHTML"
-  {{if eq $d.DescMode "view"}}hx-get="/ui/cards/{{$c.ID}}/editing" hx-trigger="sse:card.editing, every 15s"{{end}}>
+  {{if eq $d.DescMode "view"}}hx-get="/ui/cards/{{$c.ID}}/editing" hx-trigger="weave:editing, every 15s"{{end}}>
   <div class="cm-sec-head"><h3 id="cm-desc-h">Description</h3>{{if and $d.Opts.CanEdit (eq $d.DescMode "view") $c.Description}}<button type="button" class="cm-ghost" data-desc-edit hx-post="/ui/cards/{{$c.ID}}/editing/touch" hx-vals='{"field":"description"}' title="Edit description (e)">Edit</button>{{end}}</div>
   {{if eq $d.DescMode "edit"}}
     <form hx-post="/ui/cards/{{$c.ID}}/update" class="cards-editor cm-editor"><input type="hidden" name="_part" value="desc">

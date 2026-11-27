@@ -8,6 +8,7 @@
 //	RecordAction(e *ops.Env, ev ops.Event) (id string, err error)
 //	    Writes the activity (actions) row for ev. Called by notify's ops.EmitHook.
 //	CardBadges(e *ops.Env, cardIDs []string) (map[string]Badges, error)
+//	CardBadgesOn(e *ops.Env, boardID string, cardIDs []string) (map[string]Badges, error)
 //	    Face-of-card summary: task/attachment/comment counts, tracked time, task lists
 //	    and custom-field values flagged "show on front of card". No permission check.
 //	events.TaskCounts (installed in init)

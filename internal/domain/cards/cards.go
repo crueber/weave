@@ -120,9 +120,17 @@ func loadCardOn(e *ops.Env, q querier, id, boardID string) (Card, error) {
 		}
 	}
 	c.LabelIDs, c.MemberIDs = []string{}, []string{}
-	c.LabelIDs = strs(e, q, `SELECT cl.label_id FROM card_labels cl JOIN labels l ON l.id=cl.label_id
-		WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY cl.label_id`, id, c.BoardID)
-	c.MemberIDs = strs(e, q, `SELECT user_id FROM card_memberships WHERE card_id=?`, id)
+	if labels, err := strs(e, q, `SELECT cl.label_id FROM card_labels cl JOIN labels l ON l.id=cl.label_id
+		WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY cl.label_id`, id, c.BoardID); err != nil {
+		return c, err
+	} else {
+		c.LabelIDs = labels
+	}
+	if members, err := strs(e, q, `SELECT user_id FROM card_memberships WHERE card_id=?`, id); err != nil {
+		return c, err
+	} else {
+		c.MemberIDs = members
+	}
 	if e.User != nil {
 		var muted bool // a muted row is "not watching" (see muteCard)
 		if q.QueryRowContext(e.Ctx, `SELECT muted FROM card_subscriptions WHERE card_id=? AND user_id=?`, id, e.User.UserID).Scan(&muted) == nil {
@@ -130,6 +138,139 @@ func loadCardOn(e *ops.Env, q querier, id, boardID string) (Card, error) {
 		}
 	}
 	return c, nil
+}
+
+const cardBatchSize = 400
+
+func inPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return "?" + strings.Repeat(",?", n-1)
+}
+
+// loadCardsOn batch-loads cards as seen on boardID ("" = each card's home board) in chunks of 400
+// (at most 4 queries per chunk), preserving the input order and skipping missing ids.
+func loadCardsOn(e *ops.Env, q querier, boardID string, ids []string) ([]Card, error) {
+	if len(ids) == 0 {
+		return []Card{}, nil
+	}
+	byID := make(map[string]*Card, len(ids))
+	now := db.Now()
+	for start := 0; start < len(ids); start += cardBatchSize {
+		chunk := ids[start:min(start+cardBatchSize, len(ids))]
+		ph := inPlaceholders(len(chunk))
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		pargs := append([]any{boardID}, args...)
+		rows, err := q.QueryContext(e.Ctx, `SELECT `+cardCols+`,u.name FROM cards c
+			JOIN card_placements p ON p.card_id=c.id AND (p.board_id=?1 OR (?1='' AND p.is_home=1))
+			LEFT JOIN users u ON u.id=c.claimed_by
+			WHERE c.id IN (`+ph+`)`, pargs...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var c Card
+			var byName sql.NullString
+			if err := rows.Scan(&c.ID, &c.BoardID, &c.ListID, &c.CreatorUserID,
+				&c.PrevListID, &c.CoverAttachmentID, &c.Position, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.CommentsTotal,
+				&c.IsClosed, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
+				&c.CreatedAt, &c.UpdatedAt, &c.TemplateProjectID, &c.ClaimedBy, &c.ClaimedUntil, &c.ClaimNote, &byName); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if c.ClaimedBy != nil && (c.ClaimedUntil == nil || *c.ClaimedUntil < now) {
+				c.ClaimedBy, c.ClaimedUntil, c.ClaimNote = nil, nil, nil
+			} else if c.ClaimedBy != nil && byName.Valid {
+				n := byName.String
+				c.ClaimedByName = &n
+			}
+			c.LabelIDs, c.MemberIDs = []string{}, []string{}
+			byID[c.ID] = &c
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+
+		lrows, err := q.QueryContext(e.Ctx, `SELECT cl.card_id,cl.label_id FROM card_labels cl
+			JOIN labels l ON l.id=cl.label_id
+			JOIN card_placements p ON p.card_id=cl.card_id AND (p.board_id=?1 OR (?1='' AND p.is_home=1))
+			WHERE cl.card_id IN (`+ph+`) AND `+db.LabelOnBoard("l", "p.board_id")+` ORDER BY cl.label_id`, pargs...)
+		if err != nil {
+			return nil, err
+		}
+		for lrows.Next() {
+			var cid, lid string
+			if err := lrows.Scan(&cid, &lid); err != nil {
+				lrows.Close()
+				return nil, err
+			}
+			if c := byID[cid]; c != nil {
+				c.LabelIDs = append(c.LabelIDs, lid)
+			}
+		}
+		if err := lrows.Err(); err != nil {
+			lrows.Close()
+			return nil, err
+		}
+		lrows.Close()
+
+		mrows, err := q.QueryContext(e.Ctx, `SELECT card_id,user_id FROM card_memberships WHERE card_id IN (`+ph+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for mrows.Next() {
+			var cid, uid string
+			if err := mrows.Scan(&cid, &uid); err != nil {
+				mrows.Close()
+				return nil, err
+			}
+			if c := byID[cid]; c != nil {
+				c.MemberIDs = append(c.MemberIDs, uid)
+			}
+		}
+		if err := mrows.Err(); err != nil {
+			mrows.Close()
+			return nil, err
+		}
+		mrows.Close()
+
+		if e.User != nil {
+			sargs := append([]any{e.User.UserID}, args...)
+			srows, err := q.QueryContext(e.Ctx, `SELECT card_id,muted FROM card_subscriptions WHERE user_id=? AND card_id IN (`+ph+`)`, sargs...)
+			if err != nil {
+				return nil, err
+			}
+			for srows.Next() {
+				var cid string
+				var muted bool
+				if err := srows.Scan(&cid, &muted); err != nil {
+					srows.Close()
+					return nil, err
+				}
+				if c := byID[cid]; c != nil {
+					c.IsSubscribed = !muted
+				}
+			}
+			if err := srows.Err(); err != nil {
+				srows.Close()
+				return nil, err
+			}
+			srows.Close()
+		}
+	}
+	out := make([]Card, 0, len(ids))
+	for _, id := range ids {
+		if c := byID[id]; c != nil {
+			out = append(out, *c)
+		}
+	}
+	return out, nil
 }
 
 // placementsFor lists the placements of a card the caller can view (a.Boards; hidden ones are never named),
@@ -155,20 +296,21 @@ func placementsFor(e *ops.Env, a authz.CardAccess) []Placement {
 	return out
 }
 
-func strs(e *ops.Env, q querier, query string, args ...any) []string {
+func strs(e *ops.Env, q querier, query string, args ...any) ([]string, error) {
 	out := []string{}
 	rows, err := q.QueryContext(e.Ctx, query, args...)
 	if err != nil {
-		return out
+		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var s string
-		if rows.Scan(&s) == nil {
-			out = append(out, s)
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
 		}
+		out = append(out, s)
 	}
-	return out
+	return out, rows.Err()
 }
 
 // emit writes activity/notifications via ops.Emit and always publishes realtime.
@@ -320,9 +462,10 @@ func positionFor(ctx context.Context, q querier, listID, selfID, afterID, before
 			}
 			_ = q.QueryRowContext(ctx, `SELECT MAX(position) FROM card_placements WHERE list_id=? AND position<? AND card_id<>?`, listID, p.Float64, selfID).Scan(&o)
 			if !o.Valid {
-				return p.Float64 / 2, nil
-			}
-			if p.Float64-o.Float64 >= 1 {
+				if p.Float64 >= 2 {
+					return p.Float64 / 2, nil
+				}
+			} else if p.Float64-o.Float64 >= 1 {
 				return (p.Float64 + o.Float64) / 2, nil
 			}
 		default:
@@ -342,12 +485,13 @@ func boardProject(ctx context.Context, q querier, boardID string) (project strin
 	return
 }
 
-// boardMemberIDs lists users with a direct or group membership on the board.
+// boardMemberIDs lists users with a direct, group, or project-manager membership on the board.
 func boardMemberIDs(ctx context.Context, q querier, boardID string) map[string]bool {
 	out := map[string]bool{}
 	rows, err := q.QueryContext(ctx, `SELECT u.id FROM users u WHERE u.deleted_at IS NULL AND u.is_deactivated=0 AND (
-		u.id IN (SELECT user_id FROM board_memberships WHERE board_id=? AND user_id IS NOT NULL) OR
-		u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?))`, boardID, boardID)
+		u.id IN (SELECT user_id FROM board_memberships WHERE board_id=?1 AND user_id IS NOT NULL) OR
+		u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1) OR
+		u.id IN (SELECT pm.user_id FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id WHERE b.id=?1))`, boardID)
 	if err != nil {
 		return out
 	}
@@ -367,8 +511,9 @@ const labelsOfBoard = `SELECT l.id,COALESCE(l.name,''),l.color,COALESCE(l.group_
 
 func labelAllowed(ctx context.Context, q querier, boardID, labelID string) bool {
 	var n int
-	_ = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM labels l WHERE l.id=? AND (l.board_id=? OR (l.project_id=? AND (SELECT use_project_labels FROM projects WHERE id=?)=1))`,
-		labelID, boardID, boardProject(ctx, q, boardID), boardProject(ctx, q, boardID)).Scan(&n)
+	_ = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM labels l JOIN boards b ON b.id=?2 LEFT JOIN projects p ON p.id=b.project_id
+		WHERE l.id=?1 AND (l.board_id=b.id OR (l.project_id=b.project_id AND p.use_project_labels=1))`,
+		labelID, boardID).Scan(&n)
 	return n > 0
 }
 

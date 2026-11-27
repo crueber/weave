@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -268,8 +269,9 @@ func prepareArchiveBulkForm(c *web.Ctx) error {
 	if strings.HasPrefix(c.R.Header.Get("Content-Type"), "application/json") {
 		return nil
 	}
+	c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
 	if err := c.R.ParseForm(); err != nil {
-		return err
+		return ops.Invalid("invalid form data")
 	}
 	if c.R.Form.Get("kind") == "" {
 		kind := archiveKindOf(c.R.URL.Query())

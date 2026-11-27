@@ -51,7 +51,7 @@ type bucket struct {
 
 func envNum(k string, def float64) float64 {
 	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && !math.IsInf(f, 0) {
 			return f
 		}
 		fmt.Println(k+": invalid value", v, "- using", def)
@@ -102,7 +102,11 @@ func (l *limits) take(key string, rate, burst float64) (bool, time.Duration) {
 		b = &bucket{tokens: burst, last: now}
 		l.buckets[key] = b
 	}
-	b.tokens = math.Min(burst, b.tokens+now.Sub(b.last).Seconds()*rate)
+	dt := now.Sub(b.last).Seconds()
+	if dt < 0 {
+		dt = 0
+	}
+	b.tokens = math.Min(burst, b.tokens+dt*rate)
 	b.last = now
 	if b.tokens >= 1 {
 		b.tokens--
@@ -114,7 +118,8 @@ func (l *limits) take(key string, rate, burst float64) (bool, time.Duration) {
 func (l *limits) clientIP(r *http.Request) string {
 	if l.trustProxy {
 		if f := r.Header.Get("X-Forwarded-For"); f != "" {
-			return strings.TrimSpace(strings.Split(f, ",")[0])
+			first, _, _ := strings.Cut(f, ",")
+			return strings.TrimSpace(first)
 		}
 	}
 	h, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -125,17 +130,20 @@ func (l *limits) clientIP(r *http.Request) string {
 }
 
 // principalKey identifies the caller without a database lookup: a hash of the presented
-// credential (API key or session cookie) or, for anonymous callers, the client IP. Requests that
-// present a credential are additionally counted against their IP (see throttle) so inventing
-// credentials cannot dodge the limit.
+// credential (API key or session cookie, same precedence as auth.requestToken) or, for
+// anonymous callers, the client IP. Requests that present a credential are additionally
+// counted against their IP (see throttle) so inventing credentials cannot dodge the limit.
 func (l *limits) principalKey(r *http.Request) (key string, authed bool) {
 	cred := ""
-	if a := r.Header.Get("Authorization"); a != "" {
-		cred = a
-	} else if k := r.Header.Get("X-API-Key"); k != "" {
+	if k := r.Header.Get("X-API-Key"); k != "" {
 		cred = k
-	} else if c, err := r.Cookie("weave_session"); err == nil && c.Value != "" {
-		cred = c.Value
+	} else if a := r.Header.Get("Authorization"); len(a) > 7 && strings.EqualFold(a[:7], "bearer ") {
+		cred = strings.TrimSpace(a[7:])
+	}
+	if cred == "" {
+		if c, err := r.Cookie("weave_session"); err == nil && c.Value != "" {
+			cred = c.Value
+		}
 	}
 	if cred == "" {
 		return "ip:" + l.clientIP(r), false
@@ -194,7 +202,13 @@ func (s *Server) throttle(next http.Handler) http.Handler {
 			return
 		}
 		key, authed := l.principalKey(r)
-		ip := l.clientIP(r)
+		class := classify(r)
+		var ip string
+		if !authed {
+			ip = strings.TrimPrefix(key, "ip:")
+		} else if l.ipRate > 0 || class == classLogin {
+			ip = l.clientIP(r)
+		}
 		check := func(k string, rate, burst float64) bool {
 			if rate <= 0 {
 				return true
@@ -208,10 +222,10 @@ func (s *Server) throttle(next http.Handler) http.Handler {
 		if !check(key, l.rate, l.burst) {
 			return
 		}
-		if authed && l.ipRate > 0 && !check("ip:"+ip, l.ipRate, l.ipRate*10) { // optional backstop against invented credentials from one address
+		if authed && l.ipRate > 0 && !check("ip:"+ip, l.ipRate, math.Max(1, l.ipRate*10)) { // optional backstop against invented credentials from one address
 			return
 		}
-		switch classify(r) {
+		switch class {
 		case classSearch:
 			if !check("search:"+key, l.search.perMinute/60, l.search.burst) {
 				return

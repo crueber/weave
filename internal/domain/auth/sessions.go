@@ -114,7 +114,7 @@ func init() {
 	ops.Register(ops.Op{Name: "auth.logout", Summary: "End the current session", Method: "POST", Path: "/auth/logout", Auth: ops.AuthPublic, UI: "POST /logout"},
 		func(e *ops.Env, _ NoInput) (OKOut, error) {
 			if e.Req != nil {
-				if tok, explicit := requestToken(e.Req); tok != "" && !explicit {
+				if tok, src := requestToken(e.Req); tok != "" && src != credAPIKey {
 					_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM sessions WHERE token_hash=?`, sha(tok))
 				}
 			}
@@ -143,12 +143,28 @@ func init() {
 			}
 			sig := in.Signature
 			if in.PendingToken != "" {
-				sid, uid, pterms, err := pendingSession(e, in.PendingToken)
-				if err != nil || !pterms {
-					return LoginOut{}, &ops.Error{Status: 401, Code: "unauthorized", Msg: "login expired; start again"}
+				var uid string
+				err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+					sid, u, pterms, err := pendingSession(e, tx, in.PendingToken)
+					if err != nil || !pterms {
+						return &ops.Error{Status: 401, Code: "unauthorized", Msg: "login expired; start again"}
+					}
+					res, err := tx.ExecContext(e.Ctx, `DELETE FROM sessions WHERE id=? AND pending_terms=1`, sid)
+					if err != nil {
+						return err
+					}
+					if n, _ := res.RowsAffected(); n != 1 {
+						return &ops.Error{Status: 401, Code: "unauthorized", Msg: "login expired; start again"}
+					}
+					if _, err := tx.ExecContext(e.Ctx, `UPDATE users SET terms_accepted_at=?,terms_signature=? WHERE id=?`, db.Now(), sig, u); err != nil {
+						return err
+					}
+					uid = u
+					return nil
+				})
+				if err != nil {
+					return LoginOut{}, err
 				}
-				_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET terms_accepted_at=?,terms_signature=? WHERE id=?`, db.Now(), sig, uid)
-				_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM sessions WHERE id=?`, sid)
 				return newSession(e, uid, false)
 			}
 			if e.User == nil {
@@ -199,11 +215,11 @@ func init() {
 }
 
 // pendingSession validates a pending-terms token and returns the session id and user id.
-func pendingSession(e *ops.Env, tok string) (sid, uid string, pendingTerms bool, err error) {
+func pendingSession(e *ops.Env, q rowQueryer, tok string) (sid, uid string, pendingTerms bool, err error) {
 	if tok == "" {
 		return "", "", false, ops.Unauthorized()
 	}
-	err = e.DB.QueryRowContext(e.Ctx, `SELECT s.id,s.user_id,s.pending_terms FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.token_hash=? AND s.pending_terms=1 AND s.expires_at>? AND u.is_deactivated=0`, sha(tok), db.Now()).Scan(&sid, &uid, &pendingTerms)
+	err = q.QueryRowContext(e.Ctx, `SELECT s.id,s.user_id,s.pending_terms FROM sessions s JOIN users u ON u.id=s.user_id
+		WHERE s.token_hash=? AND s.pending_terms=1 AND s.expires_at>? AND u.is_deactivated=0 AND u.deleted_at IS NULL AND u.is_agent=0`, sha(tok), db.Now()).Scan(&sid, &uid, &pendingTerms)
 	return
 }

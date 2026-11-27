@@ -6,30 +6,45 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
+var (
+	inboxFlags       = []FlagSpec{{Name: "assigned", Bool: true}, {Name: "claimed", Bool: true}}
+	listStatsFlags   = []FlagSpec{{Name: "list"}}
+	cardShowFlags    = []FlagSpec{{Name: "full", Bool: true}}
+	cardMoveFlags    = []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}, {Name: "boardId"}}
+	cardCommentFlags = []FlagSpec{{Name: "board"}, {Name: "text"}}
+	cardAttachFlags  = []FlagSpec{{Name: "name"}, {Name: "board"}}
+	cardClaimFlags   = []FlagSpec{{Name: "ttl"}, {Name: "note"}, {Name: "list"}, {Name: "board"}}
+	cardReleaseFlags = []FlagSpec{{Name: "note"}, {Name: "board"}}
+	cardRenewFlags   = []FlagSpec{{Name: "ttl"}, {Name: "board"}}
+	cardDoneFlags    = []FlagSpec{{Name: "note"}, {Name: "to-list", Aliases: []string{"list"}}, {Name: "board"}, {Name: "keep-claim", Bool: true}}
+	taskAddFlags     = []FlagSpec{{Name: "list"}, {Name: "assignee"}, {Name: "board"}}
+	taskCheckFlags   = []FlagSpec{{Name: "card"}, {Name: "text"}, {Name: "n"}, {Name: "board"}}
+	taskListFlags    = []FlagSpec{{Name: "board"}}
+)
+
 func init() {
 	registerSpec("next", nextFlags, cmdNext)
-	registerSpec("inbox", []FlagSpec{{Name: "assigned", Bool: true}, {Name: "claimed", Bool: true}}, cmdInbox)
+	registerSpec("inbox", inboxFlags, cmdInbox)
 	registerSpec("board tree", boardTreeFlags, cmdBoardTree)
-	registerSpec("list stats", []FlagSpec{{Name: "list"}}, cmdListStats)
-	registerSpec("card show", []FlagSpec{{Name: "full", Bool: true}}, cmdCardShow)
-	registerSpec("card move", []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}, {Name: "boardId"}}, cmdCardMove)
-	registerSpec("card comment", []FlagSpec{{Name: "board"}}, cmdCardComment)
-	registerSpec("card attach", []FlagSpec{{Name: "name"}, {Name: "board"}}, cmdCardAttach)
-	registerSpec("card claim", []FlagSpec{{Name: "ttl"}, {Name: "note"}, {Name: "list"}, {Name: "board"}}, cmdCardClaim)
-	registerSpec("card release", []FlagSpec{{Name: "note"}, {Name: "board"}}, cmdCardRelease)
-	registerSpec("card renew", []FlagSpec{{Name: "ttl"}, {Name: "board"}}, cmdCardRenew)
-	registerSpec("card done", []FlagSpec{{Name: "note"}, {Name: "to-list", Aliases: []string{"list"}}, {Name: "board"}, {Name: "keep-claim", Bool: true}}, cmdCardDone)
+	registerSpec("list stats", listStatsFlags, cmdListStats)
+	registerSpec("card show", cardShowFlags, cmdCardShow)
+	registerSpec("card move", cardMoveFlags, cmdCardMove)
+	registerSpec("card comment", cardCommentFlags, cmdCardComment)
+	registerSpec("card attach", cardAttachFlags, cmdCardAttach)
+	registerSpec("card claim", cardClaimFlags, cmdCardClaim)
+	registerSpec("card release", cardReleaseFlags, cmdCardRelease)
+	registerSpec("card renew", cardRenewFlags, cmdCardRenew)
+	registerSpec("card done", cardDoneFlags, cmdCardDone)
 	registerSpec("card create", cardCreateFlags, cmdCardCreate)
-	registerSpec("task add", []FlagSpec{{Name: "list"}, {Name: "assignee"}, {Name: "board"}}, cmdTaskAdd)
-	registerSpec("task check", []FlagSpec{{Name: "card"}, {Name: "text"}, {Name: "n"}, {Name: "board"}}, func(a *App, args []string) int { return a.taskCheck(args, true) })
-	registerSpec("task uncheck", []FlagSpec{{Name: "card"}, {Name: "text"}, {Name: "n"}, {Name: "board"}}, func(a *App, args []string) int { return a.taskCheck(args, false) })
-	registerSpec("task list", []FlagSpec{{Name: "board"}}, cmdTaskList)
+	registerSpec("task add", taskAddFlags, cmdTaskAdd)
+	registerSpec("task check", taskCheckFlags, func(a *App, args []string) int { return a.taskCheck(args, true) })
+	registerSpec("task uncheck", taskCheckFlags, func(a *App, args []string) int { return a.taskCheck(args, false) })
+	registerSpec("task list", taskListFlags, cmdTaskList)
 }
 
 // ---- shared helpers ----
@@ -48,6 +63,19 @@ func (a *App) cardRef(ctx context.Context, ref, boardID string) (string, error) 
 		return "", usageErr("missing card id")
 	}
 	return a.Resolve(ctx, "card", ref, Scope{BoardID: boardID})
+}
+
+// resolveCardArg resolves the board context from flags/env and the card argument in one step.
+func (a *App) resolveCardArg(ctx context.Context, p *Parsed, ref string) (cardID, boardID string, err error) {
+	boardID, err = a.boardFromFlags(ctx, p)
+	if err != nil {
+		return "", "", err
+	}
+	cardID, err = a.cardRef(ctx, ref, boardID)
+	if err != nil {
+		return "", "", err
+	}
+	return cardID, boardID, nil
 }
 
 // boardOfCard finds the board a card is on (card.get boardId).
@@ -139,10 +167,19 @@ func cmdNext(a *App, args []string) int {
 		}
 		return pr, nil
 	}
-	wait, _ := parseDur(p.Str("wait"))
+	wait, err := parseDur(p.Str("wait"))
+	if err != nil {
+		return a.fail(err)
+	}
 	interval := 3 * time.Second
 	if p.Has("interval") {
-		interval, _ = parseDur(p.Str("interval"))
+		interval, err = parseDur(p.Str("interval"))
+		if err != nil {
+			return a.fail(err)
+		}
+		if interval <= 0 {
+			return a.failUsage("--interval must be positive")
+		}
 	}
 	deadline := time.Now().Add(wait)
 	for {
@@ -190,7 +227,7 @@ func cmdNext(a *App, args []string) int {
 // ---- inbox ----
 
 func cmdInbox(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "assigned", Bool: true}, {Name: "claimed", Bool: true}})
+	p, err := a.parse(args, inboxFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -200,7 +237,11 @@ func cmdInbox(a *App, args []string) int {
 		return a.fail(err)
 	}
 	boards := me.Boards
-	if bid, _ := a.boardFromFlags(ctx, p); bid != "" {
+	bid, err := a.boardFromFlags(ctx, p)
+	if err != nil {
+		return a.fail(err)
+	}
+	if bid != "" {
 		boards = []Candidate{{ID: bid}}
 	}
 	if len(boards) == 0 {
@@ -218,7 +259,7 @@ func cmdInbox(a *App, args []string) int {
 		}
 	}
 	wantAssigned, wantClaimed := p.Bool("assigned") || !p.Bool("claimed"), p.Bool("claimed") || !p.Bool("assigned")
-	op, err := a.mustOp("card.list")
+	op, err := a.mustOp(ctx, "card.list")
 	if err != nil {
 		return a.fail(err)
 	}
@@ -259,9 +300,6 @@ func cmdInbox(a *App, args []string) int {
 			}
 			assigned, claimed := cardHasMember(c, me.ID) || c["assigned"] == true, firstStr(c, "claimedBy") == me.ID
 			if (wantAssigned && assigned) || (wantClaimed && claimed) {
-				if seen[str(c, "id")] {
-					continue
-				}
 				seen[str(c, "id")] = true
 				c["boardId"] = firstNonEmpty(str(c, "boardId"), b.ID)
 				if b.Name != "" {
@@ -400,7 +438,7 @@ func (a *App) boardTree(ctx context.Context, boardID string, extra ...Params) (m
 	if err != nil {
 		return nil, err
 	}
-	op, err := a.mustOp("card.list")
+	op, err := a.mustOp(ctx, "card.list")
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +497,7 @@ func printTree(a *App, tree map[string]any) {
 }
 
 func cmdListStats(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "list"}})
+	p, err := a.parse(args, listStatsFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -518,7 +556,7 @@ func cmdListStats(a *App, args []string) int {
 // ---- card shortcuts ----
 
 func cmdCardShow(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "full", Bool: true}})
+	p, err := a.parse(args, cardShowFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -526,11 +564,7 @@ func cmdCardShow(a *App, args []string) int {
 		return a.failUsage("weave card show CARD [--full] [--board B]")
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
-	if err != nil {
-		return a.fail(err)
-	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -563,7 +597,7 @@ func cmdCardShow(a *App, args []string) int {
 }
 
 func cmdCardMove(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "to-list", Aliases: []string{"list", "listId"}}, {Name: "position"}, {Name: "board"}, {Name: "boardId"}})
+	p, err := a.parse(args, cardMoveFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -571,11 +605,7 @@ func cmdCardMove(a *App, args []string) int {
 		return a.failUsage("weave card move CARD --to-list NAME [--board B] [--boardId FROM] [--position N]")
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
-	if err != nil {
-		return a.fail(err)
-	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, bid, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -620,7 +650,7 @@ func (a *App) commentText(p *Parsed, from int) (string, error) {
 }
 
 func cmdCardComment(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "board"}, {Name: "text"}})
+	p, err := a.parse(args, cardCommentFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -628,11 +658,7 @@ func cmdCardComment(a *App, args []string) int {
 		return a.failUsage(`weave card comment CARD "text"   |   ... | weave card comment CARD --stdin`)
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
-	if err != nil {
-		return a.fail(err)
-	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -651,7 +677,7 @@ func cmdCardComment(a *App, args []string) int {
 }
 
 func cmdCardAttach(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "name"}, {Name: "board"}})
+	p, err := a.parse(args, cardAttachFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -659,15 +685,11 @@ func cmdCardAttach(a *App, args []string) int {
 		return a.failUsage("weave card attach CARD FILE [FILE...] [--name NAME]")
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
+	id, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
-	if err != nil {
-		return a.fail(err)
-	}
-	op, err := a.mustOp("attachment.create")
+	op, err := a.mustOp(ctx, "attachment.create")
 	if err != nil {
 		return a.fail(err)
 	}
@@ -690,7 +712,7 @@ func cmdCardAttach(a *App, args []string) int {
 }
 
 func cmdCardClaim(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "ttl"}, {Name: "note"}, {Name: "list"}, {Name: "board"}})
+	p, err := a.parse(args, cardClaimFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -698,11 +720,7 @@ func cmdCardClaim(a *App, args []string) int {
 		return a.failUsage("weave card claim CARD [--ttl 15m] [--note TEXT] [--list NAME]  (exit 7 if already claimed)")
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
-	if err != nil {
-		return a.fail(err)
-	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, bid, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -731,7 +749,7 @@ func cmdCardClaim(a *App, args []string) int {
 }
 
 func cmdCardRelease(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "note"}, {Name: "board"}})
+	p, err := a.parse(args, cardReleaseFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -739,8 +757,7 @@ func cmdCardRelease(a *App, args []string) int {
 		return a.failUsage("weave card release CARD [--note TEXT]")
 	}
 	ctx := a.ctx
-	bid, _ := a.boardFromFlags(ctx, p)
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -756,7 +773,7 @@ func cmdCardRelease(a *App, args []string) int {
 }
 
 func cmdCardRenew(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "ttl"}, {Name: "board"}})
+	p, err := a.parse(args, cardRenewFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -764,8 +781,7 @@ func cmdCardRenew(a *App, args []string) int {
 		return a.failUsage("weave card renew CARD [--ttl 15m]")
 	}
 	ctx := a.ctx
-	bid, _ := a.boardFromFlags(ctx, p)
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -784,7 +800,7 @@ func cmdCardRenew(a *App, args []string) int {
 
 // card done: comment the result, move to the done list, release the claim.
 func cmdCardDone(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "note"}, {Name: "to-list", Aliases: []string{"list"}}, {Name: "board"}, {Name: "keep-claim", Bool: true}})
+	p, err := a.parse(args, cardDoneFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -792,11 +808,7 @@ func cmdCardDone(a *App, args []string) int {
 		return a.failUsage("weave card done CARD [--note TEXT] [--to-list NAME] [--keep-claim]")
 	}
 	ctx := a.ctx
-	bid, err := a.boardFromFlags(ctx, p)
-	if err != nil {
-		return a.fail(err)
-	}
-	id, err := a.cardRef(ctx, p.Pos[0], bid)
+	id, bid, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -918,6 +930,9 @@ func cmdCardCreate(a *App, args []string) int {
 			}
 			specs = append(specs, s)
 		}
+		if err := sc.Err(); err != nil {
+			return a.failUsage("reading stdin: " + err.Error())
+		}
 	} else {
 		if base.Name == "" {
 			return a.failUsage(`weave card create --board B --list L --name "Title" [--desc TEXT|@file] [--label X ...] [--assign USER ...] [--due RFC3339] [--from-stdin]`)
@@ -1002,7 +1017,7 @@ func (a *App) createCard(ctx context.Context, boardID string, s cardSpec, claim 
 // ---- tasks (checklists) ----
 
 func cmdTaskAdd(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "list"}, {Name: "assignee"}, {Name: "board"}})
+	p, err := a.parse(args, taskAddFlags)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -1010,8 +1025,7 @@ func cmdTaskAdd(a *App, args []string) int {
 		return a.failUsage(`weave task add CARD "text" [--list CHECKLIST-NAME]   (creates the checklist if the card has none)`)
 	}
 	ctx := a.ctx
-	bid, _ := a.boardFromFlags(ctx, p)
-	cid, err := a.cardRef(ctx, p.Pos[0], bid)
+	cid, _, err := a.resolveCardArg(ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -1079,15 +1093,14 @@ func (a *App) tasksOf(ctx context.Context, cardID string) ([]map[string]any, err
 }
 
 func cmdTaskList(a *App, args []string) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "board"}})
+	p, err := a.parse(args, taskListFlags)
 	if err != nil {
 		return a.fail(err)
 	}
 	if len(p.Pos) < 1 {
 		return a.failUsage("weave task list CARD")
 	}
-	bid, _ := a.boardFromFlags(a.ctx, p)
-	cid, err := a.cardRef(a.ctx, p.Pos[0], bid)
+	cid, _, err := a.resolveCardArg(a.ctx, p, p.Pos[0])
 	if err != nil {
 		return a.fail(err)
 	}
@@ -1104,15 +1117,14 @@ func cmdTaskList(a *App, args []string) int {
 
 // taskCheck marks tasks complete/incomplete: by task id, or --card C with --n INDEX (1-based) or --text PREFIX.
 func (a *App) taskCheck(args []string, done bool) int {
-	p, err := a.parse(args, []FlagSpec{{Name: "card"}, {Name: "text"}, {Name: "n"}, {Name: "board"}})
+	p, err := a.parse(args, taskCheckFlags)
 	if err != nil {
 		return a.fail(err)
 	}
 	ctx := a.ctx
 	var ids []string
 	if p.Has("card") {
-		bid, _ := a.boardFromFlags(ctx, p)
-		cid, err := a.cardRef(ctx, p.Str("card"), bid)
+		cid, _, err := a.resolveCardArg(ctx, p, p.Str("card"))
 		if err != nil {
 			return a.fail(err)
 		}
@@ -1122,7 +1134,10 @@ func (a *App) taskCheck(args []string, done bool) int {
 		}
 		switch {
 		case p.Has("n"):
-			n, _ := strconv.Atoi(p.Str("n"))
+			n, err := strconv.Atoi(strings.TrimSpace(p.Str("n")))
+			if err != nil {
+				return a.failUsage("--n needs a positive integer")
+			}
 			if n < 1 || n > len(ts) {
 				return a.fail(&APIError{Code: "not_found", Message: fmt.Sprintf("card has %d tasks; --n %s is out of range", len(ts), p.Str("n"))})
 			}
@@ -1160,5 +1175,3 @@ func (a *App) taskCheck(args []string, done bool) int {
 	}
 	return a.emitItems(out)
 }
-
-var _ = sort.Strings

@@ -307,7 +307,7 @@ await run('board: archive and trash views (table or empty state, CSP)', async ()
 });
 // Regression: switch Show (Archived / Trash) in place (htmx pushes a history entry), open a card sheet from a row and
 // close it (X, Esc, backdrop). Going back to the pushed entry must not let htmx "restore" the page from a bare
-// fragment: the app header vanished and the board header was left unstyled. Same walk on the normal kanban view.
+// fragment: the app header vanished and the board header was left unstyled. Same walk on the normal board view.
 await run('board: card sheet opened from Archive / Trash / kanban closes without losing the page header', async () => {
   const a = await api('POST', `/lists/${lists[1].id}/cards`, { name: 'Sheet walk archived' });
   const t = await api('POST', `/lists/${lists[1].id}/cards`, { name: 'Sheet walk trashed' });

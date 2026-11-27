@@ -88,6 +88,21 @@ func TestDestinationTargetsIncludeQueryHosts(t *testing.T) {
 			t.Errorf("unexpected host %q in %v", h, got)
 		}
 	}
+	// case-insensitive query keys
+	gotUpper := notify.DestinationHostsForTest("teams://g@t/a/b/c?HOST=127.0.0.1:8443&URL=http://169.254.169.254/x&Server=localhost&Domain=metadata.google.internal")
+	wantUpper := map[string]bool{"t": true, "127.0.0.1": true, "169.254.169.254": true, "localhost": true, "metadata.google.internal": true}
+	if len(gotUpper) != len(wantUpper) {
+		t.Fatalf("upper hosts = %v", gotUpper)
+	}
+	for _, h := range gotUpper {
+		if !wantUpper[h] {
+			t.Errorf("unexpected upper host %q in %v", h, gotUpper)
+		}
+	}
+	// malformed URL fails closed
+	if err := notify.CheckDestinationForTest(context.Background(), "://malformed"); !errors.Is(err, notify.ErrDestinationNotAllowed) {
+		t.Fatalf("malformed URL err = %v, want ErrDestinationNotAllowed", err)
+	}
 }
 
 func TestNotificationDestinationBlockPrivateAndAllowlist(t *testing.T) {

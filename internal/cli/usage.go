@@ -50,6 +50,9 @@ Stream change events of one or more columns as NDJSON (one envelope per line).
 Reconnects automatically (backoff + jitter), resumes from the last event id, de-duplicates, and exits 0 on SIGINT/SIGTERM.`,
 	"watch": `weave watch --rooms board:ID[,project:ID]   legacy raw realtime stream
 weave watch --board B --list L ...          alias of weave listen`,
+	"agent prompt": `weave agent prompt [--general | --runner [--board B] | --project P | --board B | --board B --list L | --work-order --board B --list L --card C [--card-file F]] [--compact] [--no-install]
+
+Print the server-rendered agent prompt as plain text, ready to paste into a coding agent.`,
 	"agent run": `weave agent run --board B --listen L [--listen L2] [--claim-move-to L] [--done-list L] [--fail-list L]
                 [--ttl 15m] [--concurrency N] [--comment-output] [--no-claim] [--keep-claim] [--once] [--include-existing]
                 -- COMMAND [ARGS...]

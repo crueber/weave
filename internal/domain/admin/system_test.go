@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -38,8 +39,18 @@ func TestSystemOps(t *testing.T) {
 	call(t, e, "admin.stats")
 
 	bk := call(t, e, "admin.backup").(*ops.Stream)
-	if len(bk.Data) < 100 || string(bk.Data[:6]) != "SQLite" {
-		t.Fatalf("backup is not an sqlite file (%d bytes)", len(bk.Data))
+	if bk.Reader == nil {
+		t.Fatal("backup did not return a streaming Reader")
+	}
+	data, err := io.ReadAll(bk.Reader)
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if err := bk.Reader.Close(); err != nil {
+		t.Fatalf("close backup: %v", err)
+	}
+	if len(data) < 100 || string(data[:6]) != "SQLite" {
+		t.Fatalf("backup is not an sqlite file (%d bytes)", len(data))
 	}
 	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
 		t.Fatalf("backup temp dir not cleaned: %v", ents)

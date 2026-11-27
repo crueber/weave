@@ -94,13 +94,6 @@ type ClosesConfirm struct {
 	Heading, Body, Flip, Keep string
 }
 
-func cardsN(n int) string {
-	if n == 1 {
-		return "1 card"
-	}
-	return strconv.Itoa(n) + " cards"
-}
-
 // closesConfirm words the confirm with the exact count ("Close 12 cards now?" / "Re-open 12 cards?").
 func closesConfirm(p ListTypePreview, ctx string) ClosesConfirm {
 	d := ClosesConfirm{P: p, Ctx: ctx}
@@ -116,14 +109,16 @@ func closesConfirm(p ListTypePreview, ctx string) ClosesConfirm {
 	}
 	if p.Type == "closed" {
 		n := p.WillClose
-		d.Heading = "Close " + cardsN(n) + " now?"
-		d.Body = strings.Replace(cardsN(n), " card", " open card", 1) + " " + are(n) + " already in " + name + ". Either way, cards that land here from now on are closed."
-		d.Flip, d.Keep = "Close "+cardsN(n), "Leave them open"
+		c := plural(n, "card")
+		d.Heading = "Close " + c + " now?"
+		d.Body = strings.Replace(c, " card", " open card", 1) + " " + are(n) + " already in " + name + ". Either way, cards that land here from now on are closed."
+		d.Flip, d.Keep = "Close "+c, "Leave them open"
 	} else {
 		n := p.WillReopen
-		d.Heading = "Re-open " + cardsN(n) + "?"
-		d.Body = strings.Replace(cardsN(n), " card", " closed card", 1) + " " + are(n) + " in " + name + ". Either way, cards that land here from now on are no longer closed."
-		d.Flip, d.Keep = "Re-open "+cardsN(n), "Keep them closed"
+		c := plural(n, "card")
+		d.Heading = "Re-open " + c + "?"
+		d.Body = strings.Replace(c, " card", " closed card", 1) + " " + are(n) + " in " + name + ". Either way, cards that land here from now on are no longer closed."
+		d.Flip, d.Keep = "Re-open "+c, "Keep them closed"
 	}
 	return d
 }
@@ -143,16 +138,17 @@ func archiveConfirm(p ListArchivePreview, ctx string) ArchiveConfirm {
 	if name == "" {
 		name = "this column"
 	}
-	d.Heading = "Archive " + cardsN(p.WillArchive) + " now?"
-	d.Body = name + " holds " + cardsN(p.Cards) + "; it keeps the newest " + strconv.Itoa(p.Keep) + ". The " + cardsN(p.WillArchive) +
+	will := plural(p.WillArchive, "card")
+	d.Heading = "Archive " + will + " now?"
+	d.Body = name + " holds " + plural(p.Cards, "card") + "; it keeps the newest " + strconv.Itoa(p.Keep) + ". The " + will +
 		" that have been here longest go to the archive, where you can restore them."
 	if p.SkippedClaimed > 0 {
-		d.Body += " " + cardsN(p.SkippedClaimed) + " over the limit stay until an agent's claim on them ends."
+		d.Body += " " + plural(p.SkippedClaimed, "card") + " over the limit stay until an agent's claim on them ends."
 	}
 	if p.SkippedRecurring > 0 {
-		d.Body += " " + strings.Replace(cardsN(p.SkippedRecurring), " card", " recurring card", 1) + " over the limit " + map[bool]string{true: "stays", false: "stay"}[p.SkippedRecurring == 1] + ": recurring cards are not auto-archived."
+		d.Body += " " + strings.Replace(plural(p.SkippedRecurring, "card"), " card", " recurring card", 1) + " over the limit " + map[bool]string{true: "stays", false: "stay"}[p.SkippedRecurring == 1] + ": recurring cards are not auto-archived."
 	}
-	d.Action = "Archive " + cardsN(p.WillArchive)
+	d.Action = "Archive " + will
 	return d
 }
 
@@ -227,7 +223,7 @@ func registerListSheetUI() {
 		if err != nil {
 			return err
 		}
-		pd, err := loadPage(c.Env, d.Board, c.R.URL.Query(), false)
+		pd, err := loadPage(c.Env, d, c.R.URL.Query(), false)
 		if err != nil {
 			return err
 		}

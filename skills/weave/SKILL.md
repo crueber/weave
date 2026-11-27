@@ -1,13 +1,13 @@
 ---
 name: weave
-description: Drive the Weave kanban server from the command line with the `weave` CLI. Use this skill whenever the task involves Weave boards, lists (columns), cards, comments, checklists or attachments; whenever you must listen or watch for card changes in one or more columns; pick up, claim, work on and report back on cards as an AI agent; wire an agent or script to a column such as Ready, Review or Needs info (a column's name and description are the brief for what to do with a card there); or the user mentions weave, WEAVE_URL, WEAVE_TOKEN, a Weave API key, `weave listen`, `weave next` or `weave agent run`. Covers authentication, name resolution (use board and list names instead of ids), the claim/lease protocol, listening patterns, exit codes and safe defaults.
+description: Drive the Weave project board server from the command line with the `weave` CLI. Use this skill whenever the task involves Weave boards, lists (columns), cards, comments, checklists or attachments; whenever you must listen or watch for card changes in one or more columns; pick up, claim, work on and report back on cards as an AI agent; wire an agent or script to a column such as Ready, Review or Needs info (a column's name and description are the brief for what to do with a card there); or the user mentions weave, WEAVE_URL, WEAVE_TOKEN, a Weave API key, `weave listen`, `weave next` or `weave agent run`. Covers authentication, name resolution (use board and list names instead of ids), the claim/lease protocol, listening patterns, exit codes and safe defaults.
 ---
 
 # Weave CLI
 
-Weave is a self-hosted kanban board. Humans use the browser (OIDC login); **agents and scripts use the
+Weave is a self-hosted project management board. Humans use the browser (OIDC login); **agents and scripts use the
 `weave` CLI with an API key**. Everything the browser can do is an *op*; the CLI is generated from the
-server's op schema (253 ops in this skill's snapshot), so `weave ops` always shows what your
+server's op schema (252 ops in this skill's snapshot), so `weave ops` always shows what your
 server supports. This file is the short version; read `references/commands.md` for every command,
 `references/agent-workflows.md` for end-to-end agent patterns and `references/events.md` for the
 event stream.

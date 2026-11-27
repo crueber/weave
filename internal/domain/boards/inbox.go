@@ -11,7 +11,7 @@ import (
 	"github.com/crueber/weave/internal/web"
 )
 
-// The board Inbox: when a board has has_inbox on, its kanban view starts with a pinned Inbox column holding the
+// The board Inbox: when a board has has_inbox on, its board view starts with a pinned Inbox column holding the
 // board's drafts (cards with is_draft=1, owned by the cards domain). Capturing goes through op card.draft.create,
 // "Move to column" and drag-to-column through op card.draft.publish; this file only renders.
 
@@ -84,18 +84,31 @@ type InboxData struct {
 	Drafts []Draft
 }
 
-// inboxPage loads the page data the panel needs (kanban, no filter) after checking the caller may see the inbox.
+// inboxPage builds the lightweight PageData the inbox panel needs (board, caps, finite columns and drafts)
+// without loading board tiles, labels, members or filters.
 func inboxPage(c *web.Ctx, boardID string) (*PageData, error) {
-	d, err := ops.Typed[BoardDetail](c.Env, "board.get", BoardGetIn{ID: boardID})
+	if err := authz.RequireBoard(c.Env, boardID, authz.View); err != nil {
+		return nil, err
+	}
+	b, err := GetBoard(c.Env.Ctx, c.Env.DB, boardID)
 	if err != nil {
 		return nil, err
 	}
-	pd, err := loadPage(c.Env, d.Board, url.Values{"view": {"kanban"}}, false)
-	if err != nil {
-		return nil, err
-	}
-	if !pd.HasInbox {
+	caps := authz.Board(c.Env, boardID)
+	pd := &PageData{Board: b, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, PageURL: "/boards/" + boardID, View: "kanban"}
+	if !showInbox(pd) {
 		return nil, ops.NotFound("inbox")
+	}
+	lists, err := listsOf(c.Env, boardID, true)
+	if err != nil {
+		return nil, err
+	}
+	pd.Columns = make([]Column, len(lists))
+	for i, l := range lists {
+		pd.Columns[i] = Column{List: l}
+	}
+	if err := loadInbox(c.Env, pd, false); err != nil {
+		return nil, err
 	}
 	return pd, nil
 }
@@ -207,11 +220,11 @@ func registerInbox() {
 		if !c.IsHTMX() {
 			return backToBoard(c, boardID)
 		}
-		pd, err := shell(c, boardID)
+		pd, lists, err := shell(c, boardID)
 		if err != nil {
 			return err
 		}
-		tiles, err := tilesFor(c, pd, []string{id})
+		tiles, err := tilesFor(c, pd, lists, []string{id})
 		if err != nil {
 			return err
 		}

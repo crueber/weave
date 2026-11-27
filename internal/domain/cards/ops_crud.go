@@ -115,7 +115,7 @@ type Deleted struct {
 
 func init() {
 	ops.Register(ops.Op{Name: "card.list", Summary: "List the cards of a board (excludes drafts and templates)", Method: "GET", Path: "/boards/{boardId}/cards",
-		UI: "exempt:cards are rendered by the board shell (kanban/list/grid) and calendar/map views"}, cardList)
+		UI: "exempt:cards are rendered by the board shell (board/list/grid) and calendar/map views"}, cardList)
 	ops.Register(ops.Op{Name: "card.get", Summary: "Get a card with labels, members and claim; full=true adds tasks, comments, attachments, custom fields, activity", Method: "GET", Path: "/cards/{id}",
 		UI: "GET /ui/cards/{id}"}, cardGet)
 	ops.Register(ops.Op{Name: "card.create", Summary: "Create a card at the end (or given position) of a list", Method: "POST", Path: "/lists/{listId}/cards",
@@ -235,25 +235,28 @@ func cardList(e *ops.Env, in ListCardsIn) (ListOut, error) {
 		q += ` LIMIT -1 OFFSET ?`
 		args = append(args, offset)
 	}
-	ids := strs(e, e.DB, q, args...)
+	ids, err := strs(e, e.DB, q, args...)
+	if err != nil {
+		return ListOut{}, err
+	}
 	out := ListOut{Items: []Card{}}
 	if limit > 0 && len(ids) > limit {
 		ids = ids[:limit]
 		out.NextCursor = strconv.Itoa(offset + limit)
 	}
-	also := map[string]int{}
-	if len(ids) > 0 {
-		also = authz.AlsoOn(e, in.BoardID, ids)
+	if len(ids) == 0 {
+		return out, nil
 	}
-	for _, id := range ids {
-		c, err := loadCardOn(e, e.DB, id, in.BoardID)
-		if err != nil {
-			continue
-		}
-		c.ShareToken = nil
-		c.AlsoOnBoards = also[id]
-		out.Items = append(out.Items, c)
+	also := authz.AlsoOn(e, in.BoardID, ids)
+	cards, err := loadCardsOn(e, e.DB, in.BoardID, ids)
+	if err != nil {
+		return ListOut{}, err
 	}
+	for i := range cards {
+		cards[i].ShareToken = nil
+		cards[i].AlsoOnBoards = also[cards[i].ID]
+	}
+	out.Items = cards
 	return out, nil
 }
 
@@ -352,8 +355,12 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 		sets, args = append(sets, "description=?"), append(args, d)
 		changed = append(changed, "description")
 	}
+	clearingDue := in.DueDate != nil && *in.DueDate == ""
+	if clearingDue && in.IsDueCompleted != nil && *in.IsDueCompleted {
+		return Card{}, ops.Invalid("cannot mark a cleared due date as completed")
+	}
 	if in.DueDate != nil {
-		if *in.DueDate == "" {
+		if clearingDue {
 			sets = append(sets, "due_date=NULL", "is_due_completed=NULL")
 			if prevDue != nil {
 				changed = append(changed, "dueDate")
@@ -369,7 +376,7 @@ func cardUpdate(e *ops.Env, in UpdateIn) (Card, error) {
 			}
 		}
 	}
-	if in.IsDueCompleted != nil {
+	if in.IsDueCompleted != nil && !clearingDue {
 		sets, args = append(sets, "is_due_completed=?"), append(args, *in.IsDueCompleted)
 		changed = append(changed, "isDueCompleted")
 	}
@@ -460,7 +467,10 @@ func deleteCardTx(e *ops.Env, tx *sql.Tx, cardID, boardID string, allowDraftTemp
 		return out, false, err
 	}
 	out.Name, out.ListID = c.Name, c.ListID
-	out.Boards = placementBoards(e, tx, cardID)
+	out.Boards, err = placementBoards(e, tx, cardID)
+	if err != nil {
+		return out, false, err
+	}
 	if _, err := tx.ExecContext(e.Ctx, `DELETE FROM card_editing WHERE card_id=?`, cardID); err != nil {
 		return out, false, err
 	}
@@ -768,7 +778,7 @@ func restoreCardTx(e *ops.Env, tx *sql.Tx, cardID, boardID string) (restoreTxRes
 			return out, false, err
 		}
 		var prev any // restoring into a closing column remembers where the card was before it was archived
-		if listType(e.Ctx, tx, r.target) == "closed" {
+		if _, lt, _ := listRef(e.Ctx, tx, r.target); lt == "closed" {
 			prev = r.p.List
 			if r.p.Prev != nil {
 				prev = *r.p.Prev
@@ -851,6 +861,12 @@ func cardClose(e *ops.Env, in CloseIn) (Card, error) {
 	c, err := loadCardOn(e, e.DB, in.ID, boardID)
 	if err != nil {
 		return c, err
+	}
+	if c.IsDraft {
+		return c, ops.Invalid("publish the draft before closing it")
+	}
+	if c.IsTemplate {
+		return c, ops.Invalid("templates cannot be closed")
 	}
 	var stype string
 	_ = e.DB.QueryRowContext(e.Ctx, `SELECT type FROM lists WHERE id=?`, c.ListID).Scan(&stype)
@@ -956,12 +972,15 @@ func cardLocation(e *ops.Env, in LocationIn) (Card, error) {
 		if in.Lat == nil || in.Lng == nil {
 			return Card{}, ops.Invalid("lat and lng are both required")
 		}
-		if *in.Lat < -90 || *in.Lat > 90 || *in.Lng < -180 || *in.Lng > 180 {
+		if !(*in.Lat >= -90 && *in.Lat <= 90 && *in.Lng >= -180 && *in.Lng <= 180) {
 			return Card{}, ops.Invalid("lat must be within -90..90 and lng within -180..180")
 		}
 		var nm any
-		if strings.TrimSpace(in.Name) != "" {
-			nm = strings.TrimSpace(in.Name)
+		if s := strings.TrimSpace(in.Name); s != "" {
+			if err := ops.CheckLen("locationName", s, ops.MaxNameLen); err != nil {
+				return Card{}, err
+			}
+			nm = s
 		}
 		_, err = e.DB.ExecContext(e.Ctx, `UPDATE cards SET lat=?,lng=?,location_name=?,updated_at=? WHERE id=?`, *in.Lat, *in.Lng, nm, db.Now(), in.ID)
 	}

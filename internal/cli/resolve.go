@@ -5,7 +5,18 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
+
+const (
+	candCacheMax = 512
+	candCacheTTL = 30 * time.Second
+)
+
+type candEntry struct {
+	cands []Candidate
+	at    time.Time
+}
 
 // Candidate is one thing a name can resolve to.
 type Candidate struct {
@@ -50,8 +61,8 @@ func (a *App) Whoami(ctx context.Context) (*Identity, error) {
 	}
 	var item map[string]any
 	var err error
-	for _, name := range []string{"auth.whoami", "whoami", "auth.me"} {
-		if o, e := a.mustOp(name); e == nil {
+	for _, name := range []string{"auth.whoami", "auth.me"} {
+		if o, e := a.mustOp(ctx, name); e == nil {
 			item, err = a.itemFrom(ctx, o)
 			if err == nil || name == "auth.me" {
 				break
@@ -113,15 +124,16 @@ func firstStr(m map[string]any, keys ...string) string {
 
 func (a *App) fetchCandidates(ctx context.Context, kind string, sc Scope, raw string) ([]Candidate, error) {
 	key := kind + "|" + sc.ProjectID + "|" + sc.BoardID
-	if kind == "user" {
+	if kind == "user" || kind == "card" {
 		key += "|" + raw
 	}
+	now := time.Now()
 	a.candMu.Lock()
-	c, ok := a.candCache[key]
-	a.candMu.Unlock()
-	if ok {
-		return c, nil
+	if ce, ok := a.candCache[key]; ok && now.Sub(ce.at) < candCacheTTL {
+		a.candMu.Unlock()
+		return ce.cands, nil
 	}
+	a.candMu.Unlock()
 	var out []Candidate
 	add := func(items []any, parent string) {
 		for _, x := range items {
@@ -198,9 +210,27 @@ func (a *App) fetchCandidates(ctx context.Context, kind string, sc Scope, raw st
 	}
 	a.candMu.Lock()
 	if a.candCache == nil {
-		a.candCache = map[string][]Candidate{}
+		a.candCache = map[string]candEntry{}
 	}
-	a.candCache[key] = out
+	storedAt := time.Now()
+	if len(a.candCache) >= candCacheMax {
+		for k, ce := range a.candCache {
+			if storedAt.Sub(ce.at) >= candCacheTTL {
+				delete(a.candCache, k)
+			}
+		}
+		for len(a.candCache) >= candCacheMax {
+			var oldestKey string
+			var oldestAt time.Time
+			for k, ce := range a.candCache {
+				if oldestKey == "" || ce.at.Before(oldestAt) {
+					oldestKey, oldestAt = k, ce.at
+				}
+			}
+			delete(a.candCache, oldestKey)
+		}
+	}
+	a.candCache[key] = candEntry{cands: out, at: storedAt}
 	a.candMu.Unlock()
 	return out, nil
 }

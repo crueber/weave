@@ -3,10 +3,8 @@
 (function () {
   if (window.__cardsUI) return;
   window.__cardsUI = true;
+  var W = window.Weave;
 
-  function lsGet(k) { try { return localStorage.getItem(k); } catch (x) { return null; } }
-  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (x) { /* private mode */ } }
-  function typing(el) { return !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))); }
   function root() { return document.getElementById('card-modal'); }
   function modal() { return document.getElementById('modal'); }
   function cardInModal() { var c = root(); return c ? c.dataset.card : ''; }
@@ -17,7 +15,7 @@
   var pageURL = location.pathname + location.search;   // the page under the sheet (the sheet pushes /cards/{id})
   function tileOf(id) { return document.getElementById('tile-' + id); }
   function sheetActive() { var cm = root(); if (!cm) return false; var d = cm.closest('dialog'); return !d || d.open; }
-  function toast(msg, err) { if (window.Boards && Boards.toast) Boards.toast(msg, { error: !!err }); }
+  function toast(msg, err) { W.toast(msg, { error: !!err }); }
 
   // ---- markdown-lite toolbar: data-md="pre|post" wraps the selection, data-md-line prefixes lines ----
   document.addEventListener('click', function (e) {
@@ -182,11 +180,6 @@
 
   document.addEventListener('click', function (e) {
     var cm = root();
-    var m = modal();
-    if (m && m.open && e.target === m) { // backdrop (the dialog element itself is only hit outside its box)
-      var r = m.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) { m.close(); return; }
-    }
     if (!cm || !sheetActive() || !cm.contains(e.target) && !e.target.closest('[data-card-nav]')) return;
     var t = e.target;
     var nav = t.closest('[data-card-nav]');
@@ -210,7 +203,24 @@
   // popovers stay open across the re-render that follows each multi-select action (members, labels)
   var KEEP = { members: 1, labels: 1 };
   document.body.addEventListener('htmx:beforeSwap', function (e) {
-    var t = e.detail.target; if (!t || t.id !== 'card-modal') return;
+    var t = e.detail.target;
+    if (!t) return;
+    if (t.id === 'card-desc' && e.detail.serverResponse) {
+      var tmp = document.createElement('template');
+      tmp.innerHTML = e.detail.serverResponse.trim();
+      var fresh = tmp.content.querySelector('#card-desc');
+      if (fresh && fresh.hasAttribute('hx-get') === t.hasAttribute('hx-get') && fresh.innerHTML.trim() === t.innerHTML.trim()) {
+        e.detail.shouldSwap = false; return;
+      }
+      if (e.detail.elt === t && t.hasAttribute('hx-get')) {
+        var sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount && (t.contains(sel.anchorNode) || t.contains(sel.focusNode))) {
+          e.detail.shouldSwap = false; return;
+        }
+      }
+      return;
+    }
+    if (t.id !== 'card-modal') return;
     var o = t.querySelector('details.cards-pop[open]');
     var idx = -1;
     if (o && KEEP[o.dataset.pop]) {
@@ -231,7 +241,16 @@
     var cm = root(); if (!cm || !st.stash || cm.dataset.card !== st.stashCard) { st.stash = null; return; }
     cm.querySelectorAll('[hx-get]').forEach(function (el) {
       var h = st.stash.html[el.getAttribute('hx-get')];
-      if (h && el.querySelector('.cards-skel')) { el.innerHTML = h; if (window.htmx) htmx.process(el); }
+      if (h && (el.querySelector('.cards-skel') || !el.children.length)) {
+        if (el.getAttribute('hx-trigger') === 'load') {
+          el.removeAttribute('hx-trigger');
+          el.dataset.skipLoad = '1';
+          setTimeout(function () { delete el.dataset.skipLoad; }, 50);
+        }
+        if (el.id === 'cm-panel-activity') el.dataset.loaded = '1';
+        el.innerHTML = h;
+        if (window.htmx) htmx.process(el);
+      }
     });
     var m = modal(); if (m && m.open) m.scrollTop = st.stash.scroll;
     st.stash = null;
@@ -273,7 +292,7 @@
   function applySecState() {
     var cm = root(); if (!cm) return;
     cm.querySelectorAll('.cm-sec[data-section]').forEach(function (s) {
-      var c = lsGet(secKey(s.dataset.section)) === '1';
+      var c = W.ls.get(secKey(s.dataset.section)) === '1';
       s.classList.toggle('is-collapsed', c);
       s.querySelectorAll('[data-sec-toggle]').forEach(function (b) {
         b.setAttribute('aria-expanded', c ? 'false' : 'true');
@@ -284,12 +303,12 @@
   function toggleSection(s) {
     if (!s) return;
     var c = !s.classList.contains('is-collapsed');
-    lsSet(secKey(s.dataset.section), c ? '1' : '0');
+    W.ls.set(secKey(s.dataset.section), c ? '1' : '0');
     applySecState();
   }
   function expandSection(name) {
     var s = root() && root().querySelector('.cm-sec[data-section="' + name + '"]');
-    if (s && s.classList.contains('is-collapsed')) { lsSet(secKey(name), '0'); applySecState(); }
+    if (s && s.classList.contains('is-collapsed')) { W.ls.set(secKey(name), '0'); applySecState(); }
     return s;
   }
   function focusSection(name) {
@@ -300,7 +319,15 @@
     if (s) s.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
-  // ---- discussion tabs ----
+  // ---- discussion tabs (Activity is lazy-loaded on first activation) ----
+  function loadActivity(force) {
+    var act = document.getElementById('cm-panel-activity');
+    if (!act || !window.htmx) return;
+    if (!force && act.dataset.loaded) return;
+    var url = act.getAttribute('hx-get'); if (!url) return;
+    act.dataset.loaded = '1';
+    htmx.ajax('GET', url, { source: root(), target: act, swap: 'innerHTML', values: ctxBoard() ? { board: ctxBoard() } : {} });
+  }
   function selectTab(name, remember) {
     var cm = root(); if (!cm) return;
     cm.querySelectorAll('[data-tab]').forEach(function (b) {
@@ -308,7 +335,8 @@
       b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1;
       var p = document.getElementById('cm-panel-' + b.dataset.tab); if (p) p.hidden = !on;
     });
-    if (remember) lsSet('weave.card.tab', name);
+    if (name === 'activity') loadActivity(false);
+    if (remember) W.ls.set('weave.card.tab', name);
   }
   document.addEventListener('keydown', function (e) {
     var tab = e.target.closest && e.target.closest('[data-tab]'); if (!tab) return;
@@ -326,9 +354,9 @@
   function onSheetLoad() {
     var cm = root(); if (!cm) return;
     applySecState();
-    var tab = lsGet('weave.card.tab'); if (tab === 'activity') selectTab('activity');
+    var tab = W.ls.get('weave.card.tab'); if (tab === 'activity') selectTab('activity');
     updateCounts();
-    var cb = cm.querySelector('[data-enter-send]'); if (cb) cb.checked = lsGet('weave.card.enterSend') === '1';
+    var cb = cm.querySelector('[data-enter-send]'); if (cb) cb.checked = W.ls.get('weave.card.enterSend') === '1';
     var ta = cm.querySelector('[data-comment-input]');
     if (ta && !ta.value && st.drafts[cm.dataset.card]) { ta.value = st.drafts[cm.dataset.card]; grow(ta); }
   }
@@ -341,19 +369,19 @@
   if (document.readyState !== 'loading') onSheetLoad();
 
   // ---- comment composer: grows, Enter / Ctrl+Enter sends, clears and keeps focus ----
-  function grow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 160) + 'px'; }
+  function grow(ta) { W.grow(ta, 160); }
   document.addEventListener('input', function (e) {
     var ta = e.target; if (!ta.matches || !ta.matches('[data-comment-input]')) return;
     grow(ta); ta.form.classList.toggle('has-text', !!ta.value.trim());
     st.drafts[cardInModal()] = ta.value;
   });
   document.addEventListener('change', function (e) {
-    if (e.target.matches && e.target.matches('[data-enter-send]')) lsSet('weave.card.enterSend', e.target.checked ? '1' : '0');
+    if (e.target.matches && e.target.matches('[data-enter-send]')) W.ls.set('weave.card.enterSend', e.target.checked ? '1' : '0');
   });
   document.addEventListener('keydown', function (e) {
     var ta = e.target; if (!ta.matches || !ta.matches('[data-comment-input]')) return;
     if (e.key !== 'Enter' || e.isComposing) return;
-    var enterSends = lsGet('weave.card.enterSend') === '1';
+    var enterSends = W.ls.get('weave.card.enterSend') === '1';
     if ((e.ctrlKey || e.metaKey) || (enterSends && !e.shiftKey)) {
       e.preventDefault();
       if (ta.value.trim()) ta.form.requestSubmit();
@@ -361,6 +389,7 @@
   });
   document.body.addEventListener('htmx:beforeRequest', function (e) {
     var f = e.detail.elt;
+    if (f && f.dataset && f.dataset.skipLoad) { delete f.dataset.skipLoad; e.preventDefault(); return; }
     if (f && f.id === 'cm-comment-form' && !f.querySelector('textarea').value.trim()) e.preventDefault();
     if (f && f.matches && f.matches('[data-add-task]')) st.focusTask = f.dataset.addTask;
     else if (f && f.matches && f.matches('.x-newlist')) st.focusTask = 'new';
@@ -372,9 +401,9 @@
       delete st.drafts[cardInModal()];
       selectTab('comments', true); expandSection('discussion');
       ta.focus({ preventScroll: true });
-      // the activity feed gained an entry
+      // the activity feed gained an entry (reload if already loaded; otherwise it loads fresh on tab activation)
       var act = document.getElementById('cm-panel-activity');
-      if (act && window.htmx) htmx.ajax('GET', act.getAttribute('hx-get'), { target: act, swap: 'innerHTML' });
+      if (act && act.dataset.loaded) loadActivity(true);
     }
   });
 
@@ -423,7 +452,7 @@
     var list = [].slice.call(files), sv = document.getElementById('cards-saved');
     if (sv) sv.textContent = 'Uploading ' + list.length + (list.length > 1 ? ' files' : ' file') + '...';
     list.reduce(function (p, f) { return p.then(function () { return postFile(id, f); }); }, Promise.resolve())
-      .then(function () { expandSection('attachments'); flashSaved(list.length > 1 ? 'Attached' : 'Attached'); })
+      .then(function () { expandSection('attachments'); flashSaved('Attached'); })
       .catch(function (err) { if (sv) sv.textContent = ''; toast(err.message || 'Upload failed', true); });
   }
   document.addEventListener('change', function (e) {
@@ -449,7 +478,7 @@
   });
   document.addEventListener('paste', function (e) {
     if (!sheetActive() || !e.clipboardData || !e.clipboardData.files || !e.clipboardData.files.length) return;
-    if (typing(e.target) && e.clipboardData.getData('text')) return;
+    if (W.typing(e.target) && e.clipboardData.getData('text')) return;
     if (!root().querySelector('[data-attach-input]')) return;
     e.preventDefault();
     var stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
@@ -521,14 +550,29 @@
     setTimeout(function () {
       if (!document.contains(form) || form.contains(document.activeElement) || !window.htmx) return;
       if (ta.value !== ta.defaultValue) htmx.trigger(form, 'submit');
-      else htmx.ajax('POST', '/ui/cards/' + id + '/editing/release', { target: '#card-desc', swap: 'outerHTML', values: { field: 'description' } });
+      else htmx.ajax('POST', '/ui/cards/' + id + '/editing/release', { source: root(), target: '#card-desc', swap: 'outerHTML', values: { field: 'description', board: ctxBoard() } });
     }, 0);
   });
   document.body.addEventListener('cards:saved', function () { flashSaved('Saved'); });
   document.body.addEventListener('htmx:afterRequest', function (e) {
     var el = e.detail.elt;
-    if (e.detail.successful && el && el.closest && (el.closest('#card-title') || (el.matches && el.matches('[data-autosave]')))) { if (!el.matches('[data-autosave]')) flashSaved('Saved'); }
+    if (e.detail.successful && el && el.closest && el.closest('#card-title')) flashSaved('Saved');
   });
+  // live card.editing updates via WeaveLive (replaces dead sse:card.editing)
+  var hookedEdit = false;
+  function hookEditLive() {
+    var live = window.WeaveLive; if (hookedEdit || !live) return;
+    hookedEdit = true;
+    live.on('card.editing', function (ev) {
+      var cm = root(); if (!cm || !sheetActive() || !window.htmx) return;
+      var d; try { d = JSON.parse(ev.data); } catch (x) { return; }
+      var data = (d && d.data) || {}, id = data.cardId || (d && d.cardId);
+      if (id && id !== cm.dataset.card) return;
+      var desc = document.getElementById('card-desc');
+      if (desc && desc.hasAttribute('hx-get')) htmx.trigger(desc, 'weave:editing');
+    });
+  }
+  hookEditLive(); document.addEventListener('DOMContentLoaded', hookEditLive);
   // archiving / trashing from the sheet: close it and offer Undo instead of asking first
   document.body.addEventListener('htmx:afterRequest', function (e) {
     var el = e.detail.elt, p = el && el.getAttribute && el.getAttribute('hx-post');
@@ -565,7 +609,7 @@
     if (ae && ae.matches && ae.matches('#card-desc textarea')) {
       var form = ae.form;
       if (ae.value !== ae.defaultValue) htmx.trigger(form, 'submit');
-      else htmx.ajax('POST', '/ui/cards/' + cardInModal() + '/editing/release', { target: '#card-desc', swap: 'outerHTML', values: { field: 'description' } });
+      else htmx.ajax('POST', '/ui/cards/' + cardInModal() + '/editing/release', { source: root(), target: '#card-desc', swap: 'outerHTML', values: { field: 'description', board: ctxBoard() } });
       return true;
     }
     if (ae && ae.classList && ae.classList.contains('cards-title-input') && ae.value !== ae.defaultValue) { ae.value = ae.defaultValue; ae.blur(); return true; }
@@ -576,12 +620,12 @@
     if (layerEsc()) { e.preventDefault(); e.stopPropagation(); st.escAt = Date.now(); }
   }, true);
   function onCancel(e) { if (Date.now() - st.escAt < 80 || layerEsc()) e.preventDefault(); }
-  if (modal()) modal().addEventListener('cancel', onCancel);
+  document.addEventListener('cancel', function (e) { if (e.target === modal()) onCancel(e); }, true);
 
   // ---- single-key shortcuts while the sheet is open (never while typing) ----
   document.addEventListener('keydown', function (e) {
-    if (!sheetActive() || typing(e.target) || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-    if (document.querySelector('dialog.boards-confirm[open]')) return;   // a confirm over the sheet (boards_cardkeys.js) owns the keys
+    if (!sheetActive() || W.typing(e.target) || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (W.confirmOpen()) return;   // a confirm over the sheet owns the keys
     var tag = e.target && e.target.tagName; if (tag === 'SUMMARY' && (e.key === ' ' || e.key === 'Enter')) return;
     var k = e.key, cm = root();
     if (k === 'j' || k === 'ArrowRight') { if (k === 'ArrowRight' && e.target.closest && e.target.closest('[role=tablist]')) return; e.preventDefault(); go(1); }

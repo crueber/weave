@@ -59,8 +59,9 @@ func init() {
 		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM card_editing WHERE card_id=? AND user_id=? AND field=?`, in.ID, e.User.UserID, f); err != nil {
 			return EditListOut{}, err
 		}
-		publishEditing(e, boardID, in.ID)
-		return EditListOut{editors(e, in.ID)}, nil
+		list := editors(e, in.ID)
+		publishEditing(e, boardID, in.ID, list)
+		return EditListOut{list}, nil
 	})
 	ops.Register(ops.Op{Name: "card.edit.list", Summary: "Who is editing which fields of a card", Method: "GET", Path: "/cards/{id}/editing",
 		UI: "GET /ui/cards/{id}/editing"}, func(e *ops.Env, in IDIn) (EditListOut, error) {
@@ -71,15 +72,30 @@ func init() {
 	})
 }
 
-func publishEditing(e *ops.Env, boardID, cardID string) {
-	e.Hub.Publish(rtEvent("card.editing", "board:"+boardID, map[string]any{"cardId": cardID, "editors": editors(e, cardID)}))
+func publishEditing(e *ops.Env, boardID, cardID string, list []EditHolder) {
+	if e.Hub == nil {
+		return
+	}
+	pub := make([]EditHolder, len(list))
+	for i, h := range list {
+		h.Me = false
+		pub[i] = h
+	}
+	boards, _ := placementBoards(e, e.DB, cardID)
+	if len(boards) == 0 && boardID != "" {
+		boards = []string{boardID}
+	}
+	for _, b := range boards {
+		e.Hub.Publish(rtEvent("card.editing", "board:"+b, map[string]any{"cardId": cardID, "editors": pub}))
+	}
 }
 
 // editors lists lock holders (everything newer than 10 minutes), freshest first.
 func editors(e *ops.Env, cardID string) []EditHolder {
 	out := []EditHolder{}
+	cutoff := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
 	rows, err := e.DB.QueryContext(e.Ctx, `SELECT ce.user_id,COALESCE(u.name,''),ce.field,ce.touched_at FROM card_editing ce LEFT JOIN users u ON u.id=ce.user_id
-		WHERE ce.card_id=? ORDER BY ce.touched_at DESC`, cardID)
+		WHERE ce.card_id=? AND ce.touched_at>=? ORDER BY ce.touched_at DESC`, cardID, cutoff)
 	if err != nil {
 		return out
 	}
@@ -140,10 +156,11 @@ func editTouch(e *ops.Env, in EditTouchIn) (EditTouchOut, error) {
 	if err != nil {
 		return EditTouchOut{}, err
 	}
+	list := editors(e, in.ID)
 	if blocker == nil {
-		publishEditing(e, boardID, in.ID)
+		publishEditing(e, boardID, in.ID, list)
 	}
-	return EditTouchOut{Granted: blocker == nil, Holder: blocker, Editors: editors(e, in.ID)}, nil
+	return EditTouchOut{Granted: blocker == nil, Holder: blocker, Editors: list}, nil
 }
 
 // ---- calendar + map views
@@ -225,31 +242,82 @@ func calendar(e *ops.Env, in CalendarIn) (CalendarOut, error) {
 	last := first.AddDate(0, 1, -1)
 	to := last.AddDate(0, 0, (7-int(last.Weekday()))%7) // forward to Sunday
 	out := CalendarOut{Month: first.Format("2006-01"), From: from.Format("2006-01-02"), To: to.Format("2006-01-02"), Cards: []CalendarCard{}, Unscheduled: []CalendarCard{}}
-	load := func(q string, args ...any) []CalendarCard {
+	load := func(q string, args ...any) ([]CalendarCard, error) {
 		res := []CalendarCard{}
 		rows, err := e.DB.QueryContext(e.Ctx, q, args...)
 		if err != nil {
-			return res
+			return nil, err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var c CalendarCard
 			var due *string
 			var done *bool
-			_ = rows.Scan(&c.ID, &c.Name, &due, &done, &c.IsClosed, &c.ListID)
+			if err := rows.Scan(&c.ID, &c.Name, &due, &done, &c.IsClosed, &c.ListID); err != nil {
+				rows.Close()
+				return nil, err
+			}
 			if due != nil {
 				c.DueDate = *due
 			}
 			c.IsDueCompleted = done != nil && *done
-			c.Colors = strs(e, e.DB, `SELECT l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id WHERE cl.card_id=?1 AND `+db.LabelOnBoard("l", "?2")+` ORDER BY l.position`, c.ID, in.BoardID)
+			c.Colors = []string{}
 			res = append(res, c)
 		}
-		return res
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		if len(res) == 0 {
+			return res, nil
+		}
+		byID := make(map[string]int, len(res))
+		ids := make([]string, len(res))
+		for i := range res {
+			byID[res[i].ID] = i
+			ids[i] = res[i].ID
+		}
+		for start := 0; start < len(ids); start += cardBatchSize {
+			chunk := ids[start:min(start+cardBatchSize, len(ids))]
+			largs := make([]any, 0, len(chunk)+1)
+			largs = append(largs, in.BoardID)
+			for _, id := range chunk {
+				largs = append(largs, id)
+			}
+			lrows, err := e.DB.QueryContext(e.Ctx, `SELECT cl.card_id,l.color FROM card_labels cl JOIN labels l ON l.id=cl.label_id
+				WHERE `+db.LabelOnBoard("l", "?1")+` AND cl.card_id IN (`+inPlaceholders(len(chunk))+`) ORDER BY l.position`, largs...)
+			if err != nil {
+				return nil, err
+			}
+			for lrows.Next() {
+				var cid, col string
+				if err := lrows.Scan(&cid, &col); err != nil {
+					lrows.Close()
+					return nil, err
+				}
+				if idx, ok := byID[cid]; ok {
+					res[idx].Colors = append(res[idx].Colors, col)
+				}
+			}
+			if err := lrows.Err(); err != nil {
+				lrows.Close()
+				return nil, err
+			}
+			lrows.Close()
+		}
+		return res, nil
 	}
-	out.Cards = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+	var err error
+	out.Cards, err = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
 		WHERE p.board_id=? AND c.due_date>=? AND c.due_date<? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.due_date, c.id`,
 		in.BoardID, from.Format("2006-01-02"), to.AddDate(0, 0, 1).Format("2006-01-02"))
-	out.Unscheduled = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+	if err != nil {
+		return CalendarOut{}, err
+	}
+	out.Unscheduled, err = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
 		WHERE p.board_id=? AND c.due_date IS NULL AND c.is_draft=0 AND c.is_template=0 AND l.type='active' ORDER BY c.updated_at DESC, c.id DESC LIMIT 50`, in.BoardID)
+	if err != nil {
+		return CalendarOut{}, err
+	}
 	return out, nil
 }

@@ -59,3 +59,44 @@ func DeleteBoards(e *ops.Env, boardIDs []string, del func(tx *sql.Tx) error) (af
 	}
 	return after, nil
 }
+
+// DeleteProjectBoards resolves the boards belonging to projectID inside the deleting transaction, runs
+// BeforeBoardsDelete on them so multi-board cards are re-homed/unplaced rather than cascade-deleted, and runs del(tx).
+// Returns the hook's after function to call once the caller's own events are out. No authz: callers check Manage first.
+func DeleteProjectBoards(e *ops.Env, projectID string, del func(tx *sql.Tx) error) (after func(), err error) {
+	after = func() {}
+	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(e.Ctx, `SELECT id FROM boards WHERE project_id=?`, projectID)
+		if err != nil {
+			return err
+		}
+		var boardIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			boardIDs = append(boardIDs, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		a, err := beforeBoardsDelete(e, tx, boardIDs)
+		if err != nil {
+			return err
+		}
+		after = a
+		if del != nil {
+			return del(tx)
+		}
+		return nil
+	})
+	if err != nil {
+		return func() {}, err
+	}
+	return after, nil
+}

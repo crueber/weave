@@ -49,5 +49,5 @@
 {{define "boards_drafts"}}{{$p := .Data.P}}{{range .Data.Drafts}}{{template "boards_draft" dict "D" . "P" $p}}{{end}}{{end}}
 {{define "boards_inbox_frag"}}{{template "boards_inbox" .Data}}{{end}}
 
-{{/* list and grid views: a quiet pointer to the Inbox, which lives on the Kanban view */}}
-{{define "boards_inbox_link"}}<a class="boards-inbox-link" href="{{boardsHref .PageURL "kanban" .Query}}" title="The Inbox is the first column of the Kanban view">{{template "boards_inbox_ico"}}Inbox <span class="boards-count">{{len .Drafts}}</span><span class="boards-inbox-link-hint">on the Kanban view</span></a>{{end}}
+{{/* list and grid views: a quiet pointer to the Inbox, which lives on the board view */}}
+{{define "boards_inbox_link"}}<a class="boards-inbox-link" href="{{boardsHref .PageURL "kanban" .Query}}" title="The Inbox is the first column of the board view">{{template "boards_inbox_ico"}}Inbox <span class="boards-count">{{len .Drafts}}</span><span class="boards-inbox-link-hint">on the Kanban view</span></a>{{end}}

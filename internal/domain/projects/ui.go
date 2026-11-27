@@ -121,7 +121,7 @@ func init() {
 		return c.Render("projects_settings.html", d)
 	})
 	web.Route("GET /ui/projects/{id}/settings", func(c *web.Ctx) error {
-		if _, err := loadSettings(c, c.R.PathValue("id")); err != nil {
+		if err := authz.RequireProject(c.Env, c.R.PathValue("id"), authz.Manage); err != nil {
 			return err
 		}
 		c.Redirect("/projects/" + c.R.PathValue("id") + "/settings")
@@ -198,25 +198,6 @@ func init() {
 	web.Route("POST /ui/fieldgroups/{id}/fields", fieldsTab("project.field.create"))
 	web.Route("POST /ui/basefields/{id}", fieldsTab("project.field.update"))
 	web.Route("DELETE /ui/basefields/{id}", fieldsTab("project.field.delete"))
-}
-
-// boardURL finds the new board's id in an op result of unknown type.
-func boardURL(out any, projectID string) string {
-	b, _ := json.Marshal(out)
-	var v struct {
-		ID   string `json:"id"`
-		Item struct {
-			ID string `json:"id"`
-		} `json:"item"`
-	}
-	_ = json.Unmarshal(b, &v)
-	if v.ID == "" {
-		v.ID = v.Item.ID
-	}
-	if isID(v.ID) {
-		return "/boards/" + v.ID
-	}
-	return "/projects/" + projectID
 }
 
 func favorite(c *web.Ctx, op string) error {
@@ -370,6 +351,11 @@ func sectionParam(c *web.Ctx) string {
 
 // loadSettings loads everything the settings page shows; managers only (others get 403 as before).
 func loadSettings(c *web.Ctx, id string) (settingsData, error) {
+	return loadSettingsSection(c, id, "")
+}
+
+// loadSettingsSection loads only the data required for the named section ("" loads every section for the full page).
+func loadSettingsSection(c *web.Ctx, id, only string) (settingsData, error) {
 	p, err := Get(c.Env, id)
 	if err != nil {
 		return settingsData{}, err
@@ -379,15 +365,7 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 		return settingsData{}, ops.Forbidden()
 	}
 	d := settingsData{P: p, Sections: sections, Active: "general", FieldTypes: FieldTypes, Caps: pc}
-	def, admin := notify.AgentPromptDefault(c.Env, agentprompt.ScopeProject)
-	d.Prompt = promptEdit{Text: def, From: "Weave's built-in text", Tokens: agentprompt.Tokens(agentprompt.ScopeProject)}
-	if admin {
-		d.Prompt.From = "the admin default"
-	}
-	if p.AgentPrompt != "" {
-		d.Prompt.Text, d.Prompt.Custom = p.AgentPrompt, true
-	}
-	if c.R != nil {
+	if only == "" && c.R != nil {
 		q := c.R.URL.Query().Get("section")
 		for _, s := range sections {
 			if s.ID == q {
@@ -395,27 +373,45 @@ func loadSettings(c *web.Ctx, id string) (settingsData, error) {
 			}
 		}
 	}
-	for _, n := range GradientNames() {
-		d.Gradients = append(d.Gradients, gradient{n, BackgroundCSS(Project{BackgroundType: "gradient", BackgroundGradient: n})})
+	if only == "" || only == "agents" {
+		def, admin := notify.AgentPromptDefault(c.Env, agentprompt.ScopeProject)
+		d.Prompt = promptEdit{Text: def, From: "Weave's built-in text", Tokens: agentprompt.Tokens(agentprompt.ScopeProject)}
+		if admin {
+			d.Prompt.From = "the admin default"
+		}
+		if p.AgentPrompt != "" {
+			d.Prompt.Text, d.Prompt.Custom = p.AgentPrompt, true
+		}
 	}
-	if d.Images, err = ops.Typed[[]BackgroundImage](c.Env, "project.background.list", IDIn{id}); err != nil {
-		return d, err
+	if only == "" || only == "background" {
+		for _, n := range GradientNames() {
+			d.Gradients = append(d.Gradients, gradient{n, BackgroundCSS(Project{BackgroundType: "gradient", BackgroundGradient: n})})
+		}
+		if d.Images, err = ops.Typed[[]BackgroundImage](c.Env, "project.background.list", IDIn{id}); err != nil {
+			return d, err
+		}
 	}
-	if d.Managers, err = ops.Typed[[]Manager](c.Env, "project.manager.list", IDIn{id}); err != nil {
-		return d, err
+	if only == "" || only == "managers" {
+		if d.Managers, err = ops.Typed[[]Manager](c.Env, "project.manager.list", IDIn{id}); err != nil {
+			return d, err
+		}
+		// project.manager.remove: never the last manager; the owning manager only with CanRemoveOwnerManager.
+		for i := range d.Managers {
+			m := &d.Managers[i]
+			m.CanRemove = len(d.Managers) > 1 && (!m.IsOwner || pc.CanRemoveOwnerManager)
+		}
+		// Manager candidates come from the caller's own directory (user.list: the same privacy rules as everywhere else,
+		// e-mail addresses only for admins), minus people who cannot be managers and those who already are.
+		if d.Candidates, err = managerCandidates(c.Env, d.Managers); err != nil {
+			return d, err
+		}
 	}
-	// project.manager.remove: never the last manager; the owning manager only with CanRemoveOwnerManager.
-	for i := range d.Managers {
-		m := &d.Managers[i]
-		m.CanRemove = len(d.Managers) > 1 && (!m.IsOwner || pc.CanRemoveOwnerManager)
+	if only == "" || only == "fields" {
+		if d.Groups, err = ops.Typed[[]BaseGroup](c.Env, "project.fieldgroup.list", IDIn{id}); err != nil {
+			return d, err
+		}
 	}
-	// Manager candidates come from the caller's own directory (user.list: the same privacy rules as everywhere else,
-	// e-mail addresses only for admins), minus people who cannot be managers and those who already are.
-	if d.Candidates, err = managerCandidates(c.Env, d.Managers); err != nil {
-		return d, err
-	}
-	d.Groups, err = ops.Typed[[]BaseGroup](c.Env, "project.fieldgroup.list", IDIn{id})
-	return d, err
+	return d, nil
 }
 
 // managerCandidates lists the people the caller may add as project managers, from the user.list directory op.
@@ -449,7 +445,7 @@ func renderSection(c *web.Ctx, id, section string, done bool) error {
 	default:
 		section = "general"
 	}
-	d, err := loadSettings(c, id)
+	d, err := loadSettingsSection(c, id, section)
 	if err != nil {
 		return err
 	}

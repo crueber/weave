@@ -7,7 +7,7 @@ fast path: what the project is, the rules that have bitten before, how to build/
 
 ## 1. What this is
 
-Weave is a self-hosted kanban server: Go + HTMX + SQLite, a clean-room reimplementation of Planka (including the Pro
+Weave is a self-hosted project management board server: Go + HTMX + SQLite, a clean-room reimplementation of Planka (including the Pro
 feature list from planka.app/pro). Single binary, one data directory, **one replica only** (in-process SSE hub, SQLite).
 Humans sign in with **OIDC only** (no local passwords). Machines (the `weave` CLI, AI agents) use **API keys**.
 Every capability is one registered *op*, so the browser UI, REST API (`/api/v1`) and CLI always have the same features.

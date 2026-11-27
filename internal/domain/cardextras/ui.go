@@ -184,8 +184,10 @@ func limitParam(c *web.Ctx, def int) int {
 func members(c *web.Ctx, d *sectionData) []Member {
 	ms, _ := query(c.Env.Ctx, c.Env.DB, func(r *sql.Rows) (Member, error) { var m Member; return m, r.Scan(&m.ID, &m.Name) },
 		`SELECT u.id,u.name FROM users u WHERE u.is_deactivated=0 AND u.deleted_at IS NULL AND u.id IN (
-			SELECT user_id FROM board_memberships WHERE board_id=? AND user_id IS NOT NULL
-			UNION SELECT user_id FROM card_memberships WHERE card_id=?) ORDER BY u.name`, d.BoardID, d.CardID)
+			SELECT user_id FROM board_memberships WHERE board_id=?1 AND user_id IS NOT NULL
+			UNION SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1
+			UNION SELECT pm.user_id FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id WHERE b.id=?1
+			UNION SELECT user_id FROM card_memberships WHERE card_id=?2) ORDER BY u.name`, d.BoardID, d.CardID)
 	return ms
 }
 
@@ -234,7 +236,7 @@ func renderSection(c *web.Ctx, section, cardID string) error {
 		}
 	case "activity":
 		d.Limit = limitParam(c, 50)
-		if d.Actions, err = ops.Typed[[]ActionItem](c.Env, "activity.card", CardActionsIn{CardID: cardID, Limit: d.Limit}); err != nil {
+		if d.Actions, err = ops.Typed[[]ActionItem](c.Env, "activity.card", CardActionsIn{CardID: cardID, BoardID: d.BoardID, Limit: d.Limit}); err != nil {
 			return err
 		}
 		d.HasMore, d.NextLimit = len(d.Actions) >= d.Limit, d.Limit+50
@@ -339,7 +341,10 @@ func registerUI() {
 
 	// Custom fields take a textarea of options, so bind them by hand.
 	web.Route("POST /ui/custom-fields", func(c *web.Ctx) error {
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("invalid form data")
+		}
 		f := c.R.Form
 		out, err := ops.Call(c.Env, "customfield.create", &FieldCreateIn{GroupID: f.Get("groupId"), BaseGroupID: f.Get("baseGroupId"),
 			Name: f.Get("name"), Type: f.Get("type"), Options: splitOptions(f.Get("options")), ShowOnFrontOfCard: formBool(f.Get("showOnFrontOfCard"))})
@@ -349,7 +354,10 @@ func registerUI() {
 		return afterMutation(c, "fields", out)
 	})
 	web.Route("POST /ui/custom-fields/{id}", func(c *web.Ctx) error {
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("invalid form data")
+		}
 		f := c.R.Form
 		in := &FieldUpdateIn{ID: c.R.PathValue("id")}
 		if f.Has("name") {
@@ -378,7 +386,10 @@ func registerUI() {
 	// Drag-and-drop reorder endpoints (weave.js posts id, container, afterId, beforeId; the sortable URL carries ?_card=<cardId>).
 	reorder := func(pattern, section string, run func(c *web.Ctx, id, container, after, before string) (any, error)) {
 		web.Route(pattern, func(c *web.Ctx) error {
-			_ = c.R.ParseForm()
+			c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+			if err := c.R.ParseForm(); err != nil {
+				return ops.Invalid("invalid form data")
+			}
 			f := c.R.Form
 			out, err := run(c, f.Get("id"), f.Get("container"), f.Get("afterId"), f.Get("beforeId"))
 			if err != nil {
@@ -407,14 +418,14 @@ func registerUI() {
 		if err != nil {
 			return err
 		}
-		return writeStream(c.W, out.(*ops.Stream), true)
+		return writeStream(c.W, out.(*ops.Stream))
 	})
 	web.RoutePublic("GET /attachments/{id}/thumbnail", func(c *web.Ctx) error {
 		out, err := c.Do("attachment.thumbnail")
 		if err != nil {
 			return err
 		}
-		return writeStream(c.W, out.(*ops.Stream), true)
+		return writeStream(c.W, out.(*ops.Stream))
 	})
 
 	// Board media view.
@@ -443,16 +454,15 @@ func registerUI() {
 }
 
 // writeStream sends a file inline only for safe raster/video/audio types; everything else downloads.
-func writeStream(w http.ResponseWriter, st *ops.Stream, allowInline bool) error {
+func writeStream(w http.ResponseWriter, st *ops.Stream) error {
 	disp := "attachment"
-	ct := st.ContentType
-	if allowInline && (strings.HasPrefix(ct, "image/") && ct != "image/svg+xml" || strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "audio/") || ct == "application/pdf") {
+	ct := strings.ToLower(strings.TrimSpace(st.ContentType))
+	if (strings.HasPrefix(ct, "image/") && !strings.Contains(ct, "svg")) || strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "audio/") || ct == "application/pdf" {
 		disp = "inline"
 	}
 	if disp == "attachment" {
-		ct = "application/octet-stream"
-		if st.ContentType != "" && !strings.Contains(st.ContentType, "html") && !strings.Contains(st.ContentType, "svg") && !strings.Contains(st.ContentType, "javascript") {
-			ct = st.ContentType
+		if ct == "" || strings.Contains(ct, "html") || strings.Contains(ct, "svg") || strings.Contains(ct, "javascript") {
+			ct = "application/octet-stream"
 		}
 	}
 	w.Header().Set("Content-Type", ct)

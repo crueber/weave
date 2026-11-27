@@ -59,7 +59,7 @@ func Project(e *ops.Env, projectID string) ProjectCaps {
 	pc := ProjectCaps{ProjectID: projectID, Level: l, CanView: l >= View, CanManage: l >= Manage}
 	pc.CanFavorite = pc.CanView && e.User != nil
 	pc.CanConnectAgent = pc.CanView && e.User != nil
-	pc.CanCreateBoard = pc.CanView && CanCreateBoard(e, projectID)
+	pc.CanCreateBoard = pc.CanView && canCreateBoardAt(e, projectID, l)
 	pc.CanRemoveOwnerManager = pc.CanManage && CanRemoveOwningManager(e, projectID)
 	return pc
 }
@@ -92,30 +92,33 @@ func CanRemoveOwningManager(e *ops.Env, projectID string) bool {
 // ids are absent). The home page uses it so its "My projects" grouping follows the ops.
 func ProjectLevels(e *ops.Env, projectIDs []string) map[string]Level {
 	out := map[string]Level{}
+	projectIDs = dedupeIDs(projectIDs)
 	if len(projectIDs) == 0 || e.User == nil {
 		return out
 	}
-	in, args := placeholders(projectIDs)
-	margs := append(append([]any{}, args...), e.User.UserID)
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT project_id FROM project_managers WHERE project_id IN (`+in+`) AND user_id=?`, margs...); err == nil {
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				out[id] = Manage
+	for i := 0; i < len(projectIDs); i += idChunk {
+		in, args := placeholders(projectIDs[i:min(i+idChunk, len(projectIDs))])
+		margs := append(append([]any{}, args...), e.User.UserID)
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT project_id FROM project_managers WHERE project_id IN (`+in+`) AND user_id=?`, margs...); err == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil {
+					out[id] = Manage
+				}
 			}
+			rows.Close()
 		}
-		rows.Close()
-	}
-	vargs := append(append([]any{}, args...), e.User.UserID, e.User.UserID)
-	if rows, err := e.DB.QueryContext(e.Ctx, `SELECT DISTINCT b.project_id FROM boards b JOIN board_memberships m ON m.board_id=b.id WHERE b.project_id IN (`+in+`) AND
-		(m.user_id=? OR m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, vargs...); err == nil {
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil && out[id] < View {
-				out[id] = View
+		vargs := append(append([]any{}, args...), e.User.UserID, e.User.UserID)
+		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT DISTINCT b.project_id FROM boards b JOIN board_memberships m ON m.board_id=b.id WHERE b.project_id IN (`+in+`) AND
+			(m.user_id=? OR m.group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, vargs...); err == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil && out[id] < View {
+					out[id] = View
+				}
 			}
+			rows.Close()
 		}
-		rows.Close()
 	}
 	return out
 }
@@ -155,37 +158,109 @@ type BoardCaps struct {
 	CanRemoveSelfMember bool // board.member.remove of one's own membership (any member may leave)
 }
 
+type boardFacts struct {
+	projectID        string
+	public           bool
+	useProjectLabels bool
+	boardCreation    string
+	isPM             bool
+	isMember         bool
+	isOwner          bool
+	level            Level
+}
+
+func loadBoardFacts(e *ops.Env, boardID string) (boardFacts, bool) {
+	var f boardFacts
+	if e.User == nil {
+		if e.DB.QueryRowContext(e.Ctx, `SELECT b.project_id,b.is_public,COALESCE(p.use_project_labels,0),COALESCE(p.board_creation,'owners') FROM boards b LEFT JOIN projects p ON p.id=b.project_id WHERE b.id=?`, boardID).
+			Scan(&f.projectID, &f.public, &f.useProjectLabels, &f.boardCreation) != nil {
+			return f, false
+		}
+		if f.public {
+			f.level = View
+		}
+		return f, true
+	}
+	if e.DB.QueryRowContext(e.Ctx, `SELECT b.project_id,b.is_public,COALESCE(p.use_project_labels,0),COALESCE(p.board_creation,'owners'),
+		EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=?)
+		FROM boards b LEFT JOIN projects p ON p.id=b.project_id WHERE b.id=?`, e.User.UserID, boardID).
+		Scan(&f.projectID, &f.public, &f.useProjectLabels, &f.boardCreation, &f.isPM) != nil {
+		return f, false
+	}
+	best := None
+	hasMember := false
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT role, can_comment, COALESCE(user_id=?, 0) FROM board_memberships WHERE board_id=? AND
+		(user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))`, e.User.UserID, boardID, e.User.UserID, e.User.UserID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var role string
+			var cc *bool
+			var direct bool
+			if rows.Scan(&role, &cc, &direct) != nil {
+				continue
+			}
+			hasMember = true
+			if direct && role == RoleOwner {
+				f.isOwner = true
+			}
+			if l := MembershipLevel(role, cc); l > best {
+				best = l
+			}
+		}
+	}
+	f.isMember = f.isPM || hasMember
+	switch {
+	case f.isPM:
+		f.level = Manage
+	case best != None:
+		f.level = best
+	case f.public:
+		f.level = View
+	}
+	return f, true
+}
+
+func canEditBoardLabels(boardLevel Level, useProjectLabels, isPM bool) bool {
+	return boardLevel >= Edit && (!useProjectLabels || isPM)
+}
+
 // Board computes BoardCaps for the caller.
 func Board(e *ops.Env, boardID string) BoardCaps {
 	bc := BoardCaps{BoardID: boardID}
-	var useProjectLabels bool
-	if e.DB.QueryRowContext(e.Ctx, `SELECT b.project_id,b.is_public,COALESCE(p.use_project_labels,0) FROM boards b LEFT JOIN projects p ON p.id=b.project_id WHERE b.id=?`, boardID).
-		Scan(&bc.ProjectID, &bc.Public, &useProjectLabels) != nil {
+	f, ok := loadBoardFacts(e, boardID)
+	if !ok {
 		return bc
 	}
-	l := BoardLevel(e, boardID)
-	bc.Level = l
+	l := f.level
+	bc.ProjectID, bc.Public, bc.Level = f.projectID, f.public, l
 	bc.CanView, bc.CanComment, bc.CanEdit, bc.CanManage = l >= View, l >= Comment, l >= Edit, l >= Manage
 	bc.CanRestoreArchived = l >= Edit
 	if !bc.CanView {
 		return bc
 	}
 	signedIn := e.User != nil
-	bc.IsMember = IsBoardMember(e, boardID)
-	if signedIn {
-		var n int
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM board_memberships WHERE board_id=? AND user_id=? AND role=?`, boardID, e.User.UserID, RoleOwner).Scan(&n)
-		bc.IsOwner = n > 0
-	}
+	bc.IsMember, bc.IsOwner = f.isMember, f.isOwner
 	bc.CanOpenSettings = bc.IsMember
-	bc.CanEditLabels = bc.CanEdit && (!useProjectLabels || ProjectLevel(e, bc.ProjectID) >= Manage)
+	bc.CanEditLabels = canEditBoardLabels(l, f.useProjectLabels, f.isPM)
 	bc.CanManageMembers, bc.CanShare, bc.CanPublishTemplate = bc.CanManage, bc.CanManage, bc.CanManage
 	bc.CanApplyTemplate = bc.CanManage
 	bc.CanManageAgents = bc.CanManage && signedIn && !e.User.IsAgent
-	bc.CanManageWebhooks = RequireWebhookScope(e, "", boardID) == nil
+	bc.CanManageWebhooks = canManageBoardWebhooks(e, l)
 	bc.CanManageNotify, bc.CanEditPrompt, bc.CanDelete = bc.CanManage, bc.CanManage, bc.CanManage
-	bc.CanReorder = bc.CanManage && ProjectLevel(e, bc.ProjectID) >= Manage
-	bc.CanCreateBoardHere = signedIn && CanCreateBoard(e, bc.ProjectID)
+	bc.CanReorder = bc.CanManage && f.isPM
+	if signedIn {
+		var projLevel Level
+		switch {
+		case f.isPM:
+			projLevel = Manage
+		case f.isMember:
+			projLevel = View
+		case f.boardCreation == BoardCreationMembers && CanCreateProject(e):
+			projLevel = ProjectLevel(e, bc.ProjectID)
+		}
+		bc.CanCreateBoardHere = CanCreateBoardWith(e, projLevel, f.boardCreation)
+	}
 	bc.CanWatch, bc.CanConnectAgent, bc.CanUseSavedFilters = signedIn, signedIn, signedIn
 	bc.CanSeeInbox = signedIn && bc.IsMember
 	bc.CanRemoveSelfMember = signedIn && bc.IsMember
@@ -201,14 +276,12 @@ func CanEditBoardLabels(e *ops.Env, boardID string) bool {
 
 // RequireBoardLabels is CanEditBoardLabels as an error (not_found without View, forbidden otherwise).
 func RequireBoardLabels(e *ops.Env, boardID string) error {
-	if err := RequireBoard(e, boardID, Edit); err != nil {
-		return err
+	f, ok := loadBoardFacts(e, boardID)
+	if !ok || f.level == None {
+		return ops.NotFound("board")
 	}
-	var pid string
-	var use bool
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.project_id,COALESCE(p.use_project_labels,0) FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.id=?`, boardID).Scan(&pid, &use)
-	if use {
-		return RequireProject(e, pid, Manage)
+	if !canEditBoardLabels(f.level, f.useProjectLabels, f.isPM) {
+		return ops.Forbidden()
 	}
 	return nil
 }
@@ -246,7 +319,9 @@ func (c CardCaps) CanRemoveFromBoard(boardID string) bool {
 // CardPlacing is Card plus CanPlace (the card sheet's Boards row and the "Add to board..." picker).
 func CardPlacing(e *ops.Env, cardID string) CardCaps {
 	cc := Card(e, cardID)
-	cc.CanPlace = cc.CanEdit && len(PlaceTargets(e, cardID)) > 0
+	if cc.CanEdit && e.User != nil {
+		cc.CanPlace = len(placeTargets(e, cardID)) > 0
+	}
 	return cc
 }
 

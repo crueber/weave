@@ -24,7 +24,7 @@
 
   var handlers = {}, roomsBy = {}, es = null, started = false, healthy = false, dropped = false;
   var failures = 0, softErrors = 0, parked = false;
-  var watchdogTimer = null, retryTimer = null, pollTimer = null, parkTimer = null, refetchTimer = null, pulseTimer = null;
+  var watchdogTimer = null, retryTimer = null, pollTimer = null, parkTimer = null, refetchTimer = null, pulseTimer = null, announceTimer = null;
   var badge = null, bell = null, live = null, last = null;
 
   function rooms() {
@@ -50,6 +50,7 @@
   }
 
   function close() {
+    clearTimeout(watchdogTimer); watchdogTimer = null;
     if (es) { es.close(); es = null; }
     healthy = false;
   }
@@ -124,7 +125,8 @@
   function announce(msg) {
     if (!live) return;
     live.textContent = '';
-    setTimeout(function () { live.textContent = msg; }, 60);
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(function () { live.textContent = msg; }, 60);
   }
   function pulse() {
     bell.classList.remove('is-new');

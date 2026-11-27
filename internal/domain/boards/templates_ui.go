@@ -108,7 +108,7 @@ func galleryScope(c *web.Ctx) (pid, boardID, boardName string, err error) {
 	return pid, "", "", err
 }
 
-func galleryData(c *web.Ctx, pid, q, cat string) (GalleryData, error) {
+func galleryData(c *web.Ctx, pid, boardID, q, cat string) (GalleryData, error) {
 	d := GalleryData{ProjectID: pid, Query: q, Category: cat, Categories: TemplateCategories()}
 	if cat != "" && cat != "published" && categoryName(cat) == "" {
 		cat, d.Category = "", ""
@@ -118,7 +118,7 @@ func galleryData(c *web.Ctx, pid, q, cat string) (GalleryData, error) {
 		return d, err
 	}
 	for _, t := range all {
-		if t.ID == c.R.URL.Query().Get("boardId") && t.ID != "" {
+		if boardID != "" && t.ID == boardID {
 			continue // a board is never applied to itself
 		}
 		if t.Source == "builtin" {
@@ -127,12 +127,19 @@ func galleryData(c *web.Ctx, pid, q, cat string) (GalleryData, error) {
 			d.Published = append(d.Published, t)
 		}
 	}
-	d.Blank = cat == "" && q == ""
-	d.Empty = len(all) == 0 && !d.Blank
+	d.Blank = cat == "" && q == "" && boardID == ""
+	d.Empty = len(d.Builtins)+len(d.Published) == 0 && !d.Blank
 	if len(d.Published) > 0 {
 		d.HasPublished = true
-	} else if pub, err := ops.Typed[[]TemplateInfo](c.Env, "board.template.list", TemplateListIn{Category: "published"}); err == nil {
-		d.HasPublished = len(pub) > 0
+	} else if cat != "" || q != "" {
+		if pub, err := ops.Typed[[]TemplateInfo](c.Env, "board.template.list", TemplateListIn{Category: "published"}); err == nil {
+			for _, t := range pub {
+				if boardID == "" || t.ID != boardID {
+					d.HasPublished = true
+					break
+				}
+			}
+		}
 	}
 	return d, nil
 }
@@ -144,7 +151,7 @@ func registerGalleryUI() {
 		if err != nil {
 			return err
 		}
-		d, err := galleryData(c, pid, "", "")
+		d, err := galleryData(c, pid, "", "", "")
 		if err != nil {
 			return err
 		}
@@ -159,12 +166,11 @@ func registerGalleryUI() {
 		if err != nil {
 			return err
 		}
-		d, err := galleryData(c, pid, "", "")
+		d, err := galleryData(c, pid, bid, "", "")
 		if err != nil {
 			return err
 		}
-		d.BoardID, d.BoardName, d.Blank = bid, bname, false
-		d.Empty = len(d.Builtins)+len(d.Published) == 0
+		d.BoardID, d.BoardName = bid, bname
 		return c.RenderBlock("boards_gallery.html", "boards_gallery", d)
 	})
 	// results grid (op board.template.list): search words and category come from the rail/search form
@@ -173,13 +179,12 @@ func registerGalleryUI() {
 		if err != nil {
 			return err
 		}
-		d, err := galleryData(c, pid, c.R.URL.Query().Get("q"), c.R.URL.Query().Get("category"))
+		d, err := galleryData(c, pid, bid, c.R.URL.Query().Get("q"), c.R.URL.Query().Get("category"))
 		if err != nil {
 			return err
 		}
 		if bid != "" {
-			d.BoardID, d.BoardName, d.Blank = bid, bname, false
-			d.Empty = len(d.Builtins)+len(d.Published) == 0
+			d.BoardID, d.BoardName = bid, bname
 		}
 		return c.RenderBlock("boards_gallery.html", "boards_tpl_grid", d)
 	})

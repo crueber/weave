@@ -1,5 +1,5 @@
 <h1 align="center">Weave</h1>
-<p align="center"><b>The kanban board your whole team can work, including the agents.</b></p>
+<p align="center"><b>The project management board your whole team can work, including the agents.</b></p>
 <p align="center">
   Self-hosted. One small server. A calm, fast board for people, and a first-class CLI for AI agents.
 </p>

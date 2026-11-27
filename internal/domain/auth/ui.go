@@ -343,11 +343,16 @@ func renderSettings(c *web.Ctx, d *settingsData) error {
 		return err
 	}
 	d.User = u
-	if s, err := ops.Typed[SessionList](c.Env, "session.list", NoInput{}); err == nil {
-		d.Sessions = s.Items
+	partial := c.IsHTMX() && c.R.Method != "GET"
+	if !partial || d.Section == "sessions" {
+		if s, err := ops.Typed[SessionList](c.Env, "session.list", NoInput{}); err == nil {
+			d.Sessions = s.Items
+		}
 	}
-	if k, err := ops.Typed[[]APIKeyInfo](c.Env, "apikey.list", &APIKeyListIn{ID: "me"}); err == nil {
-		d.Keys = k
+	if !partial || d.Section == "apikey" {
+		if k, err := ops.Typed[[]APIKeyInfo](c.Env, "apikey.list", &APIKeyListIn{ID: "me"}); err == nil {
+			d.Keys = k
+		}
 	}
 	d.BaseURL = cfgOf(c.Env).BaseURL
 	d.Sections = settingsSections
@@ -355,7 +360,7 @@ func renderSettings(c *web.Ctx, d *settingsData) error {
 		d.Active = settingsSections[0].ID
 	}
 	d.Themes, d.Densities, d.ColourModes, d.Editors, d.HomeViews, d.Orders = themes, densities, colourMode, editors, homeViews, orders
-	if c.IsHTMX() && c.R.Method != "GET" {
+	if partial {
 		return c.RenderBlock("auth_settings.html", "auth_set_"+d.Section, d)
 	}
 	return c.Render("auth_settings.html", d)

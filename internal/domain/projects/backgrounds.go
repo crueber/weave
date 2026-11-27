@@ -2,6 +2,7 @@ package projects
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"image"
 	_ "image/gif"
@@ -220,20 +221,37 @@ func init() {
 				return DeleteOut{}, err
 			}
 			var file string
-			if e.DB.QueryRowContext(e.Ctx, `SELECT file FROM background_images WHERE id=? AND project_id=?`, in.ImageID, in.ID).Scan(&file) != nil {
-				return DeleteOut{}, ops.NotFound("background image")
-			}
-			if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM background_images WHERE id=?`, in.ImageID); err != nil {
+			var cleared bool
+			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				if err := tx.QueryRowContext(e.Ctx, `SELECT file FROM background_images WHERE id=? AND project_id=?`, in.ImageID, in.ID).Scan(&file); err != nil {
+					if db.IsNoRows(err) {
+						return ops.NotFound("background image")
+					}
+					return err
+				}
+				if _, err := tx.ExecContext(e.Ctx, `DELETE FROM background_images WHERE id=?`, in.ImageID); err != nil {
+					return err
+				}
+				res, err := tx.ExecContext(e.Ctx, `UPDATE projects SET background_image_id=NULL,background_type=NULL,updated_at=? WHERE id=? AND background_image_id=?`, db.Now(), in.ID, in.ImageID)
+				if err != nil {
+					return err
+				}
+				n, _ := res.RowsAffected()
+				cleared = n > 0
+				return nil
+			})
+			if err != nil {
 				return DeleteOut{}, err
 			}
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE projects SET background_image_id=NULL,background_type=NULL,updated_at=? WHERE id=? AND background_image_id=?`, db.Now(), in.ID, in.ImageID)
 			if root, err := FilesDir(e); err == nil {
 				_ = os.Remove(filepath.Join(root, file))
 				_ = os.Remove(filepath.Join(root, thumbOf(file)))
 			}
 			publish(e, "backgroundImage.deleted", in.ID, map[string]string{"id": in.ImageID})
-			if p, err := Get(e, in.ID); err == nil {
-				publish(e, "project.updated", in.ID, p)
+			if cleared {
+				if p, err := Get(e, in.ID); err == nil {
+					publish(e, "project.updated", in.ID, p)
+				}
 			}
 			return DeleteOut{in.ImageID}, nil
 		})

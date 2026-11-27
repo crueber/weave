@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,8 +105,9 @@ var (
 
 func provider(ctx context.Context, issuer string) (*oidc.Provider, error) {
 	provMu.Lock()
-	defer provMu.Unlock()
-	if p, ok := providers[issuer]; ok {
+	p, ok := providers[issuer]
+	provMu.Unlock()
+	if ok {
 		return p, nil
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -114,7 +116,9 @@ func provider(ctx context.Context, issuer string) (*oidc.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	provMu.Lock()
 	providers[issuer] = p
+	provMu.Unlock()
 	return p, nil
 }
 
@@ -210,36 +214,50 @@ func groupAccess(e *ops.Env, claims map[string]any) (role string, teams []string
 // syncTeams makes the user's membership of OIDC-managed groups match the claim.
 // Groups created here are marked source='oidc'; local groups are only added to, never removed from.
 func syncTeams(e *ops.Env, userID string, teams []string) {
-	want := map[string]bool{}
-	for _, name := range teams {
-		var id string
-		err := e.DB.QueryRowContext(e.Ctx, `SELECT id FROM user_groups WHERE name=? COLLATE NOCASE`, name).Scan(&id)
-		if err == sql.ErrNoRows {
-			id = db.NewID()
-			if _, err = e.DB.ExecContext(e.Ctx, `INSERT INTO user_groups(id,name,source,created_at) VALUES(?,?, 'oidc', ?)`, id, name, db.Now()); err != nil {
+	_ = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		want := map[string]bool{}
+		now := db.Now()
+		for _, name := range teams {
+			var id string
+			err := tx.QueryRowContext(e.Ctx, `SELECT id FROM user_groups WHERE name=? COLLATE NOCASE`, name).Scan(&id)
+			if err == sql.ErrNoRows {
+				if _, err = tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_groups(id,name,source,created_at) VALUES(?,?, 'oidc', ?)`, db.NewID(), name, now); err != nil {
+					continue
+				}
+				if err = tx.QueryRowContext(e.Ctx, `SELECT id FROM user_groups WHERE name=? COLLATE NOCASE`, name).Scan(&id); err != nil {
+					continue
+				}
+			} else if err != nil {
 				continue
 			}
-		} else if err != nil {
-			continue
+			want[id] = true
+			if _, err := tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_group_members(group_id,user_id) VALUES(?,?)`, id, userID); err != nil {
+				return err
+			}
 		}
-		want[id] = true
-		_, _ = e.DB.ExecContext(e.Ctx, `INSERT OR IGNORE INTO user_group_members(group_id,user_id) VALUES(?,?)`, id, userID)
-	}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT g.id FROM user_group_members m JOIN user_groups g ON g.id=m.group_id WHERE m.user_id=? AND g.source='oidc'`, userID)
-	if err != nil {
-		return
-	}
-	var drop []string
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil && !want[id] {
-			drop = append(drop, id)
+		rows, err := tx.QueryContext(e.Ctx, `SELECT g.id FROM user_group_members m JOIN user_groups g ON g.id=m.group_id WHERE m.user_id=? AND g.source='oidc'`, userID)
+		if err != nil {
+			return err
 		}
-	}
-	rows.Close()
-	for _, id := range drop {
-		_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM user_group_members WHERE group_id=? AND user_id=?`, id, userID)
-	}
+		var drop []string
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil && !want[id] {
+				drop = append(drop, id)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, id := range drop {
+			if _, err := tx.ExecContext(e.Ctx, `DELETE FROM user_group_members WHERE group_id=? AND user_id=?`, id, userID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // OIDCLogin maps verified ID-token claims to a local user (provisioning one when
@@ -312,14 +330,26 @@ func OIDCLogin(e *ops.Env, subject string, claims map[string]any) (LoginOut, err
 		if a.Deactivated {
 			return LoginOut{}, ops.Forbidden()
 		}
-		if hasName && name != a.Name { // the identity provider owns the display name
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET name=?,updated_at=? WHERE id=?`, name, db.Now(), a.ID)
-		}
-		// roles are owned by the identity provider: apply on every login (never demote the last admin)
-		var cur string
-		_ = e.DB.QueryRowContext(e.Ctx, `SELECT role FROM users WHERE id=?`, a.ID).Scan(&cur)
-		if cur != role && !(cur == "admin" && countOtherAdmins(e, a.ID) == 0) {
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET role=? WHERE id=?`, role, a.ID)
+		err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			if hasName && name != a.Name { // the identity provider owns the display name
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE users SET name=?,updated_at=? WHERE id=?`, name, db.Now(), a.ID); err != nil {
+					return err
+				}
+			}
+			// roles are owned by the identity provider: apply on every login (never demote the last admin)
+			var cur string
+			if err := tx.QueryRowContext(e.Ctx, `SELECT role FROM users WHERE id=?`, a.ID).Scan(&cur); err != nil {
+				return err
+			}
+			if cur != role && !(cur == "admin" && countOtherAdmins(e.Ctx, tx, a.ID) == 0) {
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE users SET role=? WHERE id=?`, role, a.ID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return LoginOut{}, err
 		}
 	}
 	syncTeams(e, a.ID, teams)
@@ -441,31 +471,46 @@ func init() {
 
 	ops.Register(ops.Op{Name: "auth.oidc.settings.update", Summary: "Update the SSO configuration stored in the database (admin; env vars still override)", Method: "PUT", Path: "/auth/oidc/settings", Auth: ops.AuthAdmin, UI: "POST /ui/admin/sso"},
 		func(e *ops.Env, in OIDCSettingsIn) (OIDCSettings, error) {
-			set := func(k string, v *string) error {
-				if v == nil {
-					return nil
+			if in.Issuer != nil {
+				trimmed := strings.TrimSpace(*in.Issuer)
+				if trimmed != "" {
+					u, err := url.Parse(trimmed)
+					if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+						return OIDCSettings{}, ops.Invalid("issuer must be an http(s) URL")
+					}
 				}
-				return SetConfig(e, "oidc."+k, strings.TrimSpace(*v))
-			}
-			setB := func(k string, v *bool) error {
-				if v == nil {
-					return nil
-				}
-				return SetConfig(e, "oidc."+k, fmt.Sprint(*v))
-			}
-			if in.Issuer != nil && *in.Issuer != "" && !strings.HasPrefix(*in.Issuer, "http") {
-				return OIDCSettings{}, ops.Invalid("issuer must be an http(s) URL")
+				in.Issuer = &trimmed
 			}
 			if in.ClientSecret != nil && *in.ClientSecret == "" {
 				in.ClientSecret = nil // blank keeps the stored secret
 			}
-			for _, err := range []error{set("issuer", in.Issuer), set("clientId", in.ClientID), set("clientSecret", in.ClientSecret), set("scopes", in.Scopes),
-				set("emailClaim", in.EmailClaim), set("nameClaim", in.NameClaim), set("usernameClaim", in.UsernameClaim), set("groupsClaim", in.GroupsClaim), set("adminGroup", in.AdminGroup), set("userGroup", in.UserGroup),
-				set("workerGroup", in.WorkerGroup), set("guestGroup", in.GuestGroup), setB("requireGroup", in.RequireGroup), set("teamPrefix", in.TeamPrefix),
-				setB("autoProvision", in.AutoProvision)} {
-				if err != nil {
-					return OIDCSettings{}, err
+			err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				set := func(k string, v *string) error {
+					if v == nil {
+						return nil
+					}
+					_, err := tx.ExecContext(e.Ctx, `INSERT INTO config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "oidc."+k, strings.TrimSpace(*v))
+					return err
 				}
+				setB := func(k string, v *bool) error {
+					if v == nil {
+						return nil
+					}
+					_, err := tx.ExecContext(e.Ctx, `INSERT INTO config(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "oidc."+k, fmt.Sprint(*v))
+					return err
+				}
+				for _, err := range []error{set("issuer", in.Issuer), set("clientId", in.ClientID), set("clientSecret", in.ClientSecret), set("scopes", in.Scopes),
+					set("emailClaim", in.EmailClaim), set("nameClaim", in.NameClaim), set("usernameClaim", in.UsernameClaim), set("groupsClaim", in.GroupsClaim), set("adminGroup", in.AdminGroup), set("userGroup", in.UserGroup),
+					set("workerGroup", in.WorkerGroup), set("guestGroup", in.GuestGroup), setB("requireGroup", in.RequireGroup), set("teamPrefix", in.TeamPrefix),
+					setB("autoProvision", in.AutoProvision)} {
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return OIDCSettings{}, err
 			}
 			provMu.Lock()
 			providers = map[string]*oidc.Provider{}

@@ -56,7 +56,7 @@
   <form hx-patch="/ui/boards/{{.Board.ID}}" hx-trigger="change" hx-target="#set-views" hx-swap="outerHTML" class="bs-form">
     <input type="hidden" name="_section" value="views">
     <div class="bs-row bs-row-stack"><span class="bs-text"><b id="bs-view-l">Default view</b><small>The view people land on when they open the board.</small></span>
-      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-view-l">{{$v := .Board.DefaultView}}{{range .Views}}<label><input type="radio" name="defaultView" value="{{.}}"{{if eq . $v}} checked{{end}}{{if $off}} disabled{{end}}><span>{{.}}</span></label>{{end}}</div></div>
+      <div class="bs-seg" role="radiogroup" aria-labelledby="bs-view-l">{{$v := .Board.DefaultView}}{{range .Views}}<label><input type="radio" name="defaultView" value="{{.}}"{{if eq . $v}} checked{{end}}{{if $off}} disabled{{end}}><span>{{viewLabel .}}</span></label>{{end}}</div></div>
     <div class="bs-row bs-row-stack bs-cardcolor"><span class="bs-text"><b id="bs-cc-l">Card colouring</b><small>How labels colour cards on this board. <b>First label (by label order) decides the card colour; colours are never mixed.</b> Reorder labels under Labels to change which colour wins.</small></span>
       <div class="bs-seg" role="radiogroup" aria-labelledby="bs-cc-l">{{$m := .Board.CardColorMode}}<label><input type="radio" name="cardColorMode" value="pill"{{if ne $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Label pill</span></label><label><input type="radio" name="cardColorMode" value="fill"{{if eq $m "fill"}} checked{{end}}{{if $off}} disabled{{end}}><span>Colour the whole card</span></label></div>
       <div class="bs-cc-preview" aria-hidden="true"><span class="bs-cc-cap">Preview</span>{{template "bs_cc_preview" .}}</div></div>
@@ -65,7 +65,7 @@
     {{template "bs_toggle" dict "ID" "bs-ages" "Name" "showCardAges" "Title" "Card ages" "Help" "Fade cards that have not been touched for a while." "On" .Board.ShowCardAges "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-tasks" "Name" "expandTaskListsByDefault" "Title" "Expand task lists" "Help" "Open task lists automatically when a card is opened." "On" .Board.ExpandTaskListsByDefault "Off" $off}}
     {{template "bs_toggle" dict "ID" "bs-inbox" "Name" "hasInbox" "Title" "Board inbox" "Help" "Adds an Inbox column for capturing ideas before they become cards." "On" .Board.HasInbox "Off" $off}}
-    {{if .Board.HasInbox}}<p class="bs-hint bs-inbox-note">The Inbox is the first column of the <a href="/boards/{{.Board.ID}}?view=kanban">Kanban view</a>. Members see it; people who only see this board because it is public do not.</p>{{end}}
+    {{if .Board.HasInbox}}<p class="bs-hint bs-inbox-note">The Inbox is the first column of the <a href="/boards/{{.Board.ID}}?view=kanban">board view</a>. Members see it; people who only see this board because it is public do not.</p>{{end}}
   </form>
 </section>{{end}}
 

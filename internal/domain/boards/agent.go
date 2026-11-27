@@ -82,14 +82,15 @@ func init() {
 }
 
 func boardTree(e *ops.Env, in TreeIn) (TreeOut, error) {
-	if err := authz.RequireBoard(e, in.ID, authz.View); err != nil {
-		return TreeOut{}, err
+	lvl := authz.BoardLevel(e, in.ID)
+	if lvl < authz.View {
+		return TreeOut{}, ops.NotFound("board")
 	}
 	b, err := GetBoard(e.Ctx, e.DB, in.ID)
 	if err != nil {
 		return TreeOut{}, err
 	}
-	if authz.BoardLevel(e, in.ID) < authz.Manage {
+	if lvl < authz.Manage {
 		b.PublicToken = ""
 	}
 	all, err := listsOf(e, in.ID, true)
@@ -111,19 +112,29 @@ func boardTree(e *ops.Env, in TreeIn) (TreeOut, error) {
 		idx[l.ID] = len(out.Lists)
 		out.Lists = append(out.Lists, TreeList{List: l, Cards: []events.CardSnap{}})
 	}
-	// the cards placed on this board, each once, in this board's column order (closed is per card)
-	q := `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0`
+	if len(out.Lists) == 0 || events.SnapshotsOn == nil {
+		return out, nil
+	}
+	// the cards placed on this board in the selected columns, each once, in this board's column order (closed is per card)
+	q := `SELECT c.id FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0` +
+		` AND p.list_id IN (?` + strings.Repeat(",?", len(out.Lists)-1) + `)`
+	args := make([]any, 0, 1+len(out.Lists))
+	args = append(args, in.ID)
+	for _, tl := range out.Lists {
+		args = append(args, tl.ID)
+	}
 	if !in.IncludeClosed {
 		q += ` AND c.is_closed=0`
 	}
 	q += ` ORDER BY p.list_id, p.position, c.created_at, c.id`
-	if events.SnapshotsOn == nil {
-		return out, nil
-	}
-	ids := strs(e, q, in.ID)
+	ids := strs(e, q, args...)
 	var also map[string]int
 	if len(ids) > 0 {
-		also = authz.AlsoOn(e, in.ID, nil)
+		var filterIDs []string
+		if in.ListIDs != "" {
+			filterIDs = ids
+		}
+		also = authz.AlsoOn(e, in.ID, filterIDs)
 	}
 	for _, c := range events.SnapshotsOn(e, in.ID, ids) {
 		if i, ok := idx[c.ListID]; ok {

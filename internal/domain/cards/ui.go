@@ -161,7 +161,10 @@ func init() {
 
 	web.Route("POST /ui/cards/{id}/update", uiUpdate)
 	web.Route("POST /ui/cards/{id}/due", func(c *web.Ctx) error {
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("invalid form data")
+		}
 		id := c.R.PathValue("id")
 		// a bare date (calendar drop) keeps the existing time of day
 		if d := c.R.Form.Get("dueDate"); len(d) == 10 {
@@ -179,7 +182,10 @@ func init() {
 		return renderModal(c, id, "view", nil)
 	})
 	web.Route("POST /ui/cards/{id}/recurrence", func(c *web.Ctx) error {
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("invalid form data")
+		}
 		f := c.R.Form
 		in := RecurrenceIn{ID: c.R.PathValue("id")}
 		if f.Get("freq") != "" {
@@ -202,7 +208,10 @@ func init() {
 		return renderModal(c, in.ID, "view", nil)
 	})
 	web.Route("POST /ui/cards/{id}/move", func(c *web.Ctx) error {
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("invalid form data")
+		}
 		if c.R.Form.Get("listId") == "" && c.R.Form.Get("container") != "" { // weave.js sortable posts "container"
 			c.R.Form.Set("listId", c.R.Form.Get("container"))
 		}
@@ -250,7 +259,11 @@ func init() {
 
 	// description editing + locks
 	web.Route("POST /ui/cards/{id}/editing/touch", func(c *web.Ctx) error {
-		out, err := ops.Typed[EditTouchOut](c.Env, "card.edit.touch", mustBind(c, "card.edit.touch"))
+		in, err := c.Bind("card.edit.touch")
+		if err != nil {
+			return err
+		}
+		out, err := ops.Typed[EditTouchOut](c.Env, "card.edit.touch", in)
 		if err != nil {
 			return err
 		}
@@ -269,7 +282,10 @@ func init() {
 		if _, err := authz.RequireCard(c.Env, c.R.PathValue("id"), authz.View); err != nil {
 			return err
 		}
-		_ = c.R.ParseForm()
+		c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.MaxDescBytes)
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("description is too long")
+		}
 		c.W.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(c.W, RenderMarkdown(c.R.Form.Get("description")))
 		return nil
@@ -329,14 +345,6 @@ func doOn(c *web.Ctx, op string) (any, error) {
 		}
 	}
 	return ops.Call(c.Env, op, in)
-}
-
-func mustBind(c *web.Ctx, op string) any {
-	in, err := c.Bind(op)
-	if err != nil {
-		return EditTouchIn{ID: c.R.PathValue("id")}
-	}
-	return in
 }
 
 type modalData struct {
@@ -437,7 +445,10 @@ func renderDesc(c *web.Ctx, id, mode string, locker *EditHolder) error {
 
 // uiUpdate handles the title and description forms of the modal.
 func uiUpdate(c *web.Ctx) error {
-	_ = c.R.ParseForm()
+	c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+	if err := c.R.ParseForm(); err != nil {
+		return ops.Invalid("invalid form data")
+	}
 	id, part := c.R.PathValue("id"), c.R.Form.Get("_part")
 	if part == "desc" || part == "autosave" {
 		// refuse to overwrite if somebody else took the lock over meanwhile

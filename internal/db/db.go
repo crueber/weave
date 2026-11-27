@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -22,9 +23,14 @@ var migFS embed.FS
 
 type DB struct{ *sql.DB }
 
+// sqliteFileURI escapes characters that have special meaning in SQLite file: URIs.
+func sqliteFileURI(path string) string {
+	return "file:" + strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
+}
+
 // Open opens (creating if needed) the database at path and applies migrations.
 func Open(path string) (*DB, error) {
-	dsn := "file:" + path + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+	dsn := sqliteFileURI(path) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -32,7 +38,11 @@ func Open(path string) (*DB, error) {
 	// Writes are serialized by SQLite (IMMEDIATE tx + busy_timeout); allow readers to fan out.
 	sdb.SetMaxOpenConns(8)
 	d := &DB{sdb}
-	return d, d.migrate()
+	if err := d.migrate(); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	return d, nil
 }
 
 // OpenReadOnly opens an existing database for reading only: no migrations, no journal-mode change, no file
@@ -47,7 +57,7 @@ func OpenReadOnly(path string) (*DB, error) {
 	}
 	var last error
 	for _, extra := range []string{"", "&immutable=1"} {
-		dsn := "file:" + path + "?mode=ro" + extra + "&_pragma=busy_timeout(10000)&_pragma=query_only(1)"
+		dsn := sqliteFileURI(path) + "?mode=ro" + extra + "&_pragma=busy_timeout(10000)&_pragma=query_only(1)"
 		sdb, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			last = err
@@ -72,6 +82,24 @@ func (d *DB) migrate() error {
 	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return err
 	}
+	applied := map[string]bool{}
+	rows, err := d.Query(`SELECT name FROM schema_migrations`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		applied[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
 	ents, _ := migFS.ReadDir("migrations")
 	names := make([]string, 0, len(ents))
 	for _, e := range ents {
@@ -79,12 +107,14 @@ func (d *DB) migrate() error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		var x string
-		if d.QueryRow(`SELECT name FROM schema_migrations WHERE name=?`, n).Scan(&x) == nil {
+		if applied[n] {
 			continue
 		}
-		b, _ := migFS.ReadFile("migrations/" + n)
-		err := d.Tx(context.Background(), func(tx *sql.Tx) error {
+		b, err := migFS.ReadFile("migrations/" + n)
+		if err != nil {
+			return fmt.Errorf("migration %s: %w", n, err)
+		}
+		err = d.Tx(context.Background(), func(tx *sql.Tx) error {
 			if _, err := tx.Exec(string(b)); err != nil {
 				return err
 			}
@@ -104,8 +134,8 @@ func (d *DB) Tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
@@ -142,7 +172,7 @@ func Token(n int) string { b := make([]byte, n); _, _ = rand.Read(b); return hex
 // PositionGap is the spacing used for REAL positions; rebalance when gaps < 1.
 const PositionGap = 65536.0
 
-func IsNoRows(err error) bool { return err == sql.ErrNoRows }
+func IsNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
 func IsUnique(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
 }

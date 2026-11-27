@@ -3,6 +3,7 @@ package boards
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/crueber/weave/internal/db"
 )
@@ -18,62 +19,104 @@ import (
 // empty): the positions are the placements in that column, the dropped card itself excluded, and a collapsed gap
 // rebalances the column's placements. Siblings are looked up in listID only.
 func PlaceCardBetween(ctx context.Context, q querier, listID, cardID, afterID, beforeID string) (float64, error) {
-	posOf := func(id string) (float64, bool) {
-		if id == "" {
-			return 0, false
-		}
-		var p sql.NullFloat64
-		if q.QueryRowContext(ctx, `SELECT position FROM card_placements WHERE card_id=? AND list_id=?`, id, listID).Scan(&p) != nil || !p.Valid {
-			return 0, false
-		}
-		return p.Float64, true
-	}
-	end := func() float64 {
-		return appendPos(ctx, q, "card_placements", "list_id=? AND card_id<>?", listID, cardID)
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		a, hasA := posOf(afterID)
-		b, hasB := posOf(beforeID)
-		switch {
-		case hasA && hasB:
-			if b-a >= 1 {
-				return (a + b) / 2, nil
+	return placeBetween(
+		func(id string) (float64, bool) {
+			if id == "" {
+				return 0, false
 			}
-		case hasA:
-			return a + db.PositionGap, nil
-		case hasB:
-			if b >= 2 {
-				return b / 2, nil
+			var p sql.NullFloat64
+			if q.QueryRowContext(ctx, `SELECT position FROM card_placements WHERE card_id=? AND list_id=?`, id, listID).Scan(&p) != nil || !p.Valid {
+				return 0, false
 			}
-			return b - db.PositionGap, nil
-		default:
-			return end(), nil
-		}
-		if err := rebalanceColumn(ctx, q, listID, cardID); err != nil {
-			return 0, err
-		}
-	}
-	return end(), nil
+			return p.Float64, true
+		},
+		func() float64 {
+			return appendPos(ctx, q, "card_placements", "list_id=? AND card_id<>?", listID, cardID)
+		},
+		func() error {
+			return rebalanceColumn(ctx, q, listID, cardID)
+		},
+		afterID, beforeID,
+	)
 }
 
 // rebalanceColumn renumbers the placements of listID (except skipCardID) with PositionGap spacing, keeping order.
 func rebalanceColumn(ctx context.Context, q querier, listID, skipCardID string) error {
-	rows, err := q.QueryContext(ctx, `SELECT card_id FROM card_placements WHERE list_id=? AND card_id<>? ORDER BY position, card_id`, listID, skipCardID)
-	if err != nil {
-		return err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+	run := func(w querier) error {
+		rows, err := w.QueryContext(ctx, `SELECT card_id FROM card_placements WHERE list_id=? AND card_id<>? ORDER BY position, card_id`, listID, skipCardID)
+		if err != nil {
 			return err
 		}
-		ids = append(ids, id)
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for i := 0; i < len(ids); i += archiveChunk {
+			chunk := ids[i:min(i+archiveChunk, len(ids))]
+			in := "(?" + strings.Repeat(",?", len(chunk)-1) + ")"
+			uargs := make([]any, 0, 1+3*len(chunk))
+			for k, id := range chunk {
+				uargs = append(uargs, id, float64(i+k+1)*db.PositionGap)
+			}
+			uargs = append(uargs, listID)
+			for _, id := range chunk {
+				uargs = append(uargs, id)
+			}
+			if _, err := w.ExecContext(ctx, `UPDATE card_placements SET position=CASE card_id`+strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END WHERE list_id=? AND card_id IN `+in, uargs...); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	rows.Close()
-	for i, id := range ids {
-		if _, err := q.ExecContext(ctx, `UPDATE card_placements SET position=? WHERE card_id=? AND list_id=?`, float64(i+1)*db.PositionGap, id, listID); err != nil {
+	if d, ok := q.(*db.DB); ok {
+		return d.Tx(ctx, func(tx *sql.Tx) error { return run(tx) })
+	}
+	return run(q)
+}
+
+// placementMove describes one card placement being moved into a target list on a board.
+type placementMove struct {
+	CardID     string
+	FromListID string
+	Position   float64
+}
+
+// movePlacements moves each placement on boardID to targetListID with its new prev_list_id, position and
+// list_changed_at, and stamps cards.updated_at, in chunks of archiveChunk.
+func movePlacements(ctx context.Context, tx *sql.Tx, boardID, targetListID, now string, moves []placementMove) error {
+	for i := 0; i < len(moves); i += archiveChunk {
+		chunk := moves[i:min(i+archiveChunk, len(moves))]
+		in := "(?" + strings.Repeat(",?", len(chunk)-1) + ")"
+		args := make([]any, 0, 3+5*len(chunk))
+		args = append(args, targetListID, now)
+		for _, m := range chunk {
+			args = append(args, m.CardID, m.FromListID)
+		}
+		for _, m := range chunk {
+			args = append(args, m.CardID, m.Position)
+		}
+		args = append(args, boardID)
+		ids := make([]any, 0, len(chunk))
+		for _, m := range chunk {
+			ids = append(ids, m.CardID)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE card_placements SET list_id=?,list_changed_at=?,prev_list_id=CASE card_id`+
+			strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END,position=CASE card_id`+
+			strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END WHERE board_id=? AND card_id IN `+in, append(args, ids...)...); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE cards SET updated_at=? WHERE id IN `+in, append([]any{now}, ids...)...); err != nil {
 			return err
 		}
 	}

@@ -74,9 +74,9 @@ func Verify(pubB64 string, msg []byte, sigB64 string) error {
 	if err != nil {
 		return err
 	}
-	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(sigB64))
-	if err != nil || len(sig) != ed25519.SignatureSize {
-		return errors.New("signature must be 64 bytes of base64")
+	sig, err := decodeKey(sigB64, ed25519.SignatureSize, "signature")
+	if err != nil {
+		return err
 	}
 	if !ed25519.Verify(pub, msg, sig) {
 		return errors.New("signature does not match (the checksums were not signed by the Weave release key, or were modified)")

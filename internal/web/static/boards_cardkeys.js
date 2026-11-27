@@ -7,16 +7,15 @@
 // Never while typing, while a dialog, picker, menu or the grab mode owns the keyboard, or with Ctrl / Meta / Alt.
 // Viewers get a small "read-only" toast. Every write goes through an existing UI route, which calls the owning op.
 (function () {
-  var B = window.Boards; if (!B || B.cardKeysInit) return; B.cardKeysInit = true;
+  var B = window.Boards, W = window.Weave; if (!B || B.cardKeysInit) return; B.cardKeysInit = true;
   var HDR = { 'HX-Request': 'true', 'X-Requested-With': 'weave' };
   var esc = B.esc;
 
-  function typing(el) { return !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))); }
   function byId(id) { return document.getElementById(id); }
   function sheet() { var m = byId('modal'), cm = byId('card-modal'); return m && m.open && cm && m.contains(cm) ? cm : null; }
   function pop() { return byId('boards-pop'); }
   function popOpen() { var p = pop(); return !!(p && !p.hidden); }
-  function confirmOpen() { return !!document.querySelector('dialog.boards-confirm[open]'); }
+  function confirmOpen() { return W.confirmOpen(); }
   function menusOpen() { return !!document.querySelector('details.boards-menu[open], details.boards-dd[open], #boards-help[open]'); }
   function sheetBusy(cm) {
     var h = byId('cm-help');
@@ -51,40 +50,11 @@
   function tileHasFocus(t) { return !!(t && t.contains(document.activeElement)); }
 
   // ---------------------------------------------------------------- confirm (Delete) ----
-  // A small modal <dialog> (top layer: above the card sheet too) placed next to the card. Focus starts on the
-  // destructive button: Enter / Space confirm, Esc or Cancel cancel. Nothing else can confirm it.
   function confirmBox(o) {
-    var d = document.createElement('dialog');
-    d.className = 'boards-confirm';
-    d.setAttribute('aria-labelledby', 'boards-confirm-h'); d.setAttribute('aria-describedby', 'boards-confirm-p');
-    var h = document.createElement('p'); h.className = 'boards-confirm-h'; h.id = 'boards-confirm-h'; h.textContent = o.title;
-    var p = document.createElement('p'); p.className = 'boards-confirm-p'; p.id = 'boards-confirm-p'; p.textContent = o.text;
-    var row = document.createElement('div'); row.className = 'boards-confirm-row';
-    var no = document.createElement('button'); no.type = 'button'; no.className = 'btn btn-ghost boards-btn'; no.textContent = 'Cancel';
-    var yes = document.createElement('button'); yes.type = 'button'; yes.className = 'btn btn-danger boards-confirm-yes'; yes.textContent = o.ok;
-    yes.setAttribute('data-confirm-yes', '');
-    row.appendChild(no); row.appendChild(yes); d.appendChild(h); d.appendChild(p); d.appendChild(row);
-    document.body.appendChild(d);
-    var back = document.activeElement, done = false;
-    function finish(ok) {
-      if (done) return; done = true;
-      if (d.open) d.close();
-      d.remove();
-      if (!ok) { if (back && document.contains(back) && back.focus) back.focus({ preventScroll: true }); B.announce('Cancelled'); return; }
-      o.onOk();
-    }
-    yes.addEventListener('click', function () { finish(true); });
-    no.addEventListener('click', function () { finish(false); });
-    d.addEventListener('cancel', function (e) { e.preventDefault(); finish(false); });
-    d.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
-      else if (e.key === 'Tab') { e.preventDefault(); (document.activeElement === yes ? no : yes).focus(); }
+    return W.confirm({
+      title: o.title, text: o.text, ok: o.ok, danger: true, anchor: o.anchor,
+      className: 'boards-confirm', onOk: o.onOk, onCancel: function () { B.announce('Cancelled'); }
     });
-    d.addEventListener('pointerdown', function (e) { if (e.target === d) { var r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) finish(false); } });
-    d.showModal();
-    if (o.anchor && window.WeavePlace && !matchMedia('(max-width:640px)').matches) { d.classList.add('is-placed'); window.WeavePlace(d, o.anchor, { align: 'left' }); }
-    yes.focus();
-    return d;
   }
 
   // ---------------------------------------------------------------- tile actions ----
@@ -155,7 +125,9 @@
     var p = pop(); if (!p) return;
     var id = t.dataset.id;
     B.closePop(false);
+    var seq = B.bumpPopSeq ? B.bumpPopSeq() : 0;
     fetch('/ui/cards/' + id + '/quick/' + kind + B.boardQ(), { credentials: 'same-origin', headers: HDR }).then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); }).then(function (html) {
+      if (B.popSeq && seq !== B.popSeq()) return;
       if (!document.contains(t)) t = byId('tile-' + id); if (!t) return;
       if (B.setPopTile) B.setPopTile(t);
       p.innerHTML = html; p.hidden = false; p._anchor = t; pick = { id: id, kind: kind };
@@ -165,11 +137,11 @@
       var f = kind === 'labels' ? (p.querySelector('.boards-kopt') || p.querySelector('[data-kpick-filter]'))
         : kind === 'due' ? p.querySelector('.boards-kopt') : p.querySelector('input[name=locationName]');
       (f || p.querySelector('.boards-kpick')).focus({ preventScroll: true });   // (a board without labels: the picker itself)
-    }).catch(function () { B.toast('Could not open the picker', { error: true }); });
+    }).catch(function () { if (B.popSeq && seq !== B.popSeq()) return; B.toast('Could not open the picker', { error: true }); });
   }
   function place(p) {
     var a = p._anchor; if (a && !document.contains(a)) a = p._anchor = byId(a.id);   // the tile was re-rendered (refreshTile, live merge)
-    if (window.WeavePlace && a) window.WeavePlace(p, a, { align: 'left', cover: true });
+    if (a) W.place(p, a, { align: 'left', cover: true });
   }
   function closePicker() { pick = null; B.closePop(); }
   function curPicker() { var p = pop(); return p && !p.hidden ? p.querySelector('.boards-kpick') : null; }
@@ -266,15 +238,8 @@
   document.addEventListener('keydown', function (e) {
     var box = e.target.closest && e.target.closest('#boards-pop .boards-kpick'); if (!box || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
     var k = e.key, opts = visibleOpts(box), i = opts.indexOf(document.activeElement), filter = box.querySelector('[data-kpick-filter]');
-    var inField = typing(e.target);
-    if (k === 'Tab') {   // keep focus inside the picker
-      var foc = [].slice.call(box.querySelectorAll('button:not([disabled]),input,select,textarea')).filter(function (el) { return !el.hidden && el.offsetParent; });
-      if (!foc.length) return;
-      var j = foc.indexOf(document.activeElement);
-      if (!e.shiftKey && j === foc.length - 1) { e.preventDefault(); foc[0].focus(); }
-      else if (e.shiftKey && j <= 0) { e.preventDefault(); foc[foc.length - 1].focus(); }
-      return;
-    }
+    var inField = W.typing(e.target);
+    if (k === 'Tab') { W.trapTab(box, e); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       if (inField && e.target !== filter) return;   // date / number inputs use their arrows
       if (!opts.length) return;
@@ -377,7 +342,7 @@
   var KEYS = { L: 1, d: 1, p: 1, s: 1, S: 1, x: 1, A: 1, Delete: 1, Backspace: 1 };
   document.addEventListener('keydown', function (e) {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || !KEYS[e.key]) return;
-    if (typing(e.target) || confirmOpen()) return;
+    if (W.typing(e.target) || confirmOpen()) return;
     var cm = sheet();
     if (cm) {
       if (sheetBusy(cm) || e.key === 'L' || e.key === 'd' || e.key === 'p') return;   // the sheet's own popovers (cards_ui.js)

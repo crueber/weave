@@ -3,6 +3,7 @@ package boards
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,17 +57,8 @@ func (f Filter) Query() string {
 	return v.Encode()
 }
 
-func (f Filter) HasLabel(id string) bool  { return contains(f.Labels, id) }
-func (f Filter) HasMember(id string) bool { return contains(f.Members, id) }
-
-func contains(s []string, x string) bool {
-	for _, y := range s {
-		if y == x {
-			return true
-		}
-	}
-	return false
-}
+func (f Filter) HasLabel(id string) bool  { return slices.Contains(f.Labels, id) }
+func (f Filter) HasMember(id string) bool { return slices.Contains(f.Members, id) }
 
 // Tile is the compact card representation rendered on board views.
 type Tile struct {
@@ -221,7 +213,7 @@ func boardLinkQuery(v url.Values) url.Values {
 }
 
 // ShowHref is the shareable board-page URL for one Show segment. Active omits show; archive modes
-// carry it in the URL. The user's kanban/list/grid choice and all current filters survive the switch.
+// carry it in the URL. The user's board/list/grid choice and all current filters survive the switch.
 func (p *PageData) ShowHref(show string) string {
 	q := boardLinkQuery(p.showValues)
 	q.Set("view", p.View)
@@ -233,7 +225,7 @@ func (p *PageData) ShowHref(show string) string {
 
 // ShowBodyHref is the fragment URL for one Show segment. Archive modes use card.archive.list's UI
 // route; Active uses the normal board body. BodyURL is the current mode's URL and is also exposed on
-// #board-body so realtime clients can refresh the archive without replacing it with a kanban body.
+// #board-body so realtime clients can refresh the archive without replacing it with a board-view body.
 func (p *PageData) ShowBodyHref(show string) string {
 	path := "/ui/boards/" + p.Board.ID + "/body"
 	if show == boardShowArchived || show == boardShowTrash {
@@ -255,8 +247,10 @@ func addCardPattern() string {
 	return strings.TrimPrefix(o.UI, "POST ")
 }
 
-// loadPage assembles a board's page data using the caller's permissions.
-func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, error) {
+// loadPage assembles a board's page data using the caller's permissions, reusing the lists, labels,
+// members and watch state already loaded into d by board.get / board.public.get.
+func loadPage(e *ops.Env, d BoardDetail, v url.Values, readOnly bool) (*PageData, error) {
+	b := d.Board
 	caps := authz.Board(e, b.ID)
 	if readOnly {
 		// The /public/{token} page is a read-only rendering whoever looks at it: it offers no writes, no settings,
@@ -272,7 +266,7 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 	}
 	pd := &PageData{Board: b, Level: levelName(caps.Level), Caps: caps, CanEdit: caps.CanEdit, CanManage: caps.CanManage, ReadOnly: readOnly,
 		Public: readOnly && e.User == nil, Filter: parseFilter(filterValues), Show: boardShow(v), showValues: cloneQuery(v),
-		UserID: userID, LabelID: firstQueryValue(v, "labelId"), MemberID: firstQueryValue(v, "memberId")}
+		UserID: userID, LabelID: firstQueryValue(v, "labelId"), MemberID: firstQueryValue(v, "memberId"), Labels: d.Labels}
 	if pd.Show != boardShowActive {
 		// Archive controls submit singular IDs. Accept the old repeated names too so existing links
 		// still select the same option; an explicit singular value takes precedence.
@@ -296,29 +290,25 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		}
 	}
 	pd.BodyURL = pd.ShowBodyHref(pd.Show)
+	var err error
 	if !readOnly {
 		pd.LiveBoardID = b.ID
 		_ = e.DB.QueryRowContext(e.Ctx, `SELECT name FROM projects WHERE id=?`, b.ProjectID).Scan(&pd.ProjectName)
+		pd.Members = d.Members
+		if pd.Saved, err = filtersOf(e, b.ID); err != nil {
+			return nil, err
+		}
 	}
-	lists, err := listsOf(e, b.ID, true)
-	if err != nil {
-		return nil, err
-	}
-	labs, err := labelsOf(e, b.ID)
-	if err != nil {
-		return nil, err
-	}
-	pd.Labels = labs
-	if pd.Members, err = membersOf(e, b.ID); err != nil {
-		return nil, err
-	}
-	if pd.Saved, err = filtersOf(e, b.ID); err != nil {
-		return nil, err
+	lists := make([]List, 0, len(d.Lists))
+	for _, l := range d.Lists {
+		if isFinite(l.Type) {
+			lists = append(lists, l)
+		}
 	}
 	pattern := addCardPattern()
 	watched := map[string]bool{}
 	if !readOnly && e.User != nil {
-		pd.Watching = boardWatched(e, b.ID)
+		pd.Watching = d.IsSubscribed
 		watched = watchedLists(e, b.ID)
 	}
 	cols := make([]Column, 0, len(lists))
@@ -334,7 +324,11 @@ func loadPage(e *ops.Env, b Board, v url.Values, readOnly bool) (*PageData, erro
 		}
 		cols = append(cols, c)
 	}
-	tiles, err := loadTiles(e, b, idx, lists)
+	tileLevel := caps.Level
+	if readOnly {
+		tileLevel = authz.None
+	}
+	tiles, err := loadTiles(e, b, tileLevel, idx, lists)
 	if err != nil {
 		return nil, err
 	}

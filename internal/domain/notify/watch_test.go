@@ -241,9 +241,16 @@ func TestWatchScopesAndDedupe(t *testing.T) {
 	}
 
 	// a cross-board move: source column watchers without access to the destination board hear nothing,
-	// the destination board's watcher does
+	// the destination board's watcher does (and never sees the source board's column in fromList)
 	w.do(t, "alice", "card.move", map[string]any{"id": card, "listId": "m1"})
-	w.take(t).expect(t, "cross-board", map[string]string{"olga": "moveCard/board"})
+	xg := w.take(t)
+	xg.expect(t, "cross-board", map[string]string{"olga": "moveCard/board"})
+	if xg.data["olga"]["fromList"] != nil {
+		t.Fatalf("cross-board move leaked source board column in fromList: %v", xg.data["olga"])
+	}
+	if xg.data["olga"]["toList"] == nil {
+		t.Fatalf("cross-board move missing destination column in toList: %v", xg.data["olga"])
+	}
 }
 
 func TestWatchReasonInMessages(t *testing.T) {

@@ -121,50 +121,87 @@ func init() {
 			if limit <= 0 || limit > 200 {
 				limit = 50
 			}
-			q := notifSelect + ` WHERE n.user_id=?`
-			args := []any{e.User.UserID}
-			if in.Unread {
-				q += ` AND n.is_read=0`
-			}
-			if in.Before != "" {
-				q += ` AND n.id<?`
-				args = append(args, in.Before)
-			}
-			q += ` ORDER BY n.id DESC LIMIT ?`
-			args = append(args, limit+1)
-			rows, err := e.DB.QueryContext(e.Ctx, q, args...)
-			if err != nil {
-				return ListOut{}, err
-			}
-			defer rows.Close()
 			out := ListOut{Items: []NotificationOut{}}
-			var page []NotificationOut
-			for rows.Next() {
-				n, err := scanNotif(rows)
+			cursor := in.Before
+			levels := map[string]authz.Level{}
+			const maxPages = 10
+			moreInDB := false
+			for pageNum := 0; pageNum < maxPages && len(out.Items) < limit; pageNum++ {
+				q := notifSelect + ` WHERE n.user_id=?`
+				args := []any{e.User.UserID}
+				if in.Unread {
+					q += ` AND n.is_read=0`
+				}
+				if cursor != "" {
+					q += ` AND n.id<?`
+					args = append(args, cursor)
+				}
+				fetch := limit - len(out.Items) + 1
+				if fetch < 50 {
+					fetch = 50
+				}
+				q += ` ORDER BY n.id DESC LIMIT ?`
+				args = append(args, fetch)
+				rows, err := e.DB.QueryContext(e.Ctx, q, args...)
+				if err != nil {
+					return ListOut{}, err
+				}
+				var page []NotificationOut
+				for rows.Next() {
+					n, err := scanNotif(rows)
+					if err != nil {
+						rows.Close()
+						return out, err
+					}
+					page = append(page, n)
+				}
+				err = rows.Err()
+				rows.Close()
 				if err != nil {
 					return out, err
 				}
-				page = append(page, n)
-			}
-			rows.Close()
-			if len(page) > limit {
-				page = page[:limit]
-				out.NextBefore = page[limit-1].ID
-			}
-			// a notification shows board and card names (joined live): keep only those about boards the caller can still
-			// view, so losing access (leaving a board, or an administrator upgrading to ownership-based permissions)
-			// also ends what old notifications reveal
-			var ids []string
-			for _, n := range page {
-				if n.BoardID != "" {
-					ids = append(ids, n.BoardID)
+				if len(page) == 0 {
+					moreInDB = false
+					break
+				}
+				// a notification shows board and card names (joined live): keep only those about boards the caller can still
+				// view, so losing access (leaving a board, or an administrator upgrading to ownership-based permissions)
+				// also ends what old notifications reveal
+				var unseen []string
+				unseenSet := map[string]bool{}
+				for _, n := range page {
+					if n.BoardID != "" {
+						if _, ok := levels[n.BoardID]; !ok && !unseenSet[n.BoardID] {
+							unseenSet[n.BoardID] = true
+							unseen = append(unseen, n.BoardID)
+						}
+					}
+				}
+				if len(unseen) > 0 {
+					lv := authz.BoardLevels(e, unseen)
+					for _, b := range unseen {
+						levels[b] = lv[b]
+					}
+				}
+				moreInDB = len(page) == fetch
+				for i, n := range page {
+					cursor = n.ID
+					if n.BoardID == "" || levels[n.BoardID] >= authz.View {
+						out.Items = append(out.Items, n)
+						if len(out.Items) == limit {
+							if i+1 < len(page) || moreInDB {
+								out.NextBefore = n.ID
+							}
+							break
+						}
+					}
+				}
+				if !moreInDB {
+					break
 				}
 			}
-			lv := authz.BoardLevels(e, ids)
-			for _, n := range page {
-				if n.BoardID == "" || lv[n.BoardID] >= authz.View {
-					out.Items = append(out.Items, n)
-				}
+			if len(out.Items) < limit && moreInDB && cursor != "" {
+				out.NextBefore = cursor
 			}
 			out.UnreadCount = unreadCount(e)
 			return out, nil

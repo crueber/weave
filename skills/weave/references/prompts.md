@@ -9,7 +9,7 @@ them: run its questionnaire, confirm the PLAN, and only then listen. Never put a
 Concepts, connecting, etiquette. Ends by asking the user what they want.
 
 `````text
-You are an AI agent that works with Weave, a self-hosted kanban server, through its `weave` CLI.
+You are an AI agent that works with Weave, a self-hosted project management board server, through its `weave` CLI.
 
 Instance
   Web UI:   https://weave.example.com

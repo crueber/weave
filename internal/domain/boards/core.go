@@ -11,19 +11,6 @@ import (
 	"github.com/crueber/weave/internal/realtime"
 )
 
-// Colors are the label / list colour names accepted by Weave (Planka palette).
-var Colors = []string{"muddy-grey", "autumn-leafs", "morning-sky", "antique-blue", "egg-yellow", "desert-sand", "dark-granite",
-	"fresh-salad", "lagoon-blue", "midnight-blue", "light-orange", "pumpkin-orange", "light-concrete", "sunny-grass", "navy-blue",
-	"lilac-eyes", "apricot-red", "orange-peel", "silver-glint", "bright-moss", "deep-ocean", "summer-sky", "berry-red", "light-cocoa",
-	"grey-stone", "tank-green", "coral-green", "sugar-plum", "pink-tulip", "shady-rust", "wet-rock", "wet-moss", "turquoise-sea",
-	"lavender-fields", "piggy-red", "light-mud", "gun-metal", "modern-green", "french-coast", "sweet-lilac", "red-burgundy", "pirate-gold"}
-
-// validColor accepts exactly #rrggbb, a Planka palette name or a Weave preset name.
-func validColor(c string) bool {
-	_, ok := ResolveColor(c)
-	return ok
-}
-
 // ui builds the browser route string for an op: the UI mirrors REST under /ui.
 func ui(method, path string) string { return method + " /ui" + path }
 
@@ -108,49 +95,96 @@ func posOf(ctx context.Context, q querier, table, id string) (float64, bool) {
 	return p.Float64, true
 }
 
+// placeBetween computes a position between afterID and beforeID using caller-supplied lookups and rebalancer.
+// Reversed siblings (b < a) skip rebalancing (rebalancing preserves relative order); otherwise at most one
+// rebalance runs on attempt 0.
+func placeBetween(posOf func(id string) (float64, bool), end func() float64, rebalance func() error, afterID, beforeID string) (float64, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		a, hasA := posOf(afterID)
+		b, hasB := posOf(beforeID)
+		switch {
+		case hasA && hasB:
+			if b-a >= 1 {
+				return (a + b) / 2, nil
+			}
+			if b < a || afterID == beforeID {
+				return end(), nil
+			}
+		case hasA:
+			return a + db.PositionGap, nil
+		case hasB:
+			if b >= 2 {
+				return b / 2, nil
+			}
+			return b - db.PositionGap, nil
+		default:
+			return end(), nil
+		}
+		if attempt == 0 {
+			if err := rebalance(); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return end(), nil
+}
+
 // PlaceBetween computes a position for a row dropped between afterID and beforeID
 // (either may be empty) inside a scope (SQL predicate on table). It rebalances
 // the scope when the gap collapses. Exported for the cards domain.
 func PlaceBetween(ctx context.Context, q querier, table, scope string, scopeArgs []any, afterID, beforeID string) float64 {
-	for attempt := 0; attempt < 2; attempt++ {
-		a, hasA := posOf(ctx, q, table, afterID)
-		b, hasB := posOf(ctx, q, table, beforeID)
-		switch {
-		case hasA && hasB:
-			if b-a >= 1 {
-				return (a + b) / 2
-			}
-		case hasA:
-			return a + db.PositionGap
-		case hasB:
-			if b >= 2 {
-				return b / 2
-			}
-			return b - db.PositionGap
-		default:
-			return appendPos(ctx, q, table, scope, scopeArgs...)
-		}
-		Rebalance(ctx, q, table, scope, scopeArgs)
-	}
-	return appendPos(ctx, q, table, scope, scopeArgs...)
+	pos, _ := placeBetween(
+		func(id string) (float64, bool) { return posOf(ctx, q, table, id) },
+		func() float64 { return appendPos(ctx, q, table, scope, scopeArgs...) },
+		func() error { Rebalance(ctx, q, table, scope, scopeArgs); return nil },
+		afterID, beforeID,
+	)
+	return pos
 }
 
 // Rebalance renumbers all rows in a scope with PositionGap spacing, keeping order.
 func Rebalance(ctx context.Context, q querier, table, scope string, args []any) {
-	rows, err := q.QueryContext(ctx, `SELECT id FROM `+table+` WHERE `+scope+` ORDER BY position, id`, args...)
-	if err != nil {
+	run := func(w querier) error {
+		rows, err := w.QueryContext(ctx, `SELECT id FROM `+table+` WHERE `+scope+` ORDER BY position, id`, args...)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for i := 0; i < len(ids); i += archiveChunk {
+			chunk := ids[i:min(i+archiveChunk, len(ids))]
+			in := "(?" + strings.Repeat(",?", len(chunk)-1) + ")"
+			uargs := make([]any, 0, 3*len(chunk))
+			for k, id := range chunk {
+				uargs = append(uargs, id, float64(i+k+1)*db.PositionGap)
+			}
+			for _, id := range chunk {
+				uargs = append(uargs, id)
+			}
+			if _, err := w.ExecContext(ctx, `UPDATE `+table+` SET position=CASE id`+strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END WHERE id IN `+in, uargs...); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if d, ok := q.(*db.DB); ok {
+		_ = d.Tx(ctx, func(tx *sql.Tx) error { return run(tx) })
 		return
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		_ = rows.Scan(&id)
-		ids = append(ids, id)
-	}
-	rows.Close()
-	for i, id := range ids {
-		_, _ = q.ExecContext(ctx, `UPDATE `+table+` SET position=? WHERE id=?`, float64(i+1)*db.PositionGap, id)
-	}
+	_ = run(q)
 }
 
 // SingleSelectConflicts returns the ids of labels already on the card that

@@ -232,15 +232,6 @@ func cardClaim(e *ops.Env, in ClaimIn) (Card, error) {
 	return finishClaim(e, boardID, in.ID, in.ListID, "", strings.TrimSpace(in.Note), ttl, expired, newMember)
 }
 
-// cardLevel is the caller's level on the card (the maximum over its viewable placements).
-func cardLevel(e *ops.Env, cardID string) authz.Level {
-	a, err := authz.CardAccessFor(e, cardID, "")
-	if err != nil {
-		return authz.None
-	}
-	return a.Level
-}
-
 // releaseNow clears the caller's own claim (no authz; callers check).
 func releaseNow(e *ops.Env, cardID string) (bool, error) {
 	res, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET claimed_by=NULL,claimed_until=NULL,claim_note=NULL,updated_at=? WHERE id=? AND claimed_by=?`, db.Now(), cardID, e.User.UserID)
@@ -252,52 +243,65 @@ func releaseNow(e *ops.Env, cardID string) (bool, error) {
 }
 
 func cardRelease(e *ops.Env, in ReleaseIn) (Card, error) {
-	boardID, err := authz.RequireCard(e, in.ID, authz.Edit)
+	a, err := authz.CardAccessFor(e, in.ID, "")
 	if err != nil {
 		return Card{}, err
 	}
+	if a.Level < authz.Edit {
+		return Card{}, ops.Forbidden()
+	}
+	boardID := a.BoardID
+	canForce := a.Level >= authz.Manage // Manage on any board the card is on
 	if err := checkMoveTarget(e, in.ID, in.ListID); err != nil {
 		return Card{}, err
 	}
-	var by sql.NullString
-	var until sql.NullString
-	if err := e.DB.QueryRowContext(e.Ctx, `SELECT claimed_by,claimed_until FROM cards WHERE id=?`, in.ID).Scan(&by, &until); err != nil {
-		return Card{}, ops.NotFound("card")
-	}
-	held := by.Valid && until.Valid && until.String >= db.Now()
-	if held && by.String != e.User.UserID && cardLevel(e, in.ID) < authz.Manage { // Manage on any board the card is on
-		return Card{}, ops.Conflict("card is claimed by someone else")
-	}
-	if by.Valid {
-		var n int64
-		var trimmed boards.LandResult
-		err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
-			trimmed = boards.LandResult{}
-			res, err := tx.ExecContext(e.Ctx, `UPDATE cards SET claimed_by=NULL,claimed_until=NULL,claim_note=NULL,updated_at=? WHERE id=? AND claimed_by=?`, db.Now(), in.ID, by.String)
-			if err != nil {
-				return err
+	var prevBy string
+	var held bool
+	var released int64
+	var trimmed boards.LandResult
+	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		trimmed = boards.LandResult{}
+		released = 0
+		var by, until sql.NullString
+		if err := tx.QueryRowContext(e.Ctx, `SELECT claimed_by,claimed_until FROM cards WHERE id=?`, in.ID).Scan(&by, &until); err != nil {
+			if err == sql.ErrNoRows {
+				return ops.NotFound("card")
 			}
-			if n, _ = res.RowsAffected(); n == 0 || in.ListID != "" {
-				return nil // a release with a move lands the card (doMove runs the destination's rules)
-			}
-			// the claim no longer shields the card: each of its columns' archive-after rule applies again (on every
-			// board it is on; it may archive this card's placement there)
-			trimmed, err = enforceArchiveAfterOf(e.Ctx, tx, in.ID)
 			return err
-		})
+		}
+		if !by.Valid {
+			return nil
+		}
+		now := db.Now()
+		held = until.Valid && until.String >= now
+		if held && by.String != e.User.UserID && !canForce {
+			return ops.Conflict("card is claimed by someone else")
+		}
+		prevBy = by.String
+		res, err := tx.ExecContext(e.Ctx, `UPDATE cards SET claimed_by=NULL,claimed_until=NULL,claim_note=NULL,updated_at=? WHERE id=? AND claimed_by=?`, now, in.ID, by.String)
 		if err != nil {
-			return Card{}, err
+			return err
 		}
-		defer boards.EmitAutoArchived(e, trimmed) // after card.released
-		if n > 0 {
-			reason := "released"
-			if !held {
-				reason = "lease_expired"
-			} else if by.String != e.User.UserID {
-				reason = "forced"
-			}
-			emit(e, "cardRelease", "card.released", boardID, in.ID, map[string]any{"reason": reason, "previousClaimedBy": by.String})
+		if released, _ = res.RowsAffected(); released == 0 || in.ListID != "" {
+			return nil // a release with a move lands the card (doMove runs the destination's rules)
 		}
+		// the claim no longer shields the card: each of its columns' archive-after rule applies again (on every
+		// board it is on; it may archive this card's placement there)
+		trimmed, err = enforceArchiveAfterOf(e.Ctx, tx, in.ID)
+		return err
+	})
+	if err != nil {
+		return Card{}, err
+	}
+	defer boards.EmitAutoArchived(e, trimmed) // after card.released
+	if released > 0 {
+		reason := "released"
+		if !held {
+			reason = "lease_expired"
+		} else if prevBy != e.User.UserID {
+			reason = "forced"
+		}
+		emit(e, "cardRelease", "card.released", boardID, in.ID, map[string]any{"reason": reason, "previousClaimedBy": prevBy})
 	}
 	if in.ListID != "" && !placedInList(e.Ctx, e.DB, in.ID, in.ListID) {
 		return doMove(e, in.ID, "", in.ListID, nil, "", "")
@@ -445,7 +449,10 @@ func SweepClaims(ctx context.Context, d *db.DB, hub *realtime.Hub, now time.Time
 // on), inside tx: after its claim ended, the card no longer shields any of them.
 func enforceArchiveAfterOf(ctx context.Context, tx *sql.Tx, cardID string) (boards.LandResult, error) {
 	var res boards.LandResult
-	lists := strs(&ops.Env{Ctx: ctx}, tx, `SELECT list_id FROM card_placements WHERE card_id=? ORDER BY is_home DESC, placed_at, board_id`, cardID)
+	lists, err := strs(&ops.Env{Ctx: ctx}, tx, `SELECT list_id FROM card_placements WHERE card_id=? ORDER BY is_home DESC, placed_at, board_id`, cardID)
+	if err != nil {
+		return res, err
+	}
 	for _, l := range lists {
 		r, err := boards.EnforceArchiveAfter(ctx, tx, l)
 		if err != nil {
@@ -493,7 +500,7 @@ func snapshotsOn(e *ops.Env, boardID string, ids []string) []events.CardSnap {
 	for start := 0; start < len(ids); start += 400 {
 		end := min(start+400, len(ids))
 		chunk := ids[start:end]
-		ph := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		ph := inPlaceholders(len(chunk))
 		args := make([]any, len(chunk))
 		for i, id := range chunk {
 			args[i] = id

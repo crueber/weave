@@ -35,7 +35,7 @@ func Render(base []cli.Op) map[string][]byte {
 	sorted := append([]cli.Op{}, base...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	snap, _ := json.MarshalIndent(sorted, "", " ")
-	merged := cli.MergedOps(base)
+	merged := cli.MergedOps(sorted)
 
 	skill := strings.ReplaceAll(read("SKILL.md"), "{{OPS_COUNT}}", fmt.Sprint(len(merged)))
 	out := map[string][]byte{
@@ -52,6 +52,10 @@ func Render(base []cli.Op) map[string][]byte {
 	}
 	return out
 }
+
+var mdCellReplacer = strings.NewReplacer("|", "\\|", "\r\n", " ", "\n", " ", "\r", " ")
+
+func mdCell(s string) string { return mdCellReplacer.Replace(s) }
 
 func renderOps(ops []*cli.Op) string {
 	var sb strings.Builder
@@ -70,6 +74,7 @@ func renderOps(ops []*cli.Op) string {
 	sort.Strings(tags)
 	sb.WriteString("Tags: " + strings.Join(tags, ", ") + "\n\n")
 	for _, t := range tags {
+		sort.Slice(byTag[t], func(i, j int) bool { return byTag[t][i].Name < byTag[t][j].Name })
 		fmt.Fprintf(&sb, "## %s\n\n", t)
 		for _, o := range byTag[t] {
 			fmt.Fprintf(&sb, "### `weave %s %s`\n\n%s  \n`%s %s` (auth: %s)\n\n", o.Tag, o.Verb(), strings.TrimSpace(o.Summary), o.Method, o.Path, o.Auth)
@@ -80,7 +85,7 @@ func renderOps(ops []*cli.Op) string {
 					if f.Required {
 						req = "yes"
 					}
-					fmt.Fprintf(&sb, "| `--%s` | %s | %s | %s | %s |\n", f.Name, f.In, f.Type, req, strings.ReplaceAll(f.Desc, "|", "\\|"))
+					fmt.Fprintf(&sb, "| `--%s` | %s | %s | %s | %s |\n", f.Name, f.In, f.Type, req, mdCell(f.Desc))
 				}
 				sb.WriteString("\n")
 			}
@@ -98,7 +103,7 @@ func renderMCP(ops []*cli.Op) string {
 	var sb strings.Builder
 	sb.WriteString("| tool | op | what it does |\n|---|---|---|\n")
 	for _, t := range cli.MCPCuratedTools() {
-		fmt.Fprintf(&sb, "| `%s` | `%s` | %s |\n", t[0], t[1], strings.ReplaceAll(summary[t[1]], "|", "\\|"))
+		fmt.Fprintf(&sb, "| `%s` | `%s` | %s |\n", t[0], t[1], mdCell(summary[t[1]]))
 	}
 	return strings.ReplaceAll(read("mcp.md"), "{{MCP_TOOLS}}", strings.TrimRight(sb.String(), "\n"))
 }

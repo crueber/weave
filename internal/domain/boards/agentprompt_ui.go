@@ -62,7 +62,17 @@ func init() {
 		}
 		// The tabs of the context the dialog was opened from survive switching to a tab that carries no context of its
 		// own (About, Runner without a board): the ids ride along as pid/bid/lid and are re-checked by promptChain.
-		for _, x := range []struct{ param, scope string }{{"lid", agentprompt.ScopeList}, {"bid", agentprompt.ScopeBoard}, {"pid", agentprompt.ScopeProject}} {
+		for _, x := range []struct {
+			param, scope string
+			missing      func() bool
+		}{
+			{"lid", agentprompt.ScopeList, func() bool { return pc.ListID == "" }},
+			{"bid", agentprompt.ScopeBoard, func() bool { return pc.BoardID == "" }},
+			{"pid", agentprompt.ScopeProject, func() bool { return pc.ProjectID == "" }},
+		} {
+			if !x.missing() {
+				continue
+			}
 			if id := q.Get(x.param); id != "" {
 				if o, err := promptChain(c.Env, x.scope, id); err == nil {
 					if pc.ListID == "" {

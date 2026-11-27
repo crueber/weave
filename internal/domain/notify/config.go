@@ -47,10 +47,44 @@ func ConfigDB(ctx context.Context, d *db.DB, key string) string {
 // Config reads one config value (env overrides the config table).
 func Config(e *ops.Env, key string) string { return ConfigDB(e.Ctx, e.DB, key) }
 
+func parseBool(v string) bool {
+	v = strings.ToLower(v)
+	return v == "true" || v == "1" || v == "yes" || v == "on"
+}
+
 // ConfigBool is Config interpreted as a boolean.
 func ConfigBool(e *ops.Env, key string) bool {
-	v := strings.ToLower(Config(e, key))
-	return v == "true" || v == "1" || v == "yes" || v == "on"
+	return parseBool(Config(e, key))
+}
+
+// configBatch reads all config table rows except branding.logoData in a single query,
+// overlaid with environment overrides for all editable setting keys.
+func configBatch(e *ops.Env) map[string]string {
+	out := map[string]string{}
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT key,value FROM config WHERE key <> 'branding.logoData'`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var k, v string
+			if rows.Scan(&k, &v) == nil {
+				out[k] = v
+			}
+		}
+	}
+	for _, k := range settingKeys {
+		if v := os.Getenv(envName(k)); v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func hasLogo(e *ops.Env) bool {
+	if os.Getenv(envName("branding.logoData")) != "" {
+		return true
+	}
+	var one int
+	return e.DB.QueryRowContext(e.Ctx, `SELECT 1 FROM config WHERE key='branding.logoData' AND value<>''`).Scan(&one) == nil
 }
 
 // ConfigAll returns every effective key with the given prefix (e.g. "oidc.").
@@ -151,9 +185,10 @@ func AgentBlockKey(name string) string { return "agentblock." + name }
 // AgentBlocks returns the admin texts of the shared agent prompt blocks that are customised (config agentblock.<name>,
 // or the environment), by block name; a block that is not in the map uses its built-in text.
 func AgentBlocks(e *ops.Env) map[string]string {
+	all := ConfigAll(e, "agentblock.")
 	out := map[string]string{}
 	for _, n := range agentprompt.BlockNames() {
-		if v := strings.TrimSpace(Config(e, AgentBlockKey(n))); v != "" {
+		if v := strings.TrimSpace(all[AgentBlockKey(n)]); v != "" {
 			out[n] = v
 		}
 	}
@@ -201,9 +236,10 @@ type SettingsView struct {
 }
 
 func settingsView(e *ops.Env) SettingsView {
+	cfg := configBatch(e)
 	v := SettingsView{Values: map[string]string{}, EnvLocked: []string{}, SecretsSet: []string{}}
 	for _, k := range settingKeys {
-		val := Config(e, k)
+		val := cfg[k]
 		if secretKeys[k] {
 			if val != "" {
 				v.SecretsSet = append(v.SecretsSet, k)
@@ -215,7 +251,7 @@ func settingsView(e *ops.Env) SettingsView {
 			v.EnvLocked = append(v.EnvLocked, k)
 		}
 	}
-	v.HasLogo = Config(e, "branding.logoData") != ""
+	v.HasLogo = hasLogo(e)
 	return v
 }
 
@@ -231,15 +267,16 @@ type PublicConfig struct {
 
 // Public builds the public configuration (exported for auth's login page).
 func Public(e *ops.Env) PublicConfig {
+	cfg := configBatch(e)
 	p := PublicConfig{
-		AppName: Config(e, "branding.appName"), LoginText: Config(e, "branding.loginText"), PrimaryColor: Config(e, "branding.primaryColor"),
-		OIDCButtonText: Config(e, "oidc.buttonText"),
-		TermsEnabled:   ConfigBool(e, "terms.enabled"),
+		AppName: cfg["branding.appName"], LoginText: cfg["branding.loginText"], PrimaryColor: cfg["branding.primaryColor"],
+		OIDCButtonText: cfg["oidc.buttonText"],
+		TermsEnabled:   parseBool(cfg["terms.enabled"]),
 	}
 	if p.AppName == "" {
 		p.AppName = "Weave"
 	}
-	if Config(e, "branding.logoData") != "" {
+	if hasLogo(e) {
 		p.LogoURL = "/branding/logo"
 	}
 	return p
@@ -322,12 +359,8 @@ func init() {
 						return ops.Invalid("templates.hidden is too long")
 					}
 					if key == "smtp.port" && val != "" {
-						n := 0
-						for _, c := range val {
-							if c < '0' || c > '9' || n > 65535 {
-								return ops.Invalid("smtp.port must be a number")
-							}
-							n = n*10 + int(c-'0')
+						if n, err := strconv.Atoi(val); err != nil || n < 1 || n > 65535 {
+							return ops.Invalid("smtp.port must be a number between 1 and 65535")
 						}
 					}
 					if err := setConfig(tx, key, val); err != nil {

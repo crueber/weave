@@ -109,6 +109,10 @@ func adminReach(ctx context.Context, q queryer, email string) ([]AdminReach, err
 		a.Unreachable = []ProjectRef{}
 		out = append(out, a)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 	if email != "" && len(out) == 0 {
 		return nil, errNoSuchUser
@@ -136,6 +140,10 @@ func adminReach(ctx context.Context, q queryer, email string) ([]AdminReach, err
 			if lost {
 				a.Unreachable = append(a.Unreachable, p)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		rows.Close()
 	}

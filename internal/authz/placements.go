@@ -163,32 +163,35 @@ func RequireCardOn(e *ops.Env, cardID, boardID string, min Level) error {
 }
 
 // CardViewers returns, for each user among userIDs who can view the card, the boards of the placements they can
-// view (home first, then by placed_at), in ONE query whatever the number of users and placements. Same rules as
+// view (home first, then by placed_at), in one query per 500 users. Same rules as
 // ViewersAmong (stored account: exists, not deleted, not deactivated; then a project manager, a direct or group
 // board membership, or a public board), applied per placement board. Users who can view no placement are absent.
 func CardViewers(e *ops.Env, cardID string, userIDs []string) map[string][]string {
 	out := map[string][]string{}
+	userIDs = dedupeIDs(userIDs)
 	if len(userIDs) == 0 {
 		return out
 	}
-	in, args := placeholders(userIDs)
-	q := `SELECT u.id, p.board_id FROM card_placements p JOIN boards b ON b.id=p.board_id JOIN users u ON u.id IN (` + in + `)
-		WHERE p.card_id=? AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
-			b.is_public=1 OR
-			EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
-			EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
-				(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))
-		ORDER BY p.is_home DESC, p.placed_at, p.board_id`
-	rows, err := e.DB.QueryContext(e.Ctx, q, append(args, cardID)...)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var u, b string
-		if rows.Scan(&u, &b) == nil {
-			out[u] = append(out[u], b)
+	for i := 0; i < len(userIDs); i += idChunk {
+		in, args := placeholders(userIDs[i:min(i+idChunk, len(userIDs))])
+		q := `SELECT u.id, p.board_id FROM card_placements p JOIN boards b ON b.id=p.board_id JOIN users u ON u.id IN (` + in + `)
+			WHERE p.card_id=? AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+				b.is_public=1 OR
+				EXISTS(SELECT 1 FROM project_managers pm WHERE pm.project_id=b.project_id AND pm.user_id=u.id) OR
+				EXISTS(SELECT 1 FROM board_memberships m WHERE m.board_id=b.id AND
+					(m.user_id=u.id OR m.group_id IN (SELECT group_id FROM user_group_members g WHERE g.user_id=u.id))))
+			ORDER BY p.is_home DESC, p.placed_at, p.board_id`
+		rows, err := e.DB.QueryContext(e.Ctx, q, append(args, cardID)...)
+		if err != nil {
+			return out
 		}
+		for rows.Next() {
+			var u, b string
+			if rows.Scan(&u, &b) == nil {
+				out[u] = append(out[u], b)
+			}
+		}
+		rows.Close()
 	}
 	return out
 }
@@ -264,37 +267,47 @@ func CardLevels(e *ops.Env, cardIDs []string) map[string]Level {
 
 // AlsoOn counts, for the cards placed on boardID (only cardIDs when not empty), their OTHER placements on boards the
 // caller can view: the data of the "also on N other boards" marker. Placements on boards the caller cannot view are
-// never counted. One placements query plus one BoardLevels call (skipped when no card has another placement), so
+// never counted. One placements query per 500 cards plus one BoardLevels call (skipped when no card has another placement), so
 // the cost is constant in the number of cards and placements. Cards with no other viewable placement are absent.
 func AlsoOn(e *ops.Env, boardID string, cardIDs []string) map[string]int {
 	out := map[string]int{}
-	q := `SELECT o.card_id,o.board_id FROM card_placements p JOIN card_placements o ON o.card_id=p.card_id AND o.board_id<>p.board_id WHERE p.board_id=?`
-	args := []any{boardID}
-	if len(cardIDs) > 0 {
-		in, ids := placeholders(cardIDs)
-		q += ` AND p.card_id IN (` + in + `)`
-		args = append(args, ids...)
-	}
-	rows, err := e.DB.QueryContext(e.Ctx, q, args...)
-	if err != nil {
-		return out
-	}
 	type pair struct{ card, board string }
 	var pairs []pair
 	seen := map[string]bool{}
 	var boards []string
-	for rows.Next() {
-		var x pair
-		if rows.Scan(&x.card, &x.board) != nil {
-			continue
+	run := func(q string, args []any) bool {
+		rows, err := e.DB.QueryContext(e.Ctx, q, args...)
+		if err != nil {
+			return false
 		}
-		pairs = append(pairs, x)
-		if !seen[x.board] {
-			seen[x.board] = true
-			boards = append(boards, x.board)
+		for rows.Next() {
+			var x pair
+			if rows.Scan(&x.card, &x.board) != nil {
+				continue
+			}
+			pairs = append(pairs, x)
+			if !seen[x.board] {
+				seen[x.board] = true
+				boards = append(boards, x.board)
+			}
+		}
+		rows.Close()
+		return true
+	}
+	base := `SELECT o.card_id,o.board_id FROM card_placements p JOIN card_placements o ON o.card_id=p.card_id AND o.board_id<>p.board_id WHERE p.board_id=?`
+	if len(cardIDs) == 0 {
+		if !run(base, []any{boardID}) {
+			return out
+		}
+	} else {
+		cardIDs = dedupeIDs(cardIDs)
+		for i := 0; i < len(cardIDs); i += idChunk {
+			in, ids := placeholders(cardIDs[i:min(i+idChunk, len(cardIDs))])
+			if !run(base+` AND p.card_id IN (`+in+`)`, append([]any{boardID}, ids...)) {
+				return out
+			}
 		}
 	}
-	rows.Close()
 	if len(pairs) == 0 {
 		return out
 	}
@@ -321,6 +334,10 @@ func PlaceTargets(e *ops.Env, cardID string) []string {
 	if _, err := CardEditAccess(e, cardID, ""); err != nil {
 		return nil
 	}
+	return placeTargets(e, cardID)
+}
+
+func placeTargets(e *ops.Env, cardID string) []string {
 	var draft, tmpl bool
 	var onTemplate int
 	if e.DB.QueryRowContext(e.Ctx, `SELECT c.is_draft,c.is_template,(SELECT COUNT(*) FROM card_placements p JOIN boards b ON b.id=p.board_id

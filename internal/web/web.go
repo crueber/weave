@@ -6,6 +6,8 @@ package web
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -13,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/ops"
@@ -106,8 +110,9 @@ func pageNavigation(p string) bool {
 // the layout with a "not found" / "not allowed" message.
 func (c *Ctx) Fail(err error) {
 	status, msg := 500, "internal error"
-	if e, ok := err.(*ops.Error); ok {
-		status, msg = e.Status, e.Msg
+	var oe *ops.Error
+	if errors.As(err, &oe) {
+		status, msg = oe.Status, oe.Msg
 	} else {
 		fmt.Println("ui error:", err)
 	}
@@ -132,7 +137,9 @@ func (c *Ctx) Fail(err error) {
 		if msg == "" {
 			msg = title
 		}
-		msg = strings.ToUpper(msg[:1]) + msg[1:]
+		if r, sz := utf8.DecodeRuneInString(msg); r != utf8.RuneError && sz > 0 {
+			msg = string(unicode.ToUpper(r)) + msg[sz:]
+		}
 		if err := c.RenderBlock("web_error.html", "page", map[string]any{"Title": title, "Msg": msg, "NotFound": status == 404}); err == nil {
 			return
 		}
@@ -146,7 +153,13 @@ func (c *Ctx) Fail(err error) {
 }
 
 // Bind builds an op input from the request using the op's own struct tags.
-func (c *Ctx) Bind(op string) (any, error) { return ops.Get(op).Bind(c.R) }
+func (c *Ctx) Bind(op string) (any, error) {
+	o := ops.Get(op)
+	if o == nil {
+		return nil, fmt.Errorf("unknown op %s", op)
+	}
+	return o.Bind(c.R)
+}
 
 // BoardHint is the context board a card fragment was asked for (docs/DESIGN.md "Placements"): the query parameter
 // board, else a form field board (the card sheet carries it on every request through an inherited hx-vals). It is
@@ -162,6 +175,9 @@ func (c *Ctx) BoardHint() string {
 		return ""
 	}
 	if c.R.Form == nil && !strings.HasPrefix(c.R.Header.Get("Content-Type"), "multipart/") {
+		if c.R.Body != nil {
+			c.R.Body = http.MaxBytesReader(c.W, c.R.Body, ops.DefaultMaxBody)
+		}
 		_ = c.R.ParseForm()
 	}
 	if c.R.Form == nil {
@@ -170,13 +186,20 @@ func (c *Ctx) BoardHint() string {
 	return c.R.Form.Get("board")
 }
 
-// Do binds the request to op's input and calls it (the standard UI mutation path).
+// Do authorizes, binds the request to op's input and calls it (the standard UI mutation path).
 func (c *Ctx) Do(op string) (any, error) {
-	in, err := c.Bind(op)
+	o := ops.Get(op)
+	if o == nil {
+		return nil, fmt.Errorf("unknown op %s", op)
+	}
+	if err := o.Authorize(c.Env); err != nil {
+		return nil, err
+	}
+	in, err := o.Bind(c.R)
 	if err != nil {
 		return nil, err
 	}
-	return ops.Call(c.Env, op, in)
+	return o.Handler(c.Env, in)
 }
 
 // Redirect works for both full-page and htmx requests.
@@ -190,7 +213,8 @@ func (c *Ctx) Redirect(url string) {
 
 // Toast triggers a client-side toast through HX-Trigger.
 func (c *Ctx) Toast(msg string) {
-	c.W.Header().Set("HX-Trigger", fmt.Sprintf(`{"toast":%q}`, msg))
+	b, _ := json.Marshal(map[string]string{"toast": msg})
+	c.W.Header().Set("HX-Trigger", string(b))
 }
 
 func (c *Ctx) IsHTMX() bool { return c.R.Header.Get("HX-Request") != "" }

@@ -1,10 +1,10 @@
 {{/* "Connect an agent": one sheet in the shared <dialog id="modal"> (sized by agent_prompt.css via dialog#modal:has(.ap)).
    Tabs (only the ones that apply where it was opened) refetch this fragment with ?scope=&id=; the two toggles do the same
    with noinstall= / compact=. The prompt is rendered on the server by the agent.prompt op; the textarea is only an editable
-   preview (Reset restores it). Copy is the shared static/copy.js ([data-copy="#selector"]). It never contains a key. */}}
+   preview (Reset restores it). Copy is handled by weave.js ([data-copy="#selector"]). It never contains a key. */}}
 {{define "page"}}{{template "boards_agentprompt" .}}{{end}}
 {{define "boards_agentprompt"}}{{$d := .Data}}
-<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/agent_prompt.css"><script src="/static/copy.js"></script>
+<link rel="stylesheet" href="/static/cards_modal.css"><link rel="stylesheet" href="/static/agent_prompt.css">
 <div id="ap" class="ap" data-scope="{{$d.Scope}}" aria-label="Connect an agent">
   <div class="ap-top">
     <div class="ap-heading"><h2 id="ap-h">Connect an agent</h2><p class="ap-sub">Copy a prompt into your coding agent (Claude Code, Codex, Gemini, OpenCode...). Showing: {{$d.Out.Title}}.</p></div>

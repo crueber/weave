@@ -10,18 +10,27 @@ import (
 // Default avatars are generated in-process with DiceBear's "Landscape" style
 // (CC0 1.0, by DiceBear): no network and no external API. The seed is the stable
 // user id (never the email), so a person always gets the same picture.
+const avatarCacheMax = 4096
+
 var (
 	landscapeOnce  sync.Once
 	landscapeStyle *dicebear.Style
 	landscapeErr   error
-	avatarCache    sync.Map // seed -> []byte (SVGs are small and deterministic)
+	avatarCacheMu  sync.Mutex
+	avatarCache    = map[string][]byte{}
+	avatarRing     = make([]string, 0, avatarCacheMax)
+	avatarRingPos  int
 )
 
 // GeneratedAvatarSVG returns the deterministic Landscape avatar for seed.
 func GeneratedAvatarSVG(seed string) ([]byte, error) {
-	if v, ok := avatarCache.Load(seed); ok {
-		return v.([]byte), nil
+	avatarCacheMu.Lock()
+	if svg, ok := avatarCache[seed]; ok {
+		avatarCacheMu.Unlock()
+		return svg, nil
 	}
+	avatarCacheMu.Unlock()
+
 	landscapeOnce.Do(func() { landscapeStyle, landscapeErr = dicebear.NewStyle([]byte(styles.Landscape)) })
 	if landscapeErr != nil {
 		return nil, landscapeErr
@@ -31,11 +40,18 @@ func GeneratedAvatarSVG(seed string) ([]byte, error) {
 		return nil, err
 	}
 	svg := []byte(av.SVG())
-	// bound the cache: ids are server-chosen, but keep memory predictable
-	n := 0
-	avatarCache.Range(func(k, _ any) bool { n++; return n < 4096 })
-	if n < 4096 {
-		avatarCache.Store(seed, svg)
+
+	avatarCacheMu.Lock()
+	if _, exists := avatarCache[seed]; !exists {
+		if len(avatarRing) < avatarCacheMax {
+			avatarRing = append(avatarRing, seed)
+		} else {
+			delete(avatarCache, avatarRing[avatarRingPos])
+			avatarRing[avatarRingPos] = seed
+			avatarRingPos = (avatarRingPos + 1) % avatarCacheMax
+		}
+		avatarCache[seed] = svg
 	}
+	avatarCacheMu.Unlock()
 	return svg, nil
 }

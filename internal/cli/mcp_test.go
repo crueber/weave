@@ -321,7 +321,7 @@ func TestMCPWeaveCallParityAndConfirm(t *testing.T) {
 	e := newMCPEnv(t, f, mcpConfig{})
 	// every op is reachable: as a named tool or through weave_call (weave_ops knows them all)
 	tools := e.toolNames()
-	for _, o := range e.ms.catalog().All() {
+	for _, o := range e.ms.catalog(context.Background()).All() {
 		if tools[mcpToolName(o.Name)] != nil {
 			continue
 		}
@@ -408,7 +408,6 @@ func TestMCPAdminToolsHidden(t *testing.T) {
 	}
 	// whoami failing: show everything (the server is the real gate)
 	f2 := newFake(t)
-	f2.status("GET /api/v1/whoami", 500, "error", "down")
 	f2.status("GET /api/v1/auth/whoami", 500, "error", "down")
 	f2.status("GET /api/v1/auth/me", 500, "error", "down")
 	if newMCPEnv(t, f2, mcpConfig{Curated: cur}).toolNames()["weave_group_create"] == nil {

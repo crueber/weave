@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/crueber/weave/internal/db"
@@ -50,27 +51,87 @@ func exportBoardFields(ctx context.Context, q boards.Querier, boardID string, wi
 	}
 	var groups []boards.FieldGroupDoc
 	known := map[string]map[string]bool{} // group -> field ids
-	for _, g := range gs {
-		// A group derived from a project base group is flattened: its fields (own and inherited) become plain fields.
-		fs, err := query(ctx, q, func(r *sql.Rows) (boards.FieldDoc, error) {
-			var f boards.FieldDoc
-			var opts sql.NullString
-			var front bool
-			err := r.Scan(&f.ID, &f.Name, &f.Type, &opts, &front)
-			f.ShowOnFrontOfCard = front
-			if opts.Valid {
-				_ = json.Unmarshal([]byte(opts.String), &f.Options)
+	if len(gs) > 0 {
+		type frow struct {
+			doc     boards.FieldDoc
+			groupID string
+			baseID  string
+			pos     float64
+		}
+		gIDs := make([]any, 0, len(gs))
+		var bIDs []any
+		seenBase := map[string]bool{}
+		for _, g := range gs {
+			gIDs = append(gIDs, g.id)
+			if g.base.Valid && g.base.String != "" && !seenBase[g.base.String] {
+				seenBase[g.base.String] = true
+				bIDs = append(bIDs, g.base.String)
 			}
-			return f, err
-		}, `SELECT id,name,type,options,show_on_front_of_card FROM custom_fields WHERE group_id=? OR (?<>'' AND base_group_id=?) ORDER BY position,id`, g.id, g.base.String, g.base.String)
+		}
+		fq := `SELECT id,group_id,base_group_id,name,type,options,position,show_on_front_of_card FROM custom_fields WHERE group_id IN (` + inPlaceholders(len(gIDs)) + `)`
+		fargs := gIDs
+		if len(bIDs) > 0 {
+			fq += ` OR base_group_id IN (` + inPlaceholders(len(bIDs)) + `)`
+			fargs = append(fargs, bIDs...)
+		}
+		fq += ` ORDER BY position,id`
+		frows, err := query(ctx, q, func(r *sql.Rows) (frow, error) {
+			var x frow
+			var gid, bid, opts sql.NullString
+			var front bool
+			err := r.Scan(&x.doc.ID, &gid, &bid, &x.doc.Name, &x.doc.Type, &opts, &x.pos, &front)
+			x.groupID, x.baseID = gid.String, bid.String
+			x.doc.ShowOnFrontOfCard = front
+			if opts.Valid {
+				_ = json.Unmarshal([]byte(opts.String), &x.doc.Options)
+			}
+			return x, err
+		}, fq, fargs...)
 		if err != nil {
 			return nil, nil, err
 		}
-		known[g.id] = map[string]bool{}
-		for _, f := range fs {
-			known[g.id][f.ID] = true
+		byGroup := map[string][]frow{}
+		byBase := map[string][]frow{}
+		for _, fr := range frows {
+			if fr.groupID != "" {
+				byGroup[fr.groupID] = append(byGroup[fr.groupID], fr)
+			}
+			if fr.baseID != "" {
+				byBase[fr.baseID] = append(byBase[fr.baseID], fr)
+			}
 		}
-		groups = append(groups, boards.FieldGroupDoc{ID: g.id, Name: g.name, Repeatable: g.rep, Card: g.card, Fields: fs})
+		for _, g := range gs {
+			// A group derived from a project base group is flattened: its fields (own and inherited) become plain fields.
+			own := byGroup[g.id]
+			var merged []frow
+			if g.base.Valid && g.base.String != "" {
+				base := byBase[g.base.String]
+				if len(own) == 0 {
+					merged = base
+				} else if len(base) == 0 {
+					merged = own
+				} else {
+					merged = make([]frow, 0, len(own)+len(base))
+					merged = append(merged, own...)
+					merged = append(merged, base...)
+					sort.Slice(merged, func(i, j int) bool {
+						if merged[i].pos != merged[j].pos {
+							return merged[i].pos < merged[j].pos
+						}
+						return merged[i].doc.ID < merged[j].doc.ID
+					})
+				}
+			} else {
+				merged = own
+			}
+			fs := make([]boards.FieldDoc, 0, len(merged))
+			known[g.id] = map[string]bool{}
+			for _, fr := range merged {
+				fs = append(fs, fr.doc)
+				known[g.id][fr.doc.ID] = true
+			}
+			groups = append(groups, boards.FieldGroupDoc{ID: g.id, Name: g.name, Repeatable: g.rep, Card: g.card, Fields: fs})
+		}
 	}
 	if !withValues || len(groups) == 0 {
 		return groups, nil, nil
@@ -156,7 +217,7 @@ func importBoardFields(ctx context.Context, tx *sql.Tx, boardID string, groups [
 			pos += base
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO custom_field_groups(id,board_id,card_id,name,repeatable,position,created_at) VALUES(?,?,?,?,?,?,?)`,
-			gid, board, card, nullIfEmpty(name), b2i(g.Repeatable), pos, now); err != nil {
+			gid, board, card, nz(name), b2i(g.Repeatable), pos, now); err != nil {
 			return err
 		}
 		made[g.ID] = gk{id: gid, card: newCard, rep: g.Repeatable, fields: map[string]fk{}}
@@ -227,11 +288,4 @@ func importBoardFields(ctx context.Context, tx *sql.Tx, boardID string, groups [
 		}
 	}
 	return nil
-}
-
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

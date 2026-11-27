@@ -62,7 +62,7 @@ func newFake(t *testing.T) *fake {
 	t.Setenv("WEAVE_NO_SCHEMA_FETCH", "1")
 	t.Setenv("NO_COLOR", "1")
 	// defaults most tests need
-	f.json("GET /api/v1/whoami", map[string]any{"item": map[string]any{
+	f.json("GET /api/v1/auth/whoami", map[string]any{"item": map[string]any{
 		"user": map[string]any{"id": "u1", "name": "Agent Smith"}, "role": "boardUser", "isAgent": true,
 		"boards": []any{map[string]any{"id": "b1", "name": "Product"}, map[string]any{"id": "b2", "name": "Platform"}},
 	}})

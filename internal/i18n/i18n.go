@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"html/template"
+	"sort"
 	"strings"
 	"sync"
 
@@ -51,10 +52,11 @@ func T(lang, key string) string {
 // Languages lists the available language codes.
 func Languages() []string {
 	once.Do(load)
-	var out []string
+	out := make([]string, 0, len(tabs))
 	for k := range tabs {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 

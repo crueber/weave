@@ -59,8 +59,7 @@ func markSnippet(s string) string {
 	return strings.ReplaceAll(s, "\x03", "</mark>")
 }
 
-type boardInfo struct {
-	level                    authz.Level
+type boardMeta struct {
 	name, projectID, project string
 }
 
@@ -70,6 +69,9 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 	fq := ftsQuery(in.Q)
 	if fq == "" {
 		return out, ops.Invalid("empty search query")
+	}
+	if in.BoardID != "" && authz.BoardLevel(e, in.BoardID) < authz.View {
+		return out, nil
 	}
 	limit := in.Limit
 	if limit <= 0 || limit > 100 {
@@ -84,8 +86,8 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 	if in.BoardID != "" {
 		// the index keeps ONE row per card or comment, under the card's home board; a card placed on this board (and
 		// its comments) matches too
-		q += ` AND (board_id=? OR (kind='card' AND ref_id IN (SELECT card_id FROM card_placements WHERE board_id=?))
-			OR (kind='comment' AND ref_id IN (SELECT m.id FROM comments m JOIN card_placements p ON p.card_id=m.card_id WHERE p.board_id=?)))`
+		q += ` AND (board_id=? OR (kind='card' AND EXISTS(SELECT 1 FROM card_placements p WHERE p.card_id=search_idx.ref_id AND p.board_id=?))
+			OR (kind='comment' AND EXISTS(SELECT 1 FROM comments m JOIN card_placements p ON p.card_id=m.card_id WHERE m.id=search_idx.ref_id AND p.board_id=?)))`
 		args = append(args, in.BoardID, in.BoardID, in.BoardID)
 	}
 	q += ` ORDER BY rank LIMIT ?`
@@ -106,13 +108,24 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 	// boardId filter when the card is placed there, else the home when viewable, else the board with the most
 	// access); the board of the index row (the home) is never named unless the caller can view it
 	cardOf := map[string]string{} // comment id -> card id
-	var cardIDs, commentIDs []string
+	var cardIDs, commentIDs, projectIDs, boardKindIDs []string
+	seenProj, seenBoard := map[string]bool{}, map[string]bool{}
 	for _, c := range cands {
 		switch c.kind {
 		case "card":
 			cardIDs = append(cardIDs, c.ref)
 		case "comment":
 			commentIDs = append(commentIDs, c.ref)
+		case "project":
+			if !seenProj[c.ref] {
+				seenProj[c.ref] = true
+				projectIDs = append(projectIDs, c.ref)
+			}
+		case "board":
+			if !seenBoard[c.board] {
+				seenBoard[c.board] = true
+				boardKindIDs = append(boardKindIDs, c.board)
+			}
 		}
 	}
 	if len(commentIDs) > 0 { // one query (at most limit*8 = 800 candidates)
@@ -133,17 +146,41 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 		}
 	}
 	access := authz.CardAccesses(e, cardIDs, in.BoardID)
-	boards := map[string]*boardInfo{}
-	binfo := func(id string) *boardInfo {
-		if b, ok := boards[id]; ok {
-			return b
+	projLevels := authz.ProjectLevels(e, projectIDs)
+	boardLevels := authz.BoardLevels(e, boardKindIDs)
+
+	// batch load board/project names for every viewable board referenced by any candidate hit
+	var metaIDs []any
+	metaSeen := map[string]bool{}
+	addMeta := func(id string) {
+		if id != "" && !metaSeen[id] {
+			metaSeen[id] = true
+			metaIDs = append(metaIDs, id)
 		}
-		b := &boardInfo{level: authz.BoardLevel(e, id)}
-		if b.level >= authz.View {
-			_ = e.DB.QueryRowContext(e.Ctx, `SELECT b.name,b.project_id,p.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.id=?`, id).Scan(&b.name, &b.projectID, &b.project)
+	}
+	for _, id := range boardKindIDs {
+		if boardLevels[id] >= authz.View {
+			addMeta(id)
 		}
-		boards[id] = b
-		return b
+	}
+	for _, a := range access {
+		if in.BoardID == "" || a.BoardID == in.BoardID {
+			addMeta(a.BoardID)
+		}
+	}
+	boards := map[string]boardMeta{}
+	if len(metaIDs) > 0 {
+		ph := "?" + strings.Repeat(",?", len(metaIDs)-1)
+		if rs, err := e.DB.QueryContext(e.Ctx, `SELECT b.id,b.name,b.project_id,p.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.id IN (`+ph+`)`, metaIDs...); err == nil {
+			for rs.Next() {
+				var id string
+				var b boardMeta
+				if rs.Scan(&id, &b.name, &b.projectID, &b.project) == nil {
+					boards[id] = b
+				}
+			}
+			rs.Close()
+		}
 	}
 	for _, c := range cands {
 		if len(out.Items) >= limit {
@@ -152,14 +189,17 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 		h := SearchHit{Kind: c.kind, ID: c.ref, Title: c.title, SnippetHTML: markSnippet(c.snip)}
 		switch c.kind {
 		case "project":
-			if authz.ProjectLevel(e, c.ref) < authz.View {
+			if projLevels[c.ref] < authz.View {
 				continue
 			}
 			h.ProjectID, h.URL = c.ref, "/projects/"+c.ref
 			h.ProjectName = c.title
 		case "board":
-			b := binfo(c.board)
-			if b.level < authz.View {
+			if boardLevels[c.board] < authz.View {
+				continue
+			}
+			b, ok := boards[c.board]
+			if !ok {
 				continue
 			}
 			h.BoardID, h.BoardName, h.ProjectID, h.ProjectName, h.URL = c.board, b.name, b.projectID, b.project, "/boards/"+c.board
@@ -178,8 +218,8 @@ func Search(e *ops.Env, in SearchIn) (SearchOut, error) {
 				// reveal a placement on a board the caller cannot view
 				continue
 			}
-			b := binfo(a.BoardID)
-			if b.level < authz.View {
+			b, ok := boards[a.BoardID]
+			if !ok {
 				continue
 			}
 			h.BoardID, h.BoardName, h.ProjectID, h.ProjectName = a.BoardID, b.name, b.projectID, b.project

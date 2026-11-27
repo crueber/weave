@@ -15,7 +15,7 @@
 .projects-card.is-hidden{opacity:.7}
 .projects-card-link{flex:1;display:flex;flex-direction:column;color:var(--fg);text-decoration:none;min-width:0}
 .projects-card-link:hover{color:var(--fg)}
-.projects-card-cover{display:block;height:72px;background-size:cover;background:var(--surface-3);border-bottom:1px solid var(--border)}
+.projects-card-cover{display:block;height:72px;background-color:var(--surface-3);background-size:cover;background-position:center;border-bottom:1px solid var(--border)}
 /* flat colour: faint tint + 4px full-colour edge instead of a saturated block */
 .projects-card-cover[style*="--hero-color"]{background:color-mix(in oklab,var(--hero-color) 16%,var(--surface));border-bottom:4px solid var(--hero-color)}
 .projects-card-body{display:flex;flex-direction:column;gap:2px;padding:var(--space-3) var(--space-4) var(--space-4)}

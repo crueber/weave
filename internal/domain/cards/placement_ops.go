@@ -125,47 +125,27 @@ func placedInList(ctx context.Context, q querier, cardID, listID string) bool {
 	return n > 0
 }
 
-// pruneAfterLeaving drops the card's labels and members that no board it is still on allows (labelAllowed; a direct
-// or group membership of any placement board), after it left a board. With one placement left this is exactly the
-// cross-board card.move rule ("labels and members that do not exist on the destination board"). It reads the raw
-// card_labels rows (Card.LabelIDs is filtered to one board).
-func pruneAfterLeaving(ctx context.Context, tx *sql.Tx, cardID string, memberIDs []string) error {
-	onBoards := strs(&ops.Env{Ctx: ctx}, tx, `SELECT board_id FROM card_placements WHERE card_id=?`, cardID)
-	labels := strs(&ops.Env{Ctx: ctx}, tx, `SELECT label_id FROM card_labels WHERE card_id=?`, cardID)
-	for _, l := range labels {
-		keep := false
-		for _, b := range onBoards {
-			if labelAllowed(ctx, tx, b, l) {
-				keep = true
-				break
-			}
-		}
-		if !keep {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM card_labels WHERE card_id=? AND label_id=?`, cardID, l); err != nil {
-				return err
-			}
-		}
+// pruneAfterLeaving drops the card's labels and members that no board it is still on allows (labelAllowed; a direct,
+// group, or project-manager membership of any placement board), after it left a board. With one placement left this is
+// exactly the cross-board card.move rule ("labels and members that do not exist on the destination board").
+func pruneAfterLeaving(ctx context.Context, tx *sql.Tx, cardID string, _ []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM card_labels WHERE card_id=?1 AND NOT EXISTS (
+		SELECT 1 FROM card_placements p
+		JOIN boards b ON b.id=p.board_id
+		LEFT JOIN projects pr ON pr.id=b.project_id
+		JOIN labels l ON l.id=card_labels.label_id
+		WHERE p.card_id=?1 AND (l.board_id=b.id OR (l.project_id=b.project_id AND pr.use_project_labels=1))
+	)`, cardID); err != nil {
+		return err
 	}
-	if memberIDs == nil {
-		memberIDs = strs(&ops.Env{Ctx: ctx}, tx, `SELECT user_id FROM card_memberships WHERE card_id=?`, cardID)
-	}
-	if len(memberIDs) == 0 {
-		return nil
-	}
-	members := map[string]bool{}
-	for _, b := range onBoards {
-		for u := range boardMemberIDs(ctx, tx, b) {
-			members[u] = true
-		}
-	}
-	for _, u := range memberIDs {
-		if !members[u] {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM card_memberships WHERE card_id=? AND user_id=?`, cardID, u); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	_, err := tx.ExecContext(ctx, `DELETE FROM card_memberships WHERE card_id=?1 AND NOT EXISTS (
+		SELECT 1 FROM users u WHERE u.id=card_memberships.user_id AND u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+			EXISTS(SELECT 1 FROM board_memberships bm JOIN card_placements p ON p.board_id=bm.board_id WHERE p.card_id=?1 AND bm.user_id=u.id) OR
+			EXISTS(SELECT 1 FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id JOIN card_placements p ON p.board_id=bm.board_id WHERE p.card_id=?1 AND gm.user_id=u.id) OR
+			EXISTS(SELECT 1 FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id JOIN card_placements p ON p.board_id=b.id WHERE p.card_id=?1 AND pm.user_id=u.id)
+		)
+	)`, cardID)
+	return err
 }
 
 // removePlacementsTx is boards.RemoveFromBoards: it takes cardID off boardIDs inside tx. When the home is among them,
@@ -206,7 +186,6 @@ func removePlacementsTx(e *ops.Env, tx *sql.Tx, cardID string, boardIDs []string
 	if len(keep) == 0 {
 		return "", fmt.Errorf("card %s: refusing to remove its last placement", cardID)
 	}
-	members := strs(e, tx, `SELECT user_id FROM card_memberships WHERE card_id=?`, cardID)
 	if doomed[home] {
 		newHome = keep[0]
 		if _, err := tx.ExecContext(e.Ctx, `UPDATE card_placements SET is_home=0 WHERE card_id=? AND board_id=?`, cardID, home); err != nil {
@@ -221,7 +200,7 @@ func removePlacementsTx(e *ops.Env, tx *sql.Tx, cardID string, boardIDs []string
 			return "", err
 		}
 	}
-	if err := pruneAfterLeaving(e.Ctx, tx, cardID, members); err != nil {
+	if err := pruneAfterLeaving(e.Ctx, tx, cardID, nil); err != nil {
 		return "", err
 	}
 	_, err = tx.ExecContext(e.Ctx, `UPDATE cards SET updated_at=? WHERE id=?`, db.Now(), cardID)
@@ -233,17 +212,20 @@ func removePlacementsTx(e *ops.Env, tx *sql.Tx, cardID string, boardIDs []string
 // placement); cards on doomed boards only are left to the cascade. after announces, on each kept card's (new) home,
 // card.updated with changed ["placements"] (plus "home" when it moved).
 func beforeBoardsDelete(e *ops.Env, tx *sql.Tx, boardIDs []string) (func(), error) {
-	ph := "?"
+	if len(boardIDs) == 0 {
+		return func() {}, nil
+	}
+	ph := inPlaceholders(len(boardIDs))
 	args := make([]any, 0, 2*len(boardIDs))
-	for i, b := range boardIDs {
-		if i > 0 {
-			ph += ",?"
-		}
+	for _, b := range boardIDs {
 		args = append(args, b)
 	}
 	args = append(args, args...)
-	cardIDs := strs(e, tx, `SELECT DISTINCT card_id FROM card_placements WHERE board_id IN (`+ph+`)
+	cardIDs, err := strs(e, tx, `SELECT DISTINCT card_id FROM card_placements WHERE board_id IN (`+ph+`)
 		AND card_id IN (SELECT card_id FROM card_placements WHERE board_id NOT IN (`+ph+`)) ORDER BY card_id`, args...)
+	if err != nil {
+		return nil, err
+	}
 	type kept struct {
 		card, home string
 		rehomed    bool
@@ -345,7 +327,16 @@ func cardPlace(e *ops.Env, in PlaceIn) (Card, error) {
 	emitScoped(e, "", events.TypePlace, events.StreamPlaced, dst, in.ID, map[string]any{"card": c, "listId": in.ListID}, []string{dst})
 	boards.EmitClosedElsewhere(e, dst, landed)
 	boards.EmitAutoArchived(e, landed)
-	return cardGet(e, GetIn{ID: in.ID, BoardID: dst})
+	a, err := authz.CardAccessFor(e, in.ID, dst)
+	if err != nil {
+		return Card{}, err
+	}
+	if a.HomeBoardID == "" || a.Boards[a.HomeBoardID] < authz.Edit {
+		c.ShareToken = nil
+	}
+	c.HomeBoardID, c.Placements = a.HomeBoardID, placementsFor(e, a)
+	c.AlsoOnBoards = len(c.Placements) - 1
+	return c, nil
 }
 
 // ---- card.unplace ("Remove from board")
@@ -507,7 +498,8 @@ func orderLandings(ctx context.Context, q querier, lands []boards.Landing) []boa
 	closing := map[string]bool{}
 	for _, l := range lands {
 		if _, ok := closing[l.ListID]; !ok {
-			closing[l.ListID] = listType(ctx, q, l.ListID) == "closed"
+			_, lt, _ := listRef(ctx, q, l.ListID)
+			closing[l.ListID] = lt == "closed"
 		}
 	}
 	out := append([]boards.Landing(nil), lands...)

@@ -35,23 +35,19 @@ func renderAgents(c *web.Ctx, errm string, key *APIKeyOut, keyName string) error
 	}
 	// board choices: only the boards the admin manages themself ("Project / Board"); the admin role shows no other
 	// board, so this page is account management (name, creator, status, key, how many boards) and nothing more
-	var ids []string
-	names := map[string]string{}
-	if rows, err := c.Env.DB.QueryContext(c.Env.Ctx, `SELECT b.id,p.name||' / '||b.name FROM boards b JOIN projects p ON p.id=b.project_id WHERE b.is_template=0 ORDER BY p.name,b.position,b.name`); err == nil {
+	uid := c.Env.User.UserID
+	if rows, err := c.Env.DB.QueryContext(c.Env.Ctx, `SELECT b.id,p.name||' / '||b.name FROM boards b JOIN projects p ON p.id=b.project_id
+		WHERE b.is_template=0 AND (
+			b.project_id IN (SELECT project_id FROM project_managers WHERE user_id=?) OR
+			b.id IN (SELECT board_id FROM board_memberships WHERE role='owner' AND (user_id=? OR group_id IN (SELECT group_id FROM user_group_members WHERE user_id=?))))
+		ORDER BY p.name,b.position,b.name LIMIT 500`, uid, uid, uid); err == nil {
 		for rows.Next() {
 			var o agentBoardOpt
 			if rows.Scan(&o.ID, &o.Name) == nil {
-				ids = append(ids, o.ID)
-				names[o.ID] = o.Name
+				d.Boards = append(d.Boards, o)
 			}
 		}
 		rows.Close()
-	}
-	lv := authz.BoardLevels(c.Env, ids)
-	for _, id := range ids {
-		if lv[id] >= authz.Manage && len(d.Boards) < 500 {
-			d.Boards = append(d.Boards, agentBoardOpt{id, names[id]})
-		}
 	}
 	if c.IsHTMX() && c.R.Method != "GET" {
 		return c.RenderBlock("auth_admin_agents.html", "agents-body", d)
@@ -134,21 +130,22 @@ func atoiOr0(s string) int {
 }
 
 func renderBoardAgents(c *web.Ctx, boardID string, d boardAgentsData) error {
-	on, err := ops.Typed[[]AgentOut](c.Env, "agent.list", AgentListIn{BoardID: boardID})
-	if err != nil {
+	if err := noAgents(c.Env); err != nil {
+		return err
+	}
+	if err := authz.RequireBoard(c.Env, boardID, authz.Manage); err != nil {
 		return err
 	}
 	all, err := ops.Typed[[]AgentOut](c.Env, "agent.list", AgentListIn{})
 	if err != nil {
 		return err
 	}
-	here := map[string]bool{}
-	for _, a := range on {
-		here[a.ID] = true
-	}
-	d.BoardID, d.Agents = boardID, on
+	d.BoardID = boardID
+	d.Agents = []AgentOut{}
 	for _, a := range all {
-		if !here[a.ID] && a.CanManage && !a.IsDeactivated {
+		if a.RoleOn(boardID) != "" {
+			d.Agents = append(d.Agents, a)
+		} else if a.CanManage && !a.IsDeactivated {
 			d.Mine = append(d.Mine, a)
 		}
 	}

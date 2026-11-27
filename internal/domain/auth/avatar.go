@@ -54,9 +54,8 @@ func normalizeAvatar(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func removeAvatarFile(e *ops.Env, userID string) {
-	var f string
-	if e.DB.QueryRowContext(e.Ctx, `SELECT COALESCE(avatar,'') FROM users WHERE id=?`, userID).Scan(&f) == nil && f != "" {
-		_ = os.Remove(filepath.Join(dataDir(e), "files", "avatars", filepath.Base(f)))
+func removeAvatarFilename(e *ops.Env, file string) {
+	if file != "" {
+		_ = os.Remove(filepath.Join(dataDir(e), "files", "avatars", filepath.Base(file)))
 	}
 }

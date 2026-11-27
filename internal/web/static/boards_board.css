@@ -1,7 +1,6 @@
 /* Boards domain styles (kanban / list / grid views, composers, drag & drop, filters, settings).
    Colours, radii and spacing come from the design tokens published in weave.css; the fallbacks
    only matter if a token is missing. */
-.boards-sr{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .ico{width:1em;height:1em;vertical-align:-.125em;flex:none}
 .boards-shell{display:flex;flex-direction:column;gap:var(--space-3,.75rem);min-height:calc(100vh - 6rem)}
 /* kanban: the shell fills the viewport under the top bar so the lists' horizontal scrollbar sits at the screen bottom */
@@ -171,7 +170,7 @@ html:not(.js) .boards-col-collapse,html:not(.js) .boards-tile-edit{display:none}
 .boards-meta{display:inline-flex;align-items:center;gap:.2rem}
 .boards-due{display:inline-flex;align-items:center;gap:.25rem;padding:.05rem .4rem;border-radius:var(--radius-sm,4px);background:var(--surface-3,#e4e4e7);color:var(--fg-2,#3f3f46)}
 .boards-due-overdue{background:var(--danger,#c9372c);color:var(--label-fg,#fff)}
-.boards-due-soon{background:var(--warning,#e8a317);color:#1f1300}
+.boards-due-soon{background:var(--warning,#e8a317);color:var(--label-fg,#fff)}
 .boards-due-done{background:var(--success,#2e8540);color:var(--label-fg,#fff)}
 .boards-prog.is-done{color:var(--success,#2e8540)}
 .boards-bar{display:inline-block;width:2rem;height:.3rem;background:var(--border,#d4d4d8);border-radius:3px;overflow:hidden;margin-left:.15rem}.boards-bar i{display:block;height:100%;background:var(--accent,#4f46e5)}
@@ -206,8 +205,6 @@ html:not(.js) .boards-add-open{display:none}
 .boards-menuitem{display:block;width:100%;text-align:left;padding:.4rem .55rem;border:0;border-radius:var(--radius-sm,4px);background:none;color:var(--fg,#111);font:inherit;cursor:pointer}
 .boards-menuitem:hover{background:var(--surface-2,#f1f1f4)}
 .boards-menuitem.danger,button.danger{color:var(--danger,#c9372c)}
-.boards-menu-sec{display:flex;flex-direction:column;gap:.3rem;padding:.5rem .55rem;border-top:1px solid var(--border,#d4d4d8);font-size:var(--text-sm,.85rem)}
-.boards-menu-sec label{display:flex;flex-direction:column;font-size:.8rem;gap:.15rem}
 .boards-menu-danger{padding:.3rem .15rem 0}
 
 /* drag and drop (pointer based; see boards_dnd.js) */
@@ -274,11 +271,7 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .bs-nav a.bs-nav-danger[aria-current]{background:var(--danger-soft);border-left-color:var(--danger)}
 .bs-panels{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
 .js-ready .bs-panel{display:none}
-.boards-settings[data-active=general] #set-general,.boards-settings[data-active=members] #set-members,.boards-settings[data-active=labels] #set-labels,
-.boards-settings[data-active=views] #set-views,.boards-settings[data-active=filters] #set-filters,.boards-settings[data-active=sharing] #set-sharing,
-.boards-settings[data-active=profile] #set-profile,.boards-settings[data-active=appearance] #set-appearance,.boards-settings[data-active=workspace] #set-workspace,
-.boards-settings[data-active=apikey] #set-apikey,.boards-settings[data-active=sessions] #set-sessions,.boards-settings[data-active=watching] #set-watching,
-.boards-settings[data-active=agents] #set-agents,.boards-settings[data-active=background] #set-background,.boards-settings[data-active=managers] #set-managers,.boards-settings[data-active=fields] #set-fields,.boards-settings[data-active=templates] #set-templates,.boards-settings[data-active=notifications] #set-notifications,.boards-settings[data-active=webhooks] #set-webhooks,.boards-settings[data-active=danger] #set-danger{display:block}
+.js-ready .bs-panel.is-active{display:block}
 .bs-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-2)}
 .bs-sec-head h2{margin:0;font-size:var(--text-lg);font-weight:700;letter-spacing:-.01em}
 .bs-status{min-height:1.2em;font-size:var(--text-sm)}.bs-saved{color:var(--success);font-weight:600}
@@ -348,7 +341,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 }
 .boards-tiles{display:flex;flex-wrap:wrap;gap:.6rem}.boards-boardtile{display:inline-flex;align-items:center;gap:.4rem;min-width:11rem;padding:.9rem 1rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-lg,8px);background:var(--surface,#fff);color:var(--fg,#111);text-decoration:none}
 .boards-new{cursor:pointer;color:var(--accent,#4f46e5);border-style:dashed}
-.boards-newdlg{padding:1rem}
 /* "Agent prompt" dialog (opened from a column menu into #modal) */
 @media(max-width:640px){.boards-col,.boards-addlist{flex-basis:84vw}}
 .bs-head .boards-btn{white-space:nowrap}.bs-text label{font:inherit;color:inherit}
@@ -426,7 +418,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-pop:has(>.boards-kpick){width:20.5rem}
 .boards-kopt{display:flex;align-items:center;gap:.5rem;width:100%;padding:.35rem .5rem;border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-sm,4px);background:var(--surface,#fff);color:var(--fg,#111);font:inherit;text-align:left;cursor:pointer}
 .boards-kopt:hover{background:var(--surface-2,#f1f1f4)}
-.boards-kopt[hidden]{display:none}
 .boards-kopt:disabled{opacity:.6;cursor:progress}
 .boards-kopt-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .boards-kopt small{color:var(--muted,#6b7280);font-size:var(--text-xs,.75rem);white-space:nowrap}
@@ -474,7 +465,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 
 /* ---- Archive / Trash: a quiet list view, with the shared board filters kept outside the fragment ---- */
 .boards-show{display:inline-flex;align-items:center;gap:2px;flex:none;padding:2px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm)}
-.boards-show-label{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .boards-show a{display:inline-flex;align-items:center;gap:var(--space-1);align-self:stretch;flex:none;min-height:0;padding:0 .5rem;border-radius:calc(var(--radius-sm) - 1px);color:var(--muted);font-size:var(--text-xs);font-weight:600;line-height:1;white-space:nowrap;text-decoration:none}
 .boards-show a:hover{color:var(--fg)}
 .boards-show a[aria-current=page]{background:var(--surface);color:var(--fg)}
@@ -483,7 +473,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .archive-head h2,.archive-summary h2{margin:0;font-size:var(--text-xl);letter-spacing:-.02em}
 .archive-head p,.archive-total,#archive-total{color:var(--muted);font-size:var(--text-sm)}
 .archive-head p{margin:var(--space-1) 0 0}.archive-total{margin:0;font-variant-numeric:tabular-nums}.archive-total strong,#archive-total{color:var(--fg);font-weight:700}
-.archive-sr{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .archive-tablewrap{min-width:0;max-width:100%;overflow-x:hidden}
 #archive-filters{display:flex;align-items:flex-end;gap:var(--space-3);flex-wrap:wrap;min-width:0;padding:var(--space-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-lg)}
 #archive-filters :is(.field,.archive-facet){display:flex;flex-direction:column;gap:var(--space-1);flex:1 1 10rem;min-width:0;font-size:var(--text-sm);font-weight:600}
@@ -562,7 +551,6 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
   #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-filterscroll>.boards-dd summary,#board-shell:is([data-show="archived"],[data-show="trash"]) #saved-filters summary{width:100%;justify-content:center;white-space:nowrap}
   .boards-show{flex-wrap:nowrap;gap:2px;padding:2px;border-radius:var(--radius-sm)}
   #board-shell:is([data-show="archived"],[data-show="trash"]) .boards-show{width:100%}
-  .boards-show-label{flex:none;padding:0 var(--space-1)}
   /* the board's own filter row keeps the Show control at its natural width (Trash must not hide behind the actions) */
   #board-shell:not(:is([data-show="archived"],[data-show="trash"])) .boards-filterscroll>.boards-show{width:auto;flex:none}
   .boards-show a{flex:none;min-width:0;min-height:0;padding:0 .5rem;border-radius:var(--radius-sm);font-size:var(--text-xs);white-space:nowrap}

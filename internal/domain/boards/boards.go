@@ -3,6 +3,7 @@ package boards
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/crueber/weave/internal/agentprompt"
 	"github.com/crueber/weave/internal/authz"
@@ -70,16 +71,17 @@ type BoardDetail struct {
 	IsSubscribed bool `json:"isSubscribed,omitempty" desc:"you watch this board (per caller; absent = not watching)"`
 }
 
-func loadDetail(e *ops.Env, b Board, withMembers bool) (BoardDetail, error) {
-	d := BoardDetail{Board: b, Level: levelName(authz.BoardLevel(e, b.ID))}
+func loadDetail(e *ops.Env, b Board, lvl authz.Level, withMembers bool) (BoardDetail, error) {
+	d := BoardDetail{Board: b, Level: levelName(lvl)}
 	var err error
 	if d.Lists, err = listsOf(e, b.ID, false); err != nil {
 		return d, err
 	}
-	if d.Labels, err = labelsOf(e, b.ID); err != nil {
+	pid, use := projectOfBoard(e, b.ID)
+	if d.Labels, err = labelsOfProject(e, b.ID, pid, use); err != nil {
 		return d, err
 	}
-	if d.LabelGroups, err = groupsOf(e, b.ID); err != nil {
+	if d.LabelGroups, err = groupsOfProject(e, b.ID, pid, use); err != nil {
 		return d, err
 	}
 	if withMembers {
@@ -170,20 +172,23 @@ func registerBoardOps() {
 		UI: ui("GET", "/projects/{projectId}/boards")}, boardList)
 	ops.Register(ops.Op{Name: "board.get", Summary: "Get a board with lists, labels, label groups and members", Method: "GET", Path: "/boards/{id}",
 		UI: "GET /boards/{id}"}, func(e *ops.Env, in BoardGetIn) (BoardDetail, error) {
-		if err := authz.RequireBoard(e, in.ID, authz.View); err != nil {
-			return BoardDetail{}, err
+		lvl := authz.BoardLevel(e, in.ID)
+		if lvl < authz.View {
+			return BoardDetail{}, ops.NotFound("board")
 		}
 		b, err := GetBoard(e.Ctx, e.DB, in.ID)
 		if err != nil {
 			return BoardDetail{}, err
 		}
-		lvl := authz.BoardLevel(e, in.ID)
 		if lvl < authz.Manage {
 			b.PublicToken = ""
 		}
-		d, err := loadDetail(e, b, e.User != nil)
+		d, err := loadDetail(e, b, lvl, e.User != nil)
+		if err != nil {
+			return d, err
+		}
 		d.IsSubscribed = boardWatched(e, in.ID)
-		return d, err
+		return d, nil
 	})
 	ops.Register(ops.Op{Name: "board.create", Summary: "Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)", Method: "POST", Path: "/projects/{projectId}/boards",
 		UI: ui("POST", "/projects/{projectId}/boards")}, boardCreate)
@@ -219,10 +224,11 @@ func registerBoardOps() {
 		if d.Lists, err = listsOf(e, b.ID, false); err != nil {
 			return d, err
 		}
-		if d.Labels, err = labelsOf(e, b.ID); err != nil {
+		pid, use := projectOfBoard(e, b.ID)
+		if d.Labels, err = labelsOfProject(e, b.ID, pid, use); err != nil {
 			return d, err
 		}
-		d.LabelGroups, err = groupsOf(e, b.ID)
+		d.LabelGroups, err = groupsOfProject(e, b.ID, pid, use)
 		return d, err
 	})
 	registerTemplateOps()
@@ -259,9 +265,14 @@ func boardList(e *ops.Env, in BoardListIn) ([]Board, error) {
 		all = append(all, b)
 	}
 	rows.Close()
+	ids := make([]string, len(all))
+	for i, b := range all {
+		ids[i] = b.ID
+	}
+	levels := authz.BoardLevels(e, ids)
 	out := []Board{}
 	for _, b := range all {
-		if l := authz.BoardLevel(e, b.ID); l >= authz.View {
+		if l := levels[b.ID]; l >= authz.View {
 			if l < authz.Manage {
 				b.PublicToken = ""
 			}
@@ -334,8 +345,12 @@ func insertBoard(e *ops.Env, tx *sql.Tx, id, projectID, name, view string, pos *
 }
 
 func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
-	if err := authz.RequireBoard(e, in.ID, authz.Edit); err != nil {
-		return Board{}, err
+	lvl := authz.BoardLevel(e, in.ID)
+	if lvl == authz.None {
+		return Board{}, ops.NotFound("board")
+	}
+	if lvl < authz.Edit {
+		return Board{}, ops.Forbidden()
 	}
 	sets, args := []string{}, []any{}
 	add := func(col string, v any) { sets = append(sets, col+"=?"); args = append(args, v) }
@@ -379,7 +394,7 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 	}
 	if in.AgentPrompt != nil {
 		// The prompt is instructions an agent follows with the reader's key: managers only (like sharing and templates).
-		if authz.BoardLevel(e, in.ID) < authz.Manage {
+		if lvl < authz.Manage {
 			return Board{}, ops.Forbidden()
 		}
 		def, _ := notify.AgentPromptDefault(e, agentprompt.ScopeBoard)
@@ -389,36 +404,33 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 		}
 		add("agent_prompt", nullStr(txt))
 	}
-	for col, v := range map[string]*bool{"always_display_card_creator": in.AlwaysDisplayCardCreator,
-		"expand_task_lists_by_default": in.ExpandTaskListsByDefault, "show_card_counter": in.ShowCardCounter, "show_card_ages": in.ShowCardAges, "has_inbox": in.HasInbox} {
-		if v != nil {
-			add(col, boolInt(*v))
+	for _, f := range []struct {
+		col string
+		v   *bool
+	}{
+		{"always_display_card_creator", in.AlwaysDisplayCardCreator},
+		{"expand_task_lists_by_default", in.ExpandTaskListsByDefault},
+		{"show_card_counter", in.ShowCardCounter},
+		{"show_card_ages", in.ShowCardAges},
+		{"has_inbox", in.HasInbox},
+	} {
+		if f.v != nil {
+			add(f.col, boolInt(*f.v))
 		}
 	}
 	if len(sets) > 0 {
 		add("updated_at", db.Now())
 		args = append(args, in.ID)
-		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE boards SET `+join(sets)+` WHERE id=?`, args...); err != nil {
+		if _, err := e.DB.ExecContext(e.Ctx, `UPDATE boards SET `+strings.Join(sets, ",")+` WHERE id=?`, args...); err != nil {
 			return Board{}, err
 		}
 		emit(e, "boardUpdate", "board.updated", in.ID, map[string]any{"id": in.ID})
 	}
 	b, err := GetBoard(e.Ctx, e.DB, in.ID)
-	if authz.BoardLevel(e, in.ID) < authz.Manage {
+	if lvl < authz.Manage {
 		b.PublicToken = ""
 	}
 	return b, err
-}
-
-func join(s []string) string {
-	out := ""
-	for i, x := range s {
-		if i > 0 {
-			out += ","
-		}
-		out += x
-	}
-	return out
 }
 
 // canOrderBoards: the order of a project's boards belongs to the project, so only project managers (and admins)

@@ -110,7 +110,7 @@ func xdgJoin(parts ...string) func(e *skillEnv) string {
 // Codex, Gemini CLI, pi, OpenCode, Amp, Goose, Qwen Code, Crush, Cursor, Copilot, Roo, Augment, Windsurf).
 func universalUser(e *skillEnv) string { return e.hp(".agents", "skills") }
 
-const weaveDesc = "Weave kanban CLI: use when a task involves Weave boards, lists, cards, comments, checklists, `weave listen`, `weave next` or `weave agent run`."
+const weaveDesc = "Weave project board CLI: use when a task involves Weave boards, lists, cards, comments, checklists, `weave listen`, `weave next` or `weave agent run`."
 
 // agentTargets is the registry. Order matters only for which of several tools sharing one location
 // is reported as the writer.

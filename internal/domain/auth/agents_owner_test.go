@@ -2,7 +2,9 @@ package auth
 
 import (
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crueber/weave/internal/db"
@@ -208,13 +210,23 @@ func TestOwnerCreatesAgents(t *testing.T) {
 	}
 }
 
+func setAgentsCap(t *testing.T, v string) {
+	t.Helper()
+	agentsCapEnv = func() string { return v }
+	agentsCapOnce, agentsCapVal = sync.Once{}, defaultAgentsPerUser
+	t.Cleanup(func() {
+		agentsCapEnv = func() string { return os.Getenv("WEAVE_AGENTS_PER_USER") }
+		agentsCapOnce, agentsCapVal = sync.Once{}, defaultAgentsPerUser
+	})
+}
+
 func TestAgentCapPerCreator(t *testing.T) {
-	t.Setenv("WEAVE_AGENTS_PER_USER", "1")
+	setAgentsCap(t, "1")
 	w := newAgentWorld(t)
 	call[AgentOut](t, w.owner, "agent.create", AgentCreateIn{Name: "one", BoardIDs: []string{"b1"}})
 	wantErr(t, w.owner, "agent.create", AgentCreateIn{Name: "two", BoardIDs: []string{"b1"}}, 422)
 	call[AgentOut](t, w.admin, "agent.create", AgentCreateIn{Name: "admin's"}) // admins are not capped
-	t.Setenv("WEAVE_AGENTS_PER_USER", "0")
+	setAgentsCap(t, "0")
 	call[AgentOut](t, w.owner, "agent.create", AgentCreateIn{Name: "two", BoardIDs: []string{"b1"}})
 }
 

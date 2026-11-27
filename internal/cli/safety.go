@@ -20,7 +20,7 @@ var maxResponseBytes int64 = 64 << 20
 func readLimited(r io.Reader) ([]byte, error) {
 	b, err := io.ReadAll(io.LimitReader(r, maxResponseBytes+1))
 	if err != nil {
-		return b, err
+		return nil, err
 	}
 	if int64(len(b)) > maxResponseBytes {
 		return nil, errors.New("response is larger than 64 MiB; refusing to buffer it")

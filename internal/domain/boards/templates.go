@@ -362,12 +362,12 @@ func builtinTpl(b builtin, withDesc bool) tpl {
 }
 
 // publishedTpl loads a published board as a template. The caller has checked visibility.
-func publishedTpl(e *ops.Env, id string, withDesc bool) (tpl, error) {
+func publishedTpl(e *ops.Env, id string, withDesc, includeCards bool) (tpl, error) {
 	src, err := GetBoard(e.Ctx, e.DB, id)
 	if err != nil {
 		return tpl{}, err
 	}
-	doc, err := buildExport(e.Ctx, e.DB, src)
+	doc, err := buildExport(e.Ctx, e.DB, src, exportOpts{includeCards: includeCards, includeActivity: false})
 	if err != nil {
 		return tpl{}, err
 	}
@@ -416,39 +416,9 @@ func publishedTpl(e *ops.Env, id string, withDesc bool) (tpl, error) {
 	return tpl{info: info, ib: ib}, nil
 }
 
-// publishedInfo is the cheap gallery row of a published board (no export of its content).
-func publishedInfo(e *ops.Env, id string) (TemplateInfo, error) {
-	src, err := GetBoard(e.Ctx, e.DB, id)
-	if err != nil {
-		return TemplateInfo{}, err
-	}
-	var project, publisher, group sql.NullString
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT p.name,u.name,g.name FROM boards b JOIN projects p ON p.id=b.project_id
-		LEFT JOIN users u ON u.id=b.template_publisher_id LEFT JOIN user_groups g ON g.id=b.template_group_id WHERE b.id=?`, id).Scan(&project, &publisher, &group)
-	info := TemplateInfo{ID: id, Name: src.Name, Source: "published", DefaultView: src.DefaultView, Project: project.String, ProjectID: src.ProjectID,
-		Publisher: publisher.String, Visibility: src.TemplateVisibility, Group: group.String, Columns: []TemplateColumn{}}
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT COALESCE(name,''),COALESCE(color,''),COALESCE(wip_limit,0),COALESCE(archive_after,0),type FROM lists WHERE board_id=? AND type IN ('active','closed') ORDER BY position`, id)
-	if err != nil {
-		return info, err
-	}
-	for rows.Next() {
-		var c TemplateColumn
-		var typ string
-		_ = rows.Scan(&c.Name, &c.Color, &c.WIPLimit, &c.ArchiveAfter, &typ)
-		c.Closed = typ == "closed"
-		info.Columns = append(info.Columns, c)
-	}
-	rows.Close()
-	var n int
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
-		WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed')`, id).Scan(&n)
-	info.IncludesSampleCards, info.SampleCardsDefault = n > 0, n > 0
-	return info, nil
-}
-
 // loadTemplate resolves a template id for the caller: built-ins need only a signed-in user (and must not be hidden by
 // the admin); published boards must be visible to the caller (authz.TemplateVisible).
-func loadTemplate(e *ops.Env, id string, withDesc bool) (tpl, error) {
+func loadTemplate(e *ops.Env, id string, withDesc, includeCards bool) (tpl, error) {
 	if strings.HasPrefix(id, builtinPrefix) {
 		b, ok := findBuiltin(id)
 		if !ok || hiddenTemplates(e)[id] {
@@ -462,7 +432,7 @@ func loadTemplate(e *ops.Env, id string, withDesc bool) (tpl, error) {
 		}
 		return tpl{}, ops.NotFound("template")
 	}
-	return publishedTpl(e, id, withDesc)
+	return publishedTpl(e, id, withDesc, includeCards)
 }
 
 func matchesQuery(t TemplateInfo, q string) bool {
@@ -491,42 +461,142 @@ func templateList(e *ops.Env, in TemplateListIn) ([]TemplateInfo, error) {
 			}
 		}
 	}
-	if in.Category == "" || in.Category == "published" {
-		q := `SELECT id FROM boards WHERE is_template=1`
-		args := []any{}
-		if in.ProjectID != "" {
-			q += ` AND project_id=?`
-			args = append(args, in.ProjectID)
-		}
-		rows, err := e.DB.QueryContext(e.Ctx, q+` ORDER BY name,id LIMIT 500`, args...)
+	if (in.Category == "" || in.Category == "published") && e.User != nil {
+		pub, err := listPublishedTemplates(e, in.ProjectID, in.Query)
 		if err != nil {
 			return nil, err
 		}
-		var ids []string
-		for rows.Next() {
-			var id string
-			_ = rows.Scan(&id)
-			ids = append(ids, id)
-		}
-		rows.Close()
-		for _, id := range ids {
-			if !authz.TemplateVisible(e, id) {
-				continue
-			}
-			info, err := publishedInfo(e, id)
-			if err != nil {
-				return nil, err
-			}
-			if matchesQuery(info, in.Query) {
-				out = append(out, info)
-			}
-		}
+		out = append(out, pub...)
 	}
 	return out, nil
 }
 
+// listPublishedTemplates loads all published templates visible to the caller (matching projectID and query) in a
+// constant number of queries: 1 query for template boards + project/publisher/group names, authz.BoardLevels + 1
+// query for caller's user_group_members, 1 batched lists query, and 1 grouped card count query.
+func listPublishedTemplates(e *ops.Env, projectID, query string) ([]TemplateInfo, error) {
+	q := `SELECT b.id,b.name,b.default_view,b.project_id,b.template_visibility,b.template_group_id,b.template_publisher_id,
+		COALESCE(p.name,''),COALESCE(u.name,''),COALESCE(g.name,'')
+		FROM boards b JOIN projects p ON p.id=b.project_id
+		LEFT JOIN users u ON u.id=b.template_publisher_id
+		LEFT JOIN user_groups g ON g.id=b.template_group_id
+		WHERE b.is_template=1`
+	var args []any
+	if projectID != "" {
+		q += ` AND b.project_id=?`
+		args = append(args, projectID)
+	}
+	rows, err := e.DB.QueryContext(e.Ctx, q+` ORDER BY b.name,b.id LIMIT 500`, args...)
+	if err != nil {
+		return nil, err
+	}
+	type cand struct {
+		info      TemplateInfo
+		groupID   sql.NullString
+		publisher sql.NullString
+	}
+	var cands []cand
+	var candIDs []string
+	needGroups := false
+	for rows.Next() {
+		var c cand
+		c.info.Source = "published"
+		c.info.Columns = []TemplateColumn{}
+		if err := rows.Scan(&c.info.ID, &c.info.Name, &c.info.DefaultView, &c.info.ProjectID, &c.info.Visibility,
+			&c.groupID, &c.publisher, &c.info.Project, &c.info.Publisher, &c.info.Group); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if c.info.Visibility == "group" && c.groupID.Valid {
+			needGroups = true
+		}
+		cands = append(cands, c)
+		candIDs = append(candIDs, c.info.ID)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
+	levels := authz.BoardLevels(e, candIDs)
+	myGroups := map[string]bool{}
+	if needGroups {
+		for _, gid := range strs(e, `SELECT group_id FROM user_group_members WHERE user_id=?`, e.User.UserID) {
+			myGroups[gid] = true
+		}
+	}
+	var out []TemplateInfo
+	byID := map[string]int{}
+	var visArgs []any
+	for _, c := range cands {
+		visible := levels[c.info.ID] >= authz.View ||
+			(c.publisher.Valid && c.publisher.String == e.User.UserID) ||
+			c.info.Visibility == "public" ||
+			(c.info.Visibility == "group" && c.groupID.Valid && myGroups[c.groupID.String])
+		if !visible || !matchesQuery(c.info, query) {
+			continue
+		}
+		byID[c.info.ID] = len(out)
+		out = append(out, c.info)
+		visArgs = append(visArgs, c.info.ID)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	inClause := "?" + strings.Repeat(",?", len(visArgs)-1)
+	lrows, err := e.DB.QueryContext(e.Ctx, `SELECT board_id,COALESCE(name,''),COALESCE(color,''),COALESCE(wip_limit,0),COALESCE(archive_after,0),type
+		FROM lists WHERE board_id IN (`+inClause+`) AND type IN ('active','closed') ORDER BY board_id, position, id`, visArgs...)
+	if err != nil {
+		return nil, err
+	}
+	for lrows.Next() {
+		var bid, typ string
+		var col TemplateColumn
+		if err := lrows.Scan(&bid, &col.Name, &col.Color, &col.WIPLimit, &col.ArchiveAfter, &typ); err != nil {
+			lrows.Close()
+			return nil, err
+		}
+		col.Closed = typ == "closed"
+		if i, ok := byID[bid]; ok {
+			out[i].Columns = append(out[i].Columns, col)
+		}
+	}
+	if err := lrows.Close(); err != nil {
+		return nil, err
+	}
+	if err := lrows.Err(); err != nil {
+		return nil, err
+	}
+	crows, err := e.DB.QueryContext(e.Ctx, `SELECT p.board_id, COUNT(*)
+		FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id IN (`+inClause+`) AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed')
+		GROUP BY p.board_id`, visArgs...)
+	if err != nil {
+		return nil, err
+	}
+	for crows.Next() {
+		var bid string
+		var n int
+		if err := crows.Scan(&bid, &n); err != nil {
+			crows.Close()
+			return nil, err
+		}
+		if i, ok := byID[bid]; ok && n > 0 {
+			out[i].IncludesSampleCards, out[i].SampleCardsDefault = true, true
+		}
+	}
+	if err := crows.Close(); err != nil {
+		return nil, err
+	}
+	return out, crows.Err()
+}
+
 func templateGet(e *ops.Env, in TemplateGetIn) (TemplatePreview, error) {
-	t, err := loadTemplate(e, in.TemplateID, true)
+	t, err := loadTemplate(e, in.TemplateID, true, true)
 	if err != nil {
 		return TemplatePreview{}, err
 	}
@@ -585,12 +655,13 @@ func instantiate(e *ops.Env, in InstantiateIn) (Board, error) {
 	if in.DefaultView != "" && !validView(in.DefaultView) {
 		return Board{}, ops.Invalid("defaultView must be kanban, grid, list, calendar or map")
 	}
-	t, err := loadTemplate(e, in.TemplateID, false)
+	wantCards := in.SampleCards == nil || *in.SampleCards
+	t, err := loadTemplate(e, in.TemplateID, false, wantCards)
 	if err != nil {
 		return Board{}, err
 	}
 	ib := t.ib
-	if in.SampleCards != nil && !*in.SampleCards {
+	if !wantCards {
 		ib.Cards = nil
 	}
 	ib.Name = in.Name

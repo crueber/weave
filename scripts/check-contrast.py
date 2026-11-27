@@ -43,12 +43,15 @@ for fg, bg in (("--fg-2", "--accent-soft"), ("--accent", "--surface"), ("--accen
     pairs.append((fg, bg, 4.5))
 for n in "red orange yellow green teal blue indigo purple pink gray".split():
     pairs.append(("--label-fg", "--label-" + n, 4.5))
+# filled status badges, toasts and notification counts (--label-fg on semantic fills)
+for bg in ("--danger", "--success", "--warning"):
+    pairs.append(("--label-fg", bg, 4.5))
 # the lit notification bell (filled accent glyph on the accent tint) and its hover; the count pill sits on it
 pairs += [("--accent-hover", "--accent-soft", 3.0), ("--danger", "--accent-soft", 3.0)]
 pairs += [("--border-strong", "--surface", 3.0), ("--focus-ring", "--surface", 3.0), ("--focus-ring", "--bg", 3.0), ("--drop-indicator", "--list-bg", 3.0)]
 # the closed mark (a --success stroke icon, non-text 3:1) on every surface it sits on: tiles, list-view rows (surface,
 # hover accent-soft), calendar chips (tile-bg, done chips surface-2), the card sheet badge (success-soft)
-# ... and the same glyph on a column that closes cards that land in it: the kanban column header (--list-bg), the
+# ... and the same glyph on a column that closes cards that land in it: the board-view column header (--list-bg), the
 # column menu and sheet (surface), the template gallery chip (surface-2)
 for bg in ("--tile-bg", "--surface", "--surface-2", "--accent-soft", "--success-soft", "--bg", "--list-bg", "--list-bg-hover"):
     pairs.append(("--success", bg, 3.0))

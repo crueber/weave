@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/crueber/weave/internal/authz"
 	"github.com/crueber/weave/internal/db"
@@ -87,16 +88,23 @@ func agentRoleOK(r string) bool { return r == "worker" || r == "boardUser" || r 
 // defaultAgentsPerUser caps the agents one person (not an admin) may create (WEAVE_AGENTS_PER_USER; 0 = no cap).
 const defaultAgentsPerUser = 50
 
+var (
+	agentsCapOnce sync.Once
+	agentsCapVal  = defaultAgentsPerUser
+	agentsCapEnv  = func() string { return os.Getenv("WEAVE_AGENTS_PER_USER") }
+)
+
 func agentsPerUser() int {
-	n := defaultAgentsPerUser
-	if v := strings.TrimSpace(os.Getenv("WEAVE_AGENTS_PER_USER")); v != "" {
-		if x, err := strconv.Atoi(v); err == nil && x >= 0 {
-			n = x
-		} else {
-			fmt.Println("WEAVE_AGENTS_PER_USER: invalid value", v, "- using", n)
+	agentsCapOnce.Do(func() {
+		if v := strings.TrimSpace(agentsCapEnv()); v != "" {
+			if x, err := strconv.Atoi(v); err == nil && x >= 0 {
+				agentsCapVal = x
+			} else {
+				fmt.Println("WEAVE_AGENTS_PER_USER: invalid value", v, "- using", defaultAgentsPerUser)
+			}
 		}
-	}
-	return n
+	})
+	return agentsCapVal
 }
 
 func boardRoleOK(r string) bool { return r == "" || r == "editor" || r == "viewer" || r == "commenter" }
@@ -104,60 +112,122 @@ func boardRoleOK(r string) bool { return r == "" || r == "editor" || r == "viewe
 // loadAgent reads one agent. Callers see only the boards they manage in Boards (the admin role adds none); BoardCount
 // is the total.
 func loadAgent(e *ops.Env, id string) (AgentOut, error) {
-	var a AgentOut
-	var cb, cbName *string
-	err := e.DB.QueryRowContext(e.Ctx, `SELECT u.id,u.name,u.role,u.is_deactivated,COALESCE(k.prefix,''),u.created_at,k.expires_at,u.created_by,c.name
-		FROM users u LEFT JOIN users c ON c.id=u.created_by
-		LEFT JOIN api_keys k ON k.id=(SELECT id FROM api_keys WHERE user_id=u.id ORDER BY created_at DESC,id DESC LIMIT 1) WHERE u.id=? AND u.is_agent=1 AND u.deleted_at IS NULL`, id).
-		Scan(&a.ID, &a.Name, &a.Role, &a.IsDeactivated, &a.KeyPrefix, &a.CreatedAt, &a.APIKeyExpiresAt, &cb, &cbName)
-	if err == sql.ErrNoRows {
-		return a, ops.NotFound("agent")
-	}
+	list, err := loadAgents(e, []string{id})
 	if err != nil {
-		return a, err
+		return AgentOut{}, err
 	}
-	if cb != nil {
-		a.CreatedBy = *cb
+	if len(list) == 0 {
+		return AgentOut{}, ops.NotFound("agent")
 	}
-	if cbName != nil {
-		a.CreatedByName = *cbName
+	return list[0], nil
+}
+
+// loadAgents reads many agents in a constant number of queries (preserving ids order; unknown ids are skipped).
+func loadAgents(e *ops.Env, ids []string) ([]AgentOut, error) {
+	if len(ids) == 0 {
+		return []AgentOut{}, nil
 	}
-	a.IsAgent, a.Boards = true, []AgentBoard{}
-	a.APIKeyExpired = keyExpired(a.APIKeyExpiresAt)
-	a.CanManage = authz.CanManageAgent(e, id)
-	rows, err := e.DB.QueryContext(e.Ctx, `SELECT m.board_id,b.name,m.id,m.role,m.can_comment FROM board_memberships m JOIN boards b ON b.id=m.board_id WHERE m.user_id=? ORDER BY b.name`, id)
-	if err != nil {
-		return a, err
-	}
-	var all []AgentBoard
-	for rows.Next() {
-		var x AgentBoard
-		var cc *bool
-		if err := rows.Scan(&x.BoardID, &x.BoardName, &x.MemberID, &x.Role, &cc); err != nil {
+	const chunk = 500
+	byID := make(map[string]*AgentOut, len(ids))
+	for i := 0; i < len(ids); i += chunk {
+		part := ids[i:min(i+chunk, len(ids))]
+		ph := "?" + strings.Repeat(",?", len(part)-1)
+		args := make([]any, len(part))
+		for j, id := range part {
+			args[j] = id
+		}
+		rows, err := e.DB.QueryContext(e.Ctx, `SELECT u.id,u.name,u.role,u.is_deactivated,COALESCE(k.prefix,''),u.created_at,k.expires_at,u.created_by,c.name
+			FROM users u LEFT JOIN users c ON c.id=u.created_by
+			LEFT JOIN api_keys k ON k.id=(SELECT id FROM api_keys WHERE user_id=u.id ORDER BY created_at DESC,id DESC LIMIT 1)
+			WHERE u.id IN (`+ph+`) AND u.is_agent=1 AND u.deleted_at IS NULL`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var a AgentOut
+			var cb, cbName *string
+			if err := rows.Scan(&a.ID, &a.Name, &a.Role, &a.IsDeactivated, &a.KeyPrefix, &a.CreatedAt, &a.APIKeyExpiresAt, &cb, &cbName); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if cb != nil {
+				a.CreatedBy = *cb
+			}
+			if cbName != nil {
+				a.CreatedByName = *cbName
+			}
+			a.IsAgent, a.Boards = true, []AgentBoard{}
+			a.APIKeyExpired = keyExpired(a.APIKeyExpiresAt)
+			byID[a.ID] = &a
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			return a, err
+			return nil, err
 		}
-		if x.Role == "viewer" && cc != nil && *cc {
-			x.Role = "commenter"
+		rows.Close()
+	}
+	if len(byID) == 0 {
+		return []AgentOut{}, nil
+	}
+	allBoards := make(map[string][]AgentBoard, len(byID))
+	seenBoard := map[string]bool{}
+	var distinctBoards []string
+	for i := 0; i < len(ids); i += chunk {
+		part := ids[i:min(i+chunk, len(ids))]
+		ph := "?" + strings.Repeat(",?", len(part)-1)
+		args := make([]any, len(part))
+		for j, id := range part {
+			args[j] = id
 		}
-		all = append(all, x)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return a, err
-	}
-	a.BoardCount = len(all)
-	ids := make([]string, 0, len(all))
-	for _, x := range all {
-		ids = append(ids, x.BoardID)
-	}
-	lv := authz.BoardLevels(e, ids)
-	for _, x := range all {
-		if lv[x.BoardID] >= authz.Manage {
-			a.Boards = append(a.Boards, x)
+		rows, err := e.DB.QueryContext(e.Ctx, `SELECT m.user_id,m.board_id,b.name,m.id,m.role,m.can_comment
+			FROM board_memberships m JOIN boards b ON b.id=m.board_id
+			WHERE m.user_id IN (`+ph+`) ORDER BY b.name`, args...)
+		if err != nil {
+			return nil, err
 		}
+		for rows.Next() {
+			var uid string
+			var x AgentBoard
+			var cc *bool
+			if err := rows.Scan(&uid, &x.BoardID, &x.BoardName, &x.MemberID, &x.Role, &cc); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if x.Role == "viewer" && cc != nil && *cc {
+				x.Role = "commenter"
+			}
+			allBoards[uid] = append(allBoards[uid], x)
+			if !seenBoard[x.BoardID] {
+				seenBoard[x.BoardID] = true
+				distinctBoards = append(distinctBoards, x.BoardID)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
-	return a, nil
+	lv := authz.BoardLevels(e, distinctBoards)
+	out := make([]AgentOut, 0, len(byID))
+	for _, id := range ids {
+		a := byID[id]
+		if a == nil {
+			continue
+		}
+		bs := allBoards[id]
+		a.BoardCount = len(bs)
+		bIDs := make([]string, len(bs))
+		for i, x := range bs {
+			bIDs[i] = x.BoardID
+			if lv[x.BoardID] >= authz.Manage {
+				a.Boards = append(a.Boards, x)
+			}
+		}
+		a.CanManage = authz.CanManageAgentFrom(e, a.CreatedBy, bIDs, lv)
+		out = append(out, *a)
+	}
+	return out, nil
 }
 
 // grantBoard upserts the agent's membership through the boards ops (authz applies: Manage on the board).
@@ -320,16 +390,27 @@ func init() {
 		if _, err := keyExpiry(in.ExpiresInDays); err != nil {
 			return AgentOut{}, err
 		}
-		if limit := agentsPerUser(); !admin && limit > 0 {
-			var n int
-			_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM users WHERE is_agent=1 AND deleted_at IS NULL AND created_by=?`, e.User.UserID).Scan(&n)
-			if n >= limit {
-				return AgentOut{}, ops.Invalid(fmt.Sprintf("you already have %d agents, the most one person may create (WEAVE_AGENTS_PER_USER); delete one first", n))
-			}
-		}
 		id := db.NewID()
-		if _, err := e.DB.ExecContext(e.Ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,is_agent,created_by,created_at) VALUES(?,?,?,?,0,1,1,?,?)`,
-			id, "agent-"+id+"@agents.invalid", name, role, e.User.UserID, db.Now()); err != nil {
+		var key APIKeyOut
+		err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			if limit := agentsPerUser(); !admin && limit > 0 {
+				var n int
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM users WHERE is_agent=1 AND deleted_at IS NULL AND created_by=?`, e.User.UserID).Scan(&n); err != nil {
+					return err
+				}
+				if n >= limit {
+					return ops.Invalid(fmt.Sprintf("you already have %d agents, the most one person may create (WEAVE_AGENTS_PER_USER); delete one first", n))
+				}
+			}
+			if _, err := tx.ExecContext(e.Ctx, `INSERT INTO users(id,email,name,role,is_sso,is_email_verified,is_agent,created_by,created_at) VALUES(?,?,?,?,0,1,1,?,?)`,
+				id, "agent-"+id+"@agents.invalid", name, role, e.User.UserID, db.Now()); err != nil {
+				return err
+			}
+			var err error
+			key, err = replaceAPIKey(e.Ctx, tx, id, in.ExpiresInDays)
+			return err
+		})
+		if err != nil {
 			return AgentOut{}, err
 		}
 		for _, b := range boards {
@@ -337,11 +418,6 @@ func init() {
 				_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM users WHERE id=? AND is_agent=1`, id)
 				return AgentOut{}, err
 			}
-		}
-		key, err := replaceAPIKey(e.Ctx, e.DB, id, in.ExpiresInDays)
-		if err != nil {
-			_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM users WHERE id=? AND is_agent=1`, id)
-			return AgentOut{}, err
 		}
 		a, err := loadAgent(e, id)
 		a.Key = &key
@@ -363,15 +439,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		out := []AgentOut{}
-		for _, id := range ids {
-			a, err := loadAgent(e, id)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, a)
-		}
-		return out, nil
+		return loadAgents(e, ids)
 	})
 
 	ops.Register(ops.Op{Name: "agent.update", Summary: "Rename an agent or deactivate it (its creator, a manager of all its boards, or an admin; only admins change the role)", Method: "PATCH", Path: "/agents/{id}",
@@ -379,32 +447,39 @@ func init() {
 		if err := authz.RequireAgentManage(e, in.ID); err != nil {
 			return AgentOut{}, err
 		}
-		if _, err := loadAgent(e, in.ID); err != nil {
-			return AgentOut{}, err
-		}
 		if in.Role != nil && !isAdmin(e) {
 			return AgentOut{}, ops.Forbidden()
 		}
+		var sets []string
+		var args []any
 		if in.Name != nil {
 			n := strings.TrimSpace(*in.Name)
 			if n == "" || len([]rune(n)) > 100 {
 				return AgentOut{}, ops.Invalid("name is required (max 100 characters)")
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET name=?,updated_at=? WHERE id=?`, n, db.Now(), in.ID); err != nil {
-				return AgentOut{}, err
-			}
+			sets = append(sets, "name=?")
+			args = append(args, n)
 		}
 		if in.Role != nil {
 			if !agentRoleOK(*in.Role) {
 				return AgentOut{}, ops.Invalid("role must be worker, boardUser or guest")
 			}
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET role=?,updated_at=? WHERE id=?`, *in.Role, db.Now(), in.ID); err != nil {
-				return AgentOut{}, err
-			}
+			sets = append(sets, "role=?")
+			args = append(args, *in.Role)
 		}
 		if in.IsDeactivated != nil {
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET is_deactivated=?,updated_at=? WHERE id=?`, *in.IsDeactivated, db.Now(), in.ID); err != nil {
+			sets = append(sets, "is_deactivated=?")
+			args = append(args, *in.IsDeactivated)
+		}
+		if len(sets) > 0 {
+			sets = append(sets, "updated_at=?")
+			args = append(args, db.Now(), in.ID)
+			res, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET `+strings.Join(sets, ",")+` WHERE id=? AND is_agent=1 AND deleted_at IS NULL`, args...)
+			if err != nil {
 				return AgentOut{}, err
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return AgentOut{}, ops.NotFound("agent")
 			}
 		}
 		publish(e, "user.updated", in.ID)
@@ -455,15 +530,34 @@ func init() {
 		}
 		type held struct{ card, board string }
 		var cards []held
-		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT id,board_id FROM cards WHERE claimed_by=?`, in.ID); err == nil {
+		err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+			cards = nil
+			rows, err := tx.QueryContext(e.Ctx, `SELECT id,board_id FROM cards WHERE claimed_by=?`, in.ID)
+			if err != nil {
+				return err
+			}
 			for rows.Next() {
 				var h held
-				_ = rows.Scan(&h.card, &h.board)
+				if err := rows.Scan(&h.card, &h.board); err != nil {
+					rows.Close()
+					return err
+				}
 				cards = append(cards, h)
 			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
 			rows.Close()
-		}
-		if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM users WHERE id=? AND is_agent=1`, in.ID); err != nil {
+			if len(cards) > 0 {
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE cards SET claimed_by=NULL,claimed_until=NULL,claim_note=NULL WHERE claimed_by=?`, in.ID); err != nil {
+					return err
+				}
+			}
+			_, err = tx.ExecContext(e.Ctx, `DELETE FROM users WHERE id=? AND is_agent=1`, in.ID)
+			return err
+		})
+		if err != nil {
 			return a, err
 		}
 		for _, h := range cards {

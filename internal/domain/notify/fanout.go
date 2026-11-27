@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"reflect"
+
 	"github.com/crueber/weave/internal/db"
 	"github.com/crueber/weave/internal/events"
 	"github.com/crueber/weave/internal/ops"
@@ -135,16 +137,42 @@ func perBoard(e *ops.Env, ev ops.Event, s eventScope, at string) []ops.Event {
 			}
 		}
 		if _, ok := d["card"]; ok && events.CardOn != nil && ev.CardID != "" {
-			if c := events.CardOn(e, ev.CardID, b); c != nil {
-				d["card"] = c
-			} else {
-				delete(d, "card") // not placed on that board (any more): never another board's view
+			if !(i == 0 && cardMatchesBoard(d["card"], b)) {
+				if c := events.CardOn(e, ev.CardID, b); c != nil {
+					d["card"] = c
+				} else {
+					delete(d, "card") // not placed on that board (any more): never another board's view
+				}
 			}
 		}
 		x.Data = d
 		out = append(out, x)
 	}
 	return out
+}
+
+// cardMatchesBoard reports whether a caller-supplied data["card"] payload is already populated for boardID
+// (so the origin copy i == 0 can skip a redundant events.CardOn reload).
+func cardMatchesBoard(v any, boardID string) bool {
+	if v == nil || boardID == "" {
+		return false
+	}
+	if m, ok := v.(map[string]any); ok {
+		return str(m, "boardId") == boardID
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return false
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Struct {
+		if f := rv.FieldByName("BoardID"); f.IsValid() && f.Kind() == reflect.String {
+			return f.String() == boardID
+		}
+	}
+	return false
 }
 
 // publicData is the data of an event without the hidden routing keys (hub publishes, webhook payloads).

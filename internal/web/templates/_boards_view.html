@@ -22,7 +22,7 @@
 {{define "boards_col"}}{{$c := .C}}{{$p := .P}}{{$name := deref $c.List.Name}}<section class="boards-col" id="col-{{$c.List.ID}}" data-id="{{$c.List.ID}}" data-list-type="{{$c.List.Type}}" role="listitem" aria-label="List {{$name}}"{{boardsListAttr $c.List.Color}}{{if eq $p.Board.CardColorMode "fill"}} data-card-mode="fill"{{end}}>
   <header class="boards-col-head" style="--list-accent:{{boardsColor $c.List.Color}}"{{if $p.CanEdit}} data-drag-handle="list" title="Drag to reorder lists"{{end}}>
     <button type="button" class="boards-iconbtn boards-col-collapse" data-collapse aria-expanded="true" aria-label="Collapse list {{$name}}"><svg class="ico" aria-hidden="true"><use href="#i-chev"/></svg></button>
-    <h2 class="boards-col-title"{{if $p.CanEdit}} data-rename="{{$c.List.ID}}" title="Click to rename"{{end}}>{{$name}}</h2>
+    <h2 class="boards-col-title"{{if $p.CanEdit}} data-rename="{{$c.List.ID}}" tabindex="0" title="Click to rename"{{end}}>{{$name}}</h2>
     {{if eq $c.List.Type "closed"}}<span class="boards-col-closes" role="img" aria-label="Closes cards that land here" title="Closes cards that land here">{{template "closed_mark_ico"}}</span>{{end}}
     {{with $c.List.ArchiveAfter}}<span class="boards-col-archive" role="img" aria-label="Auto-archive: keeps the newest {{.}} cards" title="Keeps the newest {{.}} cards; older cards are archived automatically">{{template "archive_after_ico"}}</span>{{end}}
     {{if $c.Watching}}<span class="boards-col-watch" role="img" aria-label="You watch this column" title="You watch this column">{{template "watch_bell" true}}</span>{{end}}
@@ -94,7 +94,7 @@
 
 {{define "boards_nomatch"}}<div class="boards-nomatch" role="status">
   {{if .Filter.Active}}<strong>No cards match</strong><p>Try a different search, or <a href="{{boardsHref .PageURL .View ""}}">clear all filters</a>.</p>
-  {{else}}<strong>No cards yet</strong><p>Switch to the Kanban view to add your first card.</p>{{end}}
+  {{else}}<strong>No cards yet</strong><p>Switch to the board view to add your first card.</p>{{end}}
 </div>{{end}}
 
 {{define "boards_chips"}}{{if .Filter.Active}}<div class="boards-chips" role="group" aria-label="Active filters">
@@ -152,7 +152,7 @@
 </form>
   {{if not .ReadOnly}}{{template "boards_saved_in" dict "BoardID" .Board.ID "Saved" .Saved "View" .View "Query" .Query}}{{end}}
 {{if not .ReadOnly}}<nav class="boards-show" aria-label="Show cards">
-  <span class="boards-show-label">Show</span>
+  <span class="sr-only">Show</span>
   <a href="{{.ShowHref "active"}}" data-show="active" data-show-link="active"{{if eq .Show "active"}} aria-current="page"{{end}}>Active</a>
   <a href="{{.ShowHref "archived"}}" hx-get="{{.ShowBodyHref "archived"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "archived"}}" data-show="archived" data-show-link="archived"{{if eq .Show "archived"}} aria-current="page"{{end}}>Archived</a>
   <a href="{{.ShowHref "trash"}}" hx-get="{{.ShowBodyHref "trash"}}" hx-target="#board-body" hx-swap="innerHTML" hx-push-url="{{.ShowHref "trash"}}" data-show="trash" data-show-link="trash"{{if eq .Show "trash"}} aria-current="page"{{end}}>Trash</a>

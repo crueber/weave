@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -309,6 +311,9 @@ func validateWebhook(e *ops.Env, w *WebhookOut) error {
 			return ops.Invalid("accessToken and secret must be at most 1024 printable characters")
 		}
 	}
+	if w.ProjectID != "" && w.BoardID != "" {
+		return ops.Invalid("projectId and boardId cannot both be set")
+	}
 	var x string
 	if w.ProjectID != "" && e.DB.QueryRowContext(e.Ctx, `SELECT id FROM projects WHERE id=?`, w.ProjectID).Scan(&x) != nil {
 		return ops.Invalid("unknown projectId")
@@ -319,12 +324,12 @@ func validateWebhook(e *ops.Env, w *WebhookOut) error {
 	if w.UserID != "" && e.DB.QueryRowContext(e.Ctx, `SELECT id FROM users WHERE id=?`, w.UserID).Scan(&x) != nil {
 		return ops.Invalid("unknown userId")
 	}
-	if w.BoardID != "" {
-		for _, l := range [][]string{w.Events, w.ExcludedEvents} {
-			if _, err := validateEvents(l, true); err != nil {
-				return err
-			}
-		}
+	boardScope := w.BoardID != ""
+	if w.Events, err = validateEvents(w.Events, boardScope); err != nil {
+		return err
+	}
+	if w.ExcludedEvents, err = validateEvents(w.ExcludedEvents, boardScope); err != nil {
+		return err
 	}
 	if w.UserCreated {
 		return checkStrictURL(e.Ctx, e.DB, w.URL)
@@ -349,7 +354,7 @@ func jsonList(l []string) any {
 func getWebhook(e *ops.Env, id string) (WebhookOut, error) {
 	w, err := scanWebhook(e.DB.QueryRowContext(e.Ctx, `SELECT `+whCols+` FROM webhooks WHERE id=?`, id))
 	if err != nil {
-		return w, ops.NotFound("webhook")
+		return WebhookOut{}, ops.NotFound("webhook")
 	}
 	return w, nil
 }
@@ -358,7 +363,7 @@ func getWebhook(e *ops.Env, id string) (WebhookOut, error) {
 func manageable(e *ops.Env, id string) (WebhookOut, error) {
 	w, err := getWebhook(e, id)
 	if err != nil {
-		return w, err
+		return WebhookOut{}, err
 	}
 	if err := authz.RequireWebhook(e, w.ProjectID, w.BoardID); err != nil {
 		return WebhookOut{}, err
@@ -461,9 +466,11 @@ func init() {
 			out := WebhookListOut{Items: []WebhookOut{}}
 			// board webhooks: only those of boards the caller manages (administrators included); global and project
 			// webhooks (admins only, by the query above) are instance integrations
-			ids := []string{}
+			var ids []string
+			seenID := map[string]bool{}
 			for _, w := range all {
-				if w.BoardID != "" {
+				if w.BoardID != "" && !seenID[w.BoardID] {
+					seenID[w.BoardID] = true
 					ids = append(ids, w.BoardID)
 				}
 			}
@@ -487,22 +494,11 @@ func init() {
 			}
 			w := WebhookOut{ID: db.NewID(), Name: in.Name, URL: strings.TrimSpace(in.URL), AccessToken: in.AccessToken, Secret: in.Secret, ProjectID: in.ProjectID, BoardID: in.BoardID, UserID: in.UserID,
 				CreatedBy: e.User.UserID, UserCreated: !admin, CreatedAt: db.Now()}
-			var err error
 			if in.Events != nil {
-				if w.Events, err = validateEvents(*in.Events, false); err != nil {
-					return w, err
-				}
+				w.Events = *in.Events
 			}
 			if in.ExcludedEvents != nil {
-				if w.ExcludedEvents, err = validateEvents(*in.ExcludedEvents, false); err != nil {
-					return w, err
-				}
-			}
-			if w.Events == nil {
-				w.Events = []string{}
-			}
-			if w.ExcludedEvents == nil {
-				w.ExcludedEvents = []string{}
+				w.ExcludedEvents = *in.ExcludedEvents
 			}
 			if err := checkBoardCap(e, w.BoardID); err != nil {
 				return WebhookOut{}, err
@@ -521,7 +517,7 @@ func init() {
 		func(e *ops.Env, in WebhookUpdateIn) (WebhookOut, error) {
 			w, err := manageable(e, in.ID)
 			if err != nil {
-				return w, err
+				return WebhookOut{}, err
 			}
 			admin := authz.SystemAdmin(e)
 			set := func(dst *string, v *string) {
@@ -532,8 +528,12 @@ func init() {
 			oldBoard := w.BoardID
 			set(&w.Name, in.Name)
 			set(&w.URL, in.URL)
-			set(&w.AccessToken, in.AccessToken)
-			set(&w.Secret, in.Secret)
+			if in.AccessToken != nil {
+				w.AccessToken = *in.AccessToken
+			}
+			if in.Secret != nil {
+				w.Secret = *in.Secret
+			}
 			set(&w.ProjectID, in.ProjectID)
 			set(&w.BoardID, in.BoardID)
 			set(&w.UserID, in.UserID)
@@ -552,14 +552,10 @@ func init() {
 				w.UserCreated = true // a non-admin's change is always delivered under the strict policy
 			}
 			if in.Events != nil {
-				if w.Events, err = validateEvents(*in.Events, false); err != nil {
-					return WebhookOut{}, err
-				}
+				w.Events = *in.Events
 			}
 			if in.ExcludedEvents != nil {
-				if w.ExcludedEvents, err = validateEvents(*in.ExcludedEvents, false); err != nil {
-					return WebhookOut{}, err
-				}
+				w.ExcludedEvents = *in.ExcludedEvents
 			}
 			if err := validateWebhook(e, &w); err != nil {
 				return WebhookOut{}, err
@@ -576,7 +572,7 @@ func init() {
 		func(e *ops.Env, in IDIn) (WebhookOut, error) {
 			w, err := manageable(e, in.ID)
 			if err != nil {
-				return w, err
+				return WebhookOut{}, err
 			}
 			if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM webhooks WHERE id=?`, w.ID); err != nil {
 				return WebhookOut{}, err
@@ -595,7 +591,7 @@ func init() {
 			if err != nil {
 				return DeliveryOut{}, err
 			}
-			runDelivery(e.DB, id, false)
+			runDelivery(e.Ctx, e.DB, id, false, 0)
 			d, err := loadDelivery(e.Ctx, e.DB, id, true)
 			return forViewer(e, d, testSnippetCap), err
 		})
@@ -624,16 +620,16 @@ func init() {
 		func(e *ops.Env, in IDIn) (DeliveryOut, error) {
 			d, err := loadDelivery(e.Ctx, e.DB, in.ID, false)
 			if err != nil {
-				return d, err
+				return DeliveryOut{}, err
 			}
 			if _, err := manageable(e, d.WebhookID); err != nil {
 				return DeliveryOut{}, ops.NotFound("delivery")
 			}
+			cancelDelivery(in.ID)
 			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE webhook_deliveries SET attempts=0,error=NULL,delivered_at=NULL,next_attempt_at=? WHERE id=?`, db.Now(), in.ID); err != nil {
-				return d, err
+				return DeliveryOut{}, err
 			}
-			d2, dbh := in.ID, e.DB
-			bg(func() { runDelivery(dbh, d2, true) })
+			startDelivery(e.DB, in.ID, true, 0)
 			d, err = loadDelivery(e.Ctx, e.DB, in.ID, false)
 			return forViewer(e, d, userBodyCap), err
 		})
@@ -688,15 +684,6 @@ func resolveScope(e *ops.Env, ev ops.Event) (project, board string) {
 	return
 }
 
-func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 // webhookType maps an event type to its webhook event name where they differ (the placement events of phase 4).
 func webhookType(t string) string {
 	switch t {
@@ -708,13 +695,20 @@ func webhookType(t string) string {
 	return t
 }
 
+func webhookMatchesEvent(w WebhookOut, typ, actorID string) bool {
+	if slices.Contains(w.ExcludedEvents, typ) || (len(w.Events) > 0 && !slices.Contains(w.Events, typ)) || (w.UserID != "" && w.UserID != actorID) {
+		return false
+	}
+	return true
+}
+
 // dispatchWebhooks queues a delivery for each webhook whose filters match the event (excluded events, included
 // events, acting user, project/board scope), ONCE per webhook per logical event. evs are the event's per-board
 // copies (perBoard; nil = just ev): a board webhook matches when its board is among them and receives that board's
 // copy (that board's card view, never another board's columns or labels); a project webhook matches when one of
 // those boards is in its project and receives the copy of the home board when it is in the project, else of the
 // first such board; an unscoped webhook receives the home board's copy (else the origin's).
-func dispatchWebhooks(e *ops.Env, ev ops.Event, actorID string, evs []ops.Event, home string) {
+func dispatchWebhooks(e *ops.Env, ev ops.Event, evs []ops.Event, home string) {
 	typ := webhookType(ev.Type)
 	if !eventSet[typ] {
 		return
@@ -732,6 +726,7 @@ func dispatchWebhooks(e *ops.Env, ev ops.Event, actorID string, evs []ops.Event,
 	if len(all) == 0 {
 		return
 	}
+	actorID := ""
 	if e.User != nil {
 		actorID = e.User.UserID
 	}
@@ -776,7 +771,7 @@ func dispatchWebhooks(e *ops.Env, ev ops.Event, actorID string, evs []ops.Event,
 	}
 	payloads := map[int]string{}
 	for _, w := range all {
-		if contains(w.ExcludedEvents, typ) || (len(w.Events) > 0 && !contains(w.Events, typ)) || (w.UserID != "" && w.UserID != actorID) {
+		if !webhookMatchesEvent(w, typ, actorID) {
 			continue
 		}
 		var i int
@@ -804,8 +799,79 @@ func dispatchWebhooks(e *ops.Env, ev ops.Event, actorID string, evs []ops.Event,
 			log.Println("notify: queue webhook:", err)
 			continue
 		}
-		d := e.DB
-		bg(func() { runDelivery(d, id, true) })
+		startDelivery(e.DB, id, true, 0)
+	}
+}
+
+// dispatchNotificationWebhooks queues notificationCreate deliveries for a batch of notifications created by one
+// logical event, loading matching global/project webhooks and board->project mappings once for the whole batch.
+func dispatchNotificationWebhooks(e *ops.Env, created []NotificationOut) {
+	if len(created) == 0 {
+		return
+	}
+	actorID := ""
+	if e.User != nil {
+		actorID = e.User.UserID
+	}
+	// notificationCreate is never sent to board-scoped webhooks (not in BoardWebhookEvents).
+	rows, err := e.DB.QueryContext(e.Ctx, `SELECT `+whCols+` FROM webhooks WHERE board_id IS NULL`)
+	if err != nil {
+		return
+	}
+	var hooks []WebhookOut
+	needProject := false
+	for rows.Next() {
+		w, _ := scanWebhook(rows)
+		if !webhookMatchesEvent(w, "notificationCreate", actorID) {
+			continue
+		}
+		if w.ProjectID != "" {
+			needProject = true
+		}
+		hooks = append(hooks, w)
+	}
+	rows.Close()
+	if len(hooks) == 0 {
+		return
+	}
+	projectOf := map[string]string{}
+	if needProject {
+		var args []any
+		seen := map[string]bool{}
+		for _, n := range created {
+			if n.BoardID != "" && !seen[n.BoardID] {
+				seen[n.BoardID] = true
+				args = append(args, n.BoardID)
+			}
+		}
+		if len(args) > 0 {
+			if r, err := e.DB.QueryContext(e.Ctx, `SELECT id,project_id FROM boards WHERE id IN (?`+strings.Repeat(",?", len(args)-1)+`)`, args...); err == nil {
+				for r.Next() {
+					var b, p string
+					if r.Scan(&b, &p) == nil {
+						projectOf[b] = p
+					}
+				}
+				r.Close()
+			}
+		}
+	}
+	for _, n := range created {
+		var payload string
+		for _, w := range hooks {
+			if w.ProjectID != "" && projectOf[n.BoardID] != w.ProjectID {
+				continue
+			}
+			if payload == "" {
+				payload = buildPayload("notificationCreate", map[string]any{"item": n}, e.User)
+			}
+			id, err := insertDelivery(e.Ctx, e.DB, w.ID, "notificationCreate", payload)
+			if err != nil {
+				log.Println("notify: queue webhook:", err)
+				continue
+			}
+			startDelivery(e.DB, id, true, 0)
+		}
 	}
 }
 
@@ -833,14 +899,85 @@ func SignV2(key string, ts int64, body string) string {
 	return "t=" + t + ",v1=" + hex.EncodeToString(m.Sum(nil))
 }
 
+type activeDelivery struct {
+	gen    uint64
+	cancel context.CancelFunc
+}
+
+var (
+	deliveryMu   sync.Mutex
+	deliverySeq  uint64
+	activeDelivs = map[string]activeDelivery{}
+	deliverySem  = make(chan struct{}, 32)
+)
+
+func cancelDelivery(id string) {
+	deliveryMu.Lock()
+	if cur, ok := activeDelivs[id]; ok {
+		cur.cancel()
+		delete(activeDelivs, id)
+	}
+	deliveryMu.Unlock()
+}
+
+func startDelivery(d *db.DB, id string, retry bool, initialDelay time.Duration) {
+	deliveryMu.Lock()
+	if prev, ok := activeDelivs[id]; ok {
+		prev.cancel()
+	}
+	deliverySeq++
+	gen := deliverySeq
+	ctx, cancel := context.WithCancel(context.Background())
+	activeDelivs[id] = activeDelivery{gen: gen, cancel: cancel}
+	deliveryMu.Unlock()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			cancel()
+			deliveryMu.Lock()
+			if cur, ok := activeDelivs[id]; ok && cur.gen == gen {
+				delete(activeDelivs, id)
+			}
+			deliveryMu.Unlock()
+		}()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Println("notify: delivery panic:", r)
+			}
+		}()
+		runDelivery(ctx, d, id, retry, initialDelay)
+	}()
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // runDelivery attempts a delivery; with retry it follows RetryBackoff on failure,
 // otherwise it makes a single attempt.
-func runDelivery(d *db.DB, id string, retry bool) {
-	ctx := context.Background()
+func runDelivery(ctx context.Context, d *db.DB, id string, retry bool, initialDelay time.Duration) {
+	if initialDelay > 0 && !sleepCtx(ctx, initialDelay) {
+		return
+	}
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		var whID, event, payload string
 		var attempts int
-		if d.QueryRowContext(ctx, `SELECT webhook_id,event,COALESCE(payload,''),attempts FROM webhook_deliveries WHERE id=?`, id).Scan(&whID, &event, &payload, &attempts) != nil {
+		if d.QueryRowContext(ctx, `SELECT webhook_id,event,COALESCE(payload,''),attempts FROM webhook_deliveries WHERE id=? AND delivered_at IS NULL`, id).Scan(&whID, &event, &payload, &attempts) != nil {
 			return
 		}
 		var url, token, secret string
@@ -853,7 +990,16 @@ func runDelivery(d *db.DB, id string, retry bool) {
 		if strict {
 			client = strictClient(strictPolicy(userAllowPrivate(ctx, d)))
 		}
+		select {
+		case deliverySem <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
 		status, body, derr, dur := post(ctx, client, url, token, secret, event, id, payload)
+		<-deliverySem
+		if ctx.Err() != nil {
+			return
+		}
 		if strict && derr != "" {
 			// connection details (resolved addresses, refusals, timeouts) stay in the server log
 			log.Printf("notify: webhook %s delivery %s: %s", whID, id, derr)
@@ -875,16 +1021,21 @@ func runDelivery(d *db.DB, id string, retry bool) {
 		} else {
 			errv = derr
 		}
-		_, err := d.ExecContext(ctx, `UPDATE webhook_deliveries SET attempts=?,status=?,error=?,response_body=?,duration_ms=?,delivered_at=?,next_attempt_at=? WHERE id=?`,
+		res, err := d.ExecContext(ctx, `UPDATE webhook_deliveries SET attempts=?,status=?,error=?,response_body=?,duration_ms=?,delivered_at=?,next_attempt_at=? WHERE id=? AND delivered_at IS NULL`,
 			attempts, status, errv, body, dur, deliveredAt, next, id)
 		if err != nil {
 			log.Println("notify: delivery update:", err)
 			return
 		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return
+		}
 		if ok || next == nil {
 			return
 		}
-		time.Sleep(wait)
+		if !sleepCtx(ctx, wait) {
+			return
+		}
 	}
 }
 
@@ -957,24 +1108,40 @@ func loadDelivery(ctx context.Context, d *db.DB, id string, withPayload bool) (D
 	return x, err
 }
 
+func pruneWebhookDeliveries(ctx context.Context, d *db.DB) {
+	if _, err := d.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE created_at < ?`, time.Now().UTC().AddDate(0, 0, -30).Format(time.RFC3339)); err != nil {
+		log.Println("notify: prune webhook deliveries:", err)
+	}
+}
+
 func init() {
 	server.Hooks = append(server.Hooks, func(s *server.Server) error {
 		ctx := context.Background()
-		_, _ = s.DB.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE created_at < ?`, time.Now().UTC().AddDate(0, 0, -30).Format(time.RFC3339))
-		rows, err := s.DB.QueryContext(ctx, `SELECT id FROM webhook_deliveries WHERE delivered_at IS NULL AND next_attempt_at IS NOT NULL`)
+		pruneWebhookDeliveries(ctx, s.DB)
+		rows, err := s.DB.QueryContext(ctx, `SELECT id,COALESCE(next_attempt_at,'') FROM webhook_deliveries WHERE delivered_at IS NULL AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at ASC`)
 		if err != nil {
 			return nil
 		}
-		var ids []string
+		type pending struct {
+			id   string
+			next string
+		}
+		var items []pending
 		for rows.Next() {
-			var id string
-			_ = rows.Scan(&id)
-			ids = append(ids, id)
+			var p pending
+			if rows.Scan(&p.id, &p.next) == nil {
+				items = append(items, p)
+			}
 		}
 		rows.Close()
-		for _, id := range ids {
-			id := id
-			bg(func() { runDelivery(s.DB, id, true) })
+		for _, p := range items {
+			var delay time.Duration
+			if t, err := time.Parse(time.RFC3339, p.next); err == nil {
+				if d := time.Until(t); d > 0 {
+					delay = d
+				}
+			}
+			startDelivery(s.DB, p.id, true, delay)
 		}
 		return nil
 	})

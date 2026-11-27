@@ -2431,7 +2431,7 @@
   "method": "GET",
   "path": "/boards/{boardId}/cards",
   "auth": "user",
-  "ui": "exempt:cards are rendered by the board shell (kanban/list/grid) and calendar/map views",
+  "ui": "exempt:cards are rendered by the board shell (board/list/grid) and calendar/map views",
   "fields": [
    {
     "name": "boardId",

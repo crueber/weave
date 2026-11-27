@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 )
 
 // Profile is one saved server + credential pair.
@@ -65,12 +64,7 @@ func saveConfigFile(cf ConfigFile) error {
 }
 
 func (cf ConfigFile) names() []string {
-	var n []string
-	for k := range cf.Profiles {
-		n = append(n, k)
-	}
-	sort.Strings(n)
-	return n
+	return sortedKeys(cf.Profiles)
 }
 
 // Resolved is the effective connection: flags > env > profile > default.

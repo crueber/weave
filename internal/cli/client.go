@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -76,8 +75,13 @@ func codeForStatus(st int) string {
 }
 
 func (a *App) httpClient(timeout time.Duration) *http.Client {
-	if a.HTTP != nil && timeout == 0 {
-		return a.HTTP
+	if a.HTTP != nil {
+		if timeout == 0 {
+			return a.HTTP
+		}
+		cp := *a.HTTP
+		cp.Timeout = timeout
+		return &cp
 	}
 	return &http.Client{Timeout: timeout, CheckRedirect: redirectPolicy(a.Cfg.Token != "")}
 }
@@ -144,12 +148,7 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 	for i := range o.Fields {
 		known[o.Fields[i].Name] = &o.Fields[i]
 	}
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range sortedKeys(params) {
 		v := params[k]
 		if v == nil {
 			continue
@@ -179,64 +178,6 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	var rdr io.Reader
-	ct := ""
-	if len(opts.uploads) > 0 {
-		// stream the multipart body through a pipe: an upload may be hundreds of MiB
-		pr, pw := io.Pipe()
-		mw := multipart.NewWriter(pw)
-		ct = mw.FormDataContentType()
-		go func() {
-			err := writeMultipart(mw, body, opts.uploads)
-			if err == nil {
-				err = mw.Close()
-			}
-			pw.CloseWithError(err)
-		}()
-		defer pr.Close() // unblocks the writer if the request fails before draining the body
-		rdr = pr
-	} else if len(files) > 0 {
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		for k, v := range body {
-			s, isStr := v.(string)
-			if !isStr {
-				bb, _ := json.Marshal(v)
-				s = string(bb)
-			}
-			_ = mw.WriteField(k, s)
-		}
-		fkeys := make([]string, 0, len(files))
-		for k := range files {
-			fkeys = append(fkeys, k)
-		}
-		sort.Strings(fkeys)
-		for _, k := range fkeys {
-			p := files[k]
-			var data []byte
-			var err error
-			name := filepath.Base(p)
-			if p == "-" {
-				data, err = io.ReadAll(a.Stdin)
-				name = "stdin"
-			} else {
-				data, err = os.ReadFile(p)
-			}
-			if err != nil {
-				return nil, usageErr(err.Error())
-			}
-			if n, ok := params["name"].(string); ok && n != "" && len(files) == 1 {
-				name = n
-			}
-			fw, _ := mw.CreateFormFile(k, name)
-			_, _ = fw.Write(data)
-		}
-		_ = mw.Close()
-		rdr, ct = &buf, mw.FormDataContentType()
-	} else if o.Method != "GET" {
-		bb, _ := json.Marshal(body)
-		rdr, ct = bytes.NewReader(bb), "application/json"
-	}
 	if a.DryRun && o.Method != "GET" && !opts.noDry {
 		dr := map[string]any{"dryRun": true, "op": o.Name, "method": o.Method, "url": u}
 		if len(files) > 0 {
@@ -247,6 +188,64 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 		}
 		b, _ := json.Marshal(map[string]any{"item": dr})
 		return &Response{Status: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: b}, nil
+	}
+	uploads := opts.uploads
+	var opened []*os.File
+	defer func() {
+		for _, f := range opened {
+			_ = f.Close()
+		}
+	}()
+	if len(uploads) == 0 && len(files) > 0 {
+		uploads = make([]Upload, 0, len(files))
+		for _, k := range sortedKeys(files) {
+			p := files[k]
+			var r io.Reader
+			name := filepath.Base(p)
+			if p == "-" {
+				r = a.Stdin
+				name = "stdin"
+			} else {
+				f, err := os.Open(p)
+				if err != nil {
+					return nil, usageErr(err.Error())
+				}
+				opened = append(opened, f)
+				r = f
+			}
+			if n, ok := params["name"].(string); ok && n != "" && len(files) == 1 {
+				name = n
+			}
+			uploads = append(uploads, Upload{Field: k, Name: name, R: r})
+		}
+	}
+	var rdr io.Reader
+	ct := ""
+	if len(uploads) > 0 {
+		// stream the multipart body through a pipe: an upload may be hundreds of MiB
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		ct = mw.FormDataContentType()
+		pipeDone := make(chan struct{})
+		go func() {
+			defer close(pipeDone)
+			err := writeMultipart(mw, body, uploads)
+			if err == nil {
+				err = mw.Close()
+			}
+			pw.CloseWithError(err)
+		}()
+		defer func() {
+			pr.Close() // unblocks the writer if the request fails before draining the body
+			<-pipeDone // ensure the writer finishes reading opened files before they are closed
+		}()
+		rdr = pr
+	} else if o.Method != "GET" {
+		bb, err := json.Marshal(body)
+		if err != nil {
+			return nil, usageErr(err.Error())
+		}
+		rdr, ct = bytes.NewReader(bb), "application/json"
 	}
 	req, err := http.NewRequestWithContext(ctx, o.Method, u, rdr)
 	if err != nil {
@@ -262,7 +261,7 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 	req.Header.Set("Accept", "application/json")
 	a.warnInsecure()
 	timeout := a.Timeout
-	if opts.stream != nil || len(opts.uploads) > 0 {
+	if opts.stream != nil || len(uploads) > 0 {
 		timeout = 0 // large transfers are bounded by the caller's context and byte caps instead
 	}
 	resp, err := a.httpClient(timeout).Do(req)
@@ -277,7 +276,7 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 		return &Response{Status: resp.StatusCode, Header: resp.Header}, nil
 	}
 	b, rerr := readLimited(resp.Body)
-	if rerr != nil && b == nil {
+	if rerr != nil {
 		return nil, &APIError{Code: "network", Message: rerr.Error()}
 	}
 	r := &Response{Status: resp.StatusCode, Header: resp.Header, Body: b}
@@ -290,15 +289,13 @@ func (a *App) call(ctx context.Context, o *Op, params Params, opts callOpts) (*R
 // writeMultipart writes the non-file body fields (sorted, JSON for non-strings) and then each
 // upload part, copying from its reader.
 func writeMultipart(mw *multipart.Writer, body map[string]any, ups []Upload) error {
-	keys := make([]string, 0, len(body))
-	for k := range body {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range sortedKeys(body) {
 		s, isStr := body[k].(string)
 		if !isStr {
-			bb, _ := json.Marshal(body[k])
+			bb, err := json.Marshal(body[k])
+			if err != nil {
+				return err
+			}
 			s = string(bb)
 		}
 		if err := mw.WriteField(k, s); err != nil {
@@ -360,7 +357,7 @@ func errorFromResponse(r *Response) *APIError {
 
 // Do calls an op by name.
 func (a *App) Do(ctx context.Context, name string, params Params) (*Response, error) {
-	o, err := a.mustOp(name)
+	o, err := a.mustOp(ctx, name)
 	if err != nil {
 		return nil, err
 	}

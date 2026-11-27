@@ -725,7 +725,7 @@ func TestSkillPrintCompact(t *testing.T) {
 	b := newSbox(t)
 	var out, errb bytes.Buffer
 	a := &App{Stdout: &out, Stderr: &errb, SkillEnv: b.senv()}
-	if code := cmdSkill(a, []string{"print", "--compact"}); code != 0 || !strings.Contains(out.String(), "Weave kanban") {
+	if code := cmdSkill(a, []string{"print", "--compact"}); code != 0 || !strings.Contains(out.String(), "Weave board") {
 		t.Fatal(out.String())
 	}
 }

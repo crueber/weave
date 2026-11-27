@@ -4,7 +4,9 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/crueber/weave/internal/db"
@@ -12,10 +14,46 @@ import (
 	"github.com/crueber/weave/internal/realtime"
 )
 
+var (
+	tplOnce  sync.Once
+	tplBytes []byte
+	tplErr   error
+)
+
+func templateDB() ([]byte, error) {
+	tplOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "weave-test-tpl-*")
+		if err != nil {
+			tplErr = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		p := filepath.Join(dir, "tpl.db")
+		d, err := db.Open(p)
+		if err != nil {
+			tplErr = err
+			return
+		}
+		_, _ = d.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		if err := d.Close(); err != nil {
+			tplErr = err
+			return
+		}
+		tplBytes, tplErr = os.ReadFile(p)
+	})
+	return tplBytes, tplErr
+}
+
 // Env returns an Env on a fresh temp SQLite DB, with the given principal (nil = anonymous).
 func Env(t testing.TB, u *ops.Principal) *ops.Env {
 	t.Helper()
-	d, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	p := filepath.Join(t.TempDir(), "t.db")
+	if b, err := templateDB(); err == nil {
+		if werr := os.WriteFile(p, b, 0o600); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+	d, err := db.Open(p)
 	if err != nil {
 		t.Fatal(err)
 	}

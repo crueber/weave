@@ -67,7 +67,7 @@ func cmdComplete(a *App, words []string) int {
 	var positional []string
 	for i := 0; i < len(prev); i++ {
 		if strings.HasPrefix(prev[i], "-") {
-			if !strings.Contains(prev[i], "=") && i+1 < len(prev) && !strings.HasPrefix(prev[i+1], "-") && !boolish(prev[i]) {
+			if !strings.Contains(prev[i], "=") && i+1 < len(prev) && !strings.HasPrefix(prev[i+1], "-") && !boolish(prev[i], positional, cat) {
 				i++
 			}
 			continue
@@ -123,8 +123,6 @@ func cmdComplete(a *App, words []string) int {
 			out = append(out, "print", "install", "check", "targets", "uninstall")
 		case "config":
 			out = append(out, "list", "use", "set", "get", "remove", "path")
-		case "agent":
-			out = append(out, "run")
 		}
 	}
 	sort.Strings(out)
@@ -138,9 +136,49 @@ func cmdComplete(a *App, words []string) int {
 	return 0
 }
 
-func boolish(flag string) bool {
-	switch strings.TrimLeft(flag, "-") {
-	case "json", "all", "dry-run", "yes", "quiet", "no-color", "stdin", "once", "claim", "full", "help", "include-existing", "force", "check":
+func boolish(flag string, pos []string, cat *Catalog) bool {
+	want := norm(strings.TrimLeft(flag, "-"))
+	short := ""
+	if len(flag) == 2 && flag[0] == '-' && flag[1] != '-' {
+		short = flag[1:]
+	}
+	match := func(specs []FlagSpec) bool {
+		for _, s := range specs {
+			if !s.Bool {
+				continue
+			}
+			if short != "" && s.Short == short {
+				return true
+			}
+			if norm(s.Name) == want {
+				return true
+			}
+			for _, al := range s.Aliases {
+				if norm(al) == want {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if match(globalSpecs()) {
+		return true
+	}
+	if len(pos) >= 2 {
+		if match(shortcutSpecs[pos[0]+" "+pos[1]]) {
+			return true
+		}
+		if cat != nil {
+			if o := cat.LookupVerb(pos[0], pos[1]); o != nil {
+				for _, f := range o.Fields {
+					if f.Type == "bool" && norm(f.Name) == want {
+						return true
+					}
+				}
+			}
+		}
+	}
+	if len(pos) >= 1 && match(shortcutSpecs[pos[0]]) {
 		return true
 	}
 	return false

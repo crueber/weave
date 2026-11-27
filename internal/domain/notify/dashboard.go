@@ -3,6 +3,7 @@ package notify
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -180,6 +181,10 @@ func dashActivity(e *ops.Env, limit int) []DashActivity {
 	cursor := "zzzz" // ids are hex: sorts after every id
 	level := map[string]bool{}
 	shown := map[string]bool{} // logical events already listed: an event recorded on several boards shows once
+	type actRow struct {
+		a      DashActivity
+		origin string
+	}
 	for page := 0; page < 6 && len(out) < limit; page++ {
 		rows, err := e.DB.QueryContext(e.Ctx, `SELECT a.id,a.type,COALESCE(u.name,''),COALESCE(a.card_id,''),COALESCE(c.name,''),a.board_id,COALESCE(b.name,''),a.created_at,COALESCE(a.origin_id,a.id)
 		 FROM actions a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN cards c ON c.id=a.card_id LEFT JOIN boards b ON b.id=a.board_id
@@ -187,35 +192,46 @@ func dashActivity(e *ops.Env, limit int) []DashActivity {
 		if err != nil {
 			return out
 		}
-		n := 0
+		var batch []actRow
 		for rows.Next() {
-			var a DashActivity
-			var origin string
-			_ = rows.Scan(&a.ID, &a.Type, &a.User, &a.CardID, &a.CardName, &a.BoardID, &a.BoardName, &a.CreatedAt, &origin)
-			cursor = a.ID
-			n++
-			ok, seen := level[a.BoardID]
-			if !seen {
-				ok = authz.BoardLevel(e, a.BoardID) >= authz.View
-				level[a.BoardID] = ok
+			var r actRow
+			if rows.Scan(&r.a.ID, &r.a.Type, &r.a.User, &r.a.CardID, &r.a.CardName, &r.a.BoardID, &r.a.BoardName, &r.a.CreatedAt, &r.origin) == nil {
+				cursor = r.a.ID
+				batch = append(batch, r)
 			}
+		}
+		rows.Close()
+		var unseen []string
+		unseenSet := map[string]bool{}
+		for _, r := range batch {
+			if _, seen := level[r.a.BoardID]; !seen && !unseenSet[r.a.BoardID] {
+				unseenSet[r.a.BoardID] = true
+				unseen = append(unseen, r.a.BoardID)
+			}
+		}
+		if len(unseen) > 0 {
+			lv := authz.BoardLevels(e, unseen)
+			for _, b := range unseen {
+				level[b] = lv[b] >= authz.View
+			}
+		}
+		for _, r := range batch {
 			// the access filter first, then the dedupe: a copy on a hidden board never hides the event (nor names it)
-			if !ok || len(out) >= limit || shown[origin] {
+			if !level[r.a.BoardID] || len(out) >= limit || shown[r.origin] {
 				continue
 			}
-			shown[origin] = true
-			who := a.User
+			shown[r.origin] = true
+			who := r.a.User
 			if who == "" {
 				who = "Someone"
 			}
-			a.Summary = who + " " + humanAction(a.Type)
-			if a.CardName != "" {
-				a.Summary += " " + a.CardName
+			r.a.Summary = who + " " + humanAction(r.a.Type)
+			if r.a.CardName != "" {
+				r.a.Summary += " " + r.a.CardName
 			}
-			out = append(out, a)
+			out = append(out, r.a)
 		}
-		rows.Close()
-		if n < 100 {
+		if len(batch) < 100 {
 			break
 		}
 	}
@@ -261,7 +277,7 @@ func init() {
 				if !valid[id] {
 					return DashboardOut{}, ops.Invalid("unknown panel " + id)
 				}
-				if !contains(cfg.Order, id) {
+				if !slices.Contains(cfg.Order, id) {
 					cfg.Order = append(cfg.Order, id)
 				}
 			}

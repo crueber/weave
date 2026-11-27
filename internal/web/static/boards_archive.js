@@ -53,12 +53,6 @@
   function syncSelection() {
     var a = archive(), form = bulkForm(); if (!a) return;
     initForm(form);
-    a.querySelectorAll('.archive-row-action').forEach(function (f) {
-      if ((f.getAttribute('hx-post') || '').indexOf('/archive/delete') < 0) return;
-      f.setAttribute('hx-confirm', 'Permanently delete 1 card? This cannot be undone. Cards that are only partially in Trash may be skipped.');
-      f.setAttribute('data-confirm-title', 'Permanently delete 1 card?');
-      f.setAttribute('data-confirm-ok', 'Delete forever');
-    });
     var loaded = rows();
     loaded.forEach(function (r) {
       var c = cardCheck(r), on = !!c && (all || selected.has(rowID(r)));

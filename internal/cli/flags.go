@@ -87,8 +87,15 @@ func ParseFlags(args []string, specs []FlagSpec) (*Parsed, error) {
 				return nil, usageErr("unknown flag --" + name)
 			}
 			val, hasVal = v, eq
-		case len(a) == 2 && a[0] == '-' && a[1] != '-' && byShort[a[1:]] != nil:
+		case len(a) == 2 && a[0] == '-' && a[1] != '-':
 			spec = byShort[a[1:]]
+			if spec == nil {
+				if (a[1] >= 'a' && a[1] <= 'z') || (a[1] >= 'A' && a[1] <= 'Z') {
+					return nil, usageErr("unknown flag " + a)
+				}
+				p.Pos = append(p.Pos, a)
+				continue
+			}
 		default:
 			p.Pos = append(p.Pos, a)
 			continue

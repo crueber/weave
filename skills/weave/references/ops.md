@@ -5,7 +5,7 @@
 Every op is callable as `weave <tag> <verb>` (op `a.b.c` is `weave a b.c`). Path fields can be given positionally.
 The server is the source of truth: `weave ops` / `weave schema OP` show what *your* server supports.
 
-Tags: activity, admin, agent, apikey, attachment, audit, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, subscription, system, task, tasklist, time, user, webhook, whoami
+Tags: activity, admin, agent, apikey, attachment, audit, auth, board, card, comment, config, customfield, customfieldgroup, customfieldrow, customfieldvalue, dashboard, export, filter, group, label, labelgroup, list, notification, notification_service, presence, project, search, session, smtp, subscription, system, task, tasklist, time, user, webhook
 
 ## activity
 
@@ -2698,11 +2698,4 @@ Update a webhook
 | `--projectId` | body | string |  | admins only |
 | `--boardId` | body | string |  | move to another board you manage (non-admins cannot remove the board scope) |
 | `--userId` | body | string |  | admins only |
-
-## whoami
-
-### `weave whoami whoami`
-
-Who am I: user, role, isAgent and accessible boards  
-`GET /whoami` (auth: user)
 

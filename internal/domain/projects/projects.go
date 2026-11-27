@@ -165,22 +165,23 @@ func uid(e *ops.Env) string {
 	return e.User.UserID
 }
 
-// IsManager reports whether the caller is admin or a manager of the project.
+// IsManager reports whether the caller is a manager of the project.
 func IsManager(e *ops.Env, projectID string) bool {
 	return authz.ProjectLevel(e, projectID) >= authz.Manage
 }
 
 // Get returns a project the caller may view (not_found otherwise).
 func Get(e *ops.Env, id string) (Project, error) {
-	if err := authz.RequireProject(e, id, authz.View); err != nil {
-		return Project{}, err
+	l := authz.ProjectLevel(e, id)
+	if l == authz.None {
+		return Project{}, ops.NotFound("project")
 	}
 	p, err := scanProject(e.DB.QueryRowContext(e.Ctx, `SELECT `+projCols+` FROM projects p WHERE p.id=?`, uid(e), id))
 	if err != nil {
 		return p, ops.NotFound("project")
 	}
-	p.CanManage = IsManager(e, id)
-	p.CanCreateBoard = authz.CanCreateBoard(e, id)
+	p.CanManage = l >= authz.Manage
+	p.CanCreateBoard = authz.CanCreateBoardWith(e, l, p.BoardCreation)
 	return p, nil
 }
 
@@ -242,19 +243,11 @@ func List(e *ops.Env, o ListOpts) ([]Project, error) {
 	}
 	lv := authz.ProjectLevels(e, ids)
 	for i := range out {
-		out[i].CanManage = lv[out[i].ID] >= authz.Manage
-		out[i].CanCreateBoard = out[i].CanManage || authz.CanCreateBoard(e, out[i].ID)
+		l := lv[out[i].ID]
+		out[i].CanManage = l >= authz.Manage
+		out[i].CanCreateBoard = authz.CanCreateBoardWith(e, l, out[i].BoardCreation)
 	}
 	return out, nil
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 func publish(e *ops.Env, name, projectID string, data any) {
@@ -315,11 +308,14 @@ func init() {
 			return Project{}, ops.Forbidden()
 		}
 		name := strings.TrimSpace(in.Name)
-		if name == "" || len(name) > 128 {
+		if name == "" {
 			return Project{}, ops.Invalid("name is required (max 128 characters)")
 		}
-		if len(in.Description) > 1024 {
-			return Project{}, ops.Invalid("description too long (max 1024)")
+		if err := ops.CheckLen("name", name, 128); err != nil {
+			return Project{}, err
+		}
+		if err := ops.CheckLen("description", in.Description, 1024); err != nil {
+			return Project{}, err
 		}
 		id, mid, now := db.NewID(), db.NewID(), db.Now()
 		err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
@@ -348,17 +344,8 @@ func init() {
 			return DeleteOut{}, err
 		}
 		files := imageFiles(e, in.ID)
-		var boardIDs []string // a card also placed on a board of another project survives (re-homed there)
-		if rows, err := e.DB.QueryContext(e.Ctx, `SELECT id FROM boards WHERE project_id=?`, in.ID); err == nil {
-			for rows.Next() {
-				var b string
-				if rows.Scan(&b) == nil {
-					boardIDs = append(boardIDs, b)
-				}
-			}
-			rows.Close()
-		}
-		after, err := boards.DeleteBoards(e, boardIDs, func(tx *sql.Tx) error {
+		// a card also placed on a board of another project survives (re-homed there)
+		after, err := boards.DeleteProjectBoards(e, in.ID, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(e.Ctx, `DELETE FROM projects WHERE id=?`, in.ID)
 			return err
 		})
@@ -408,96 +395,129 @@ func updateProject(e *ops.Env, in UpdateIn) (Project, error) {
 	if err := authz.RequireProject(e, in.ID, authz.Manage); err != nil {
 		return Project{}, err
 	}
-	cur, err := Get(e, in.ID)
-	if err != nil {
-		return cur, err
-	}
+	var newName string
 	if in.Name != nil {
-		n := strings.TrimSpace(*in.Name)
-		if n == "" || len(n) > 128 {
-			return cur, ops.Invalid("name is required (max 128 characters)")
+		newName = strings.TrimSpace(*in.Name)
+		if newName == "" {
+			return Project{}, ops.Invalid("name is required (max 128 characters)")
 		}
-		cur.Name = n
+		if err := ops.CheckLen("name", newName, 128); err != nil {
+			return Project{}, err
+		}
 	}
 	if in.Description != nil {
-		if len(*in.Description) > 1024 {
-			return cur, ops.Invalid("description too long (max 1024)")
+		if err := ops.CheckLen("description", *in.Description, 1024); err != nil {
+			return Project{}, err
 		}
-		cur.Description = strings.TrimSpace(*in.Description)
 	}
-	if in.IsHidden != nil {
-		cur.IsHidden = *in.IsHidden
+	if in.BackgroundColor != nil && *in.BackgroundColor != "" && !hexColor.MatchString(*in.BackgroundColor) {
+		return Project{}, ops.Invalid("backgroundColor must be a hex colour like #1d6fa5")
 	}
-	if in.UseProjectLabels != nil {
-		cur.UseProjectLabels = *in.UseProjectLabels
-	}
-	if in.BackgroundColor != nil {
-		if *in.BackgroundColor != "" && !hexColor.MatchString(*in.BackgroundColor) {
-			return cur, ops.Invalid("backgroundColor must be a hex colour like #1d6fa5")
+	if in.BackgroundGradient != nil && *in.BackgroundGradient != "" {
+		if _, ok := Gradients[*in.BackgroundGradient]; !ok {
+			return Project{}, ops.Invalid("unknown gradient " + *in.BackgroundGradient)
 		}
-		cur.BackgroundColor = *in.BackgroundColor
 	}
-	if in.BackgroundGradient != nil {
-		if _, ok := Gradients[*in.BackgroundGradient]; !ok && *in.BackgroundGradient != "" {
-			return cur, ops.Invalid("unknown gradient " + *in.BackgroundGradient)
-		}
-		cur.BackgroundGradient = *in.BackgroundGradient
-	}
-	if in.BackgroundImageID != nil {
-		if *in.BackgroundImageID != "" {
-			var n int
-			_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM background_images WHERE id=? AND project_id=?`, *in.BackgroundImageID, in.ID).Scan(&n)
-			if n == 0 {
-				return cur, ops.NotFound("background image")
-			}
-		}
-		cur.BackgroundImageID = *in.BackgroundImageID
-	}
+	var newPrompt string
 	if in.AgentPrompt != nil {
 		def, _ := notify.AgentPromptDefault(e, agentprompt.ScopeProject)
 		txt, err := agentprompt.Normalize(*in.AgentPrompt, def)
 		if err != nil {
-			return cur, ops.Invalid("agentPrompt: " + err.Error())
+			return Project{}, ops.Invalid("agentPrompt: " + err.Error())
 		}
-		cur.AgentPrompt = txt
+		newPrompt = txt
 	}
 	if in.BoardCreation != nil {
 		switch *in.BoardCreation {
 		case authz.BoardCreationOwners, authz.BoardCreationMembers:
-			cur.BoardCreation = *in.BoardCreation
 		default:
-			return cur, ops.Invalid("boardCreation must be owners or members")
+			return Project{}, ops.Invalid("boardCreation must be owners or members")
 		}
 	}
 	if in.BackgroundType != nil {
 		switch *in.BackgroundType {
 		case "", "color", "gradient", "image":
-			cur.BackgroundType = *in.BackgroundType
 		default:
-			return cur, ops.Invalid("backgroundType must be color, gradient, image or empty")
+			return Project{}, ops.Invalid("backgroundType must be color, gradient, image or empty")
 		}
 	}
-	switch cur.BackgroundType {
-	case "color":
-		if cur.BackgroundColor == "" {
-			return cur, ops.Invalid("backgroundColor is required for type color")
+	err := e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		var cur Project
+		err := tx.QueryRowContext(e.Ctx, `SELECT name,COALESCE(description,''),is_hidden,use_project_labels,COALESCE(background_type,''),
+			COALESCE(background_color,''),COALESCE(background_gradient,''),COALESCE(background_image_id,''),COALESCE(agent_prompt,''),board_creation
+			FROM projects WHERE id=?`, in.ID).Scan(&cur.Name, &cur.Description, &cur.IsHidden, &cur.UseProjectLabels,
+			&cur.BackgroundType, &cur.BackgroundColor, &cur.BackgroundGradient, &cur.BackgroundImageID, &cur.AgentPrompt, &cur.BoardCreation)
+		if err != nil {
+			if db.IsNoRows(err) {
+				return ops.NotFound("project")
+			}
+			return err
 		}
-	case "gradient":
-		if cur.BackgroundGradient == "" {
-			return cur, ops.Invalid("backgroundGradient is required for type gradient")
+		if in.Name != nil {
+			cur.Name = newName
 		}
-	case "image":
-		if cur.BackgroundImageID == "" {
-			return cur, ops.Invalid("backgroundImageId is required for type image")
+		if in.Description != nil {
+			cur.Description = strings.TrimSpace(*in.Description)
 		}
-	}
-	_, err = e.DB.ExecContext(e.Ctx, `UPDATE projects SET name=?,description=?,is_hidden=?,use_project_labels=?,background_type=?,background_color=?,
-		background_gradient=?,background_image_id=?,agent_prompt=?,board_creation=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
-		nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), nullStr(cur.AgentPrompt), cur.BoardCreation, db.Now(), in.ID)
+		if in.IsHidden != nil {
+			cur.IsHidden = *in.IsHidden
+		}
+		if in.UseProjectLabels != nil {
+			cur.UseProjectLabels = *in.UseProjectLabels
+		}
+		if in.BackgroundColor != nil {
+			cur.BackgroundColor = *in.BackgroundColor
+		}
+		if in.BackgroundGradient != nil {
+			cur.BackgroundGradient = *in.BackgroundGradient
+		}
+		if in.BackgroundImageID != nil {
+			if *in.BackgroundImageID != "" {
+				var n int
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM background_images WHERE id=? AND project_id=?`, *in.BackgroundImageID, in.ID).Scan(&n); err != nil {
+					return err
+				}
+				if n == 0 {
+					return ops.NotFound("background image")
+				}
+			}
+			cur.BackgroundImageID = *in.BackgroundImageID
+		}
+		if in.AgentPrompt != nil {
+			cur.AgentPrompt = newPrompt
+		}
+		if in.BoardCreation != nil {
+			cur.BoardCreation = *in.BoardCreation
+		}
+		if in.BackgroundType != nil {
+			cur.BackgroundType = *in.BackgroundType
+		}
+		switch cur.BackgroundType {
+		case "color":
+			if cur.BackgroundColor == "" {
+				return ops.Invalid("backgroundColor is required for type color")
+			}
+		case "gradient":
+			if cur.BackgroundGradient == "" {
+				return ops.Invalid("backgroundGradient is required for type gradient")
+			}
+		case "image":
+			if cur.BackgroundImageID == "" {
+				return ops.Invalid("backgroundImageId is required for type image")
+			}
+		}
+		_, err = tx.ExecContext(e.Ctx, `UPDATE projects SET name=?,description=?,is_hidden=?,use_project_labels=?,background_type=?,background_color=?,
+			background_gradient=?,background_image_id=?,agent_prompt=?,board_creation=?,updated_at=? WHERE id=?`, cur.Name, nullStr(cur.Description), cur.IsHidden, cur.UseProjectLabels,
+			nullStr(cur.BackgroundType), nullStr(cur.BackgroundColor), nullStr(cur.BackgroundGradient), nullStr(cur.BackgroundImageID), nullStr(cur.AgentPrompt), cur.BoardCreation, db.Now(), in.ID)
+		return err
+	})
 	if err != nil {
-		return cur, err
+		return Project{}, err
 	}
-	p, _ := Get(e, in.ID)
+	p, err := Get(e, in.ID)
+	if err != nil {
+		return Project{}, err
+	}
 	publish(e, "project.updated", in.ID, p)
 	return p, nil
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/mail"
@@ -102,11 +103,15 @@ func redact(e *ops.Env, u *User) *User {
 
 // UserBrief returns a user's public fields (nil when the user does not exist).
 func UserBrief(e *ops.Env, id string) *User {
-	u, err := loadUser(e, id)
-	if err != nil {
+	var u User
+	if e.DB.QueryRowContext(e.Ctx, `SELECT id,username,name,COALESCE(avatar,''),is_agent FROM users WHERE id=? AND deleted_at IS NULL`, id).
+		Scan(&u.ID, &u.Username, &u.Name, &u.avatarFile, &u.IsAgent) != nil {
 		return nil
 	}
-	return &User{ID: u.ID, Username: u.Username, Name: u.Name, AvatarURL: u.AvatarURL, IsAgent: u.IsAgent}
+	if u.avatarFile != "" {
+		u.AvatarURL = "/avatars/" + u.ID + "?v=" + sha(u.avatarFile)[:8]
+	}
+	return &u
 }
 
 // resolve maps "me" to the caller and enforces self-or-admin access.
@@ -126,9 +131,13 @@ func resolve(e *ops.Env, id string, adminOnly bool) (string, error) {
 	return id, nil
 }
 
-func countOtherAdmins(e *ops.Env, id string) int {
+type rowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func countOtherAdmins(ctx context.Context, q rowQueryer, id string) int {
 	var n int
-	_ = e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND is_deactivated=0 AND deleted_at IS NULL AND id<>?`, id).Scan(&n)
+	_ = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND is_agent=0 AND is_deactivated=0 AND deleted_at IS NULL AND id<>?`, id).Scan(&n)
 	return n
 }
 
@@ -245,7 +254,7 @@ func init() {
 				q += ` AND is_deactivated=0`
 			}
 			if in.Q != "" {
-				like := "%" + strings.NewReplacer("%", `\%`, "_", `\_`).Replace(in.Q) + "%"
+				like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(in.Q) + "%"
 				if isAdmin(e) {
 					q += ` AND (name LIKE ? ESCAPE '\' OR username LIKE ? ESCAPE '\' OR email LIKE ? ESCAPE '\')`
 					args = append(args, like, like, like)
@@ -291,14 +300,33 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
+			var sets []string
+			var args []any
 			if in.Phone != nil {
-				_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET phone=?,updated_at=? WHERE id=?`, ptrEmpty(in.Phone), db.Now(), id)
+				sets = append(sets, "phone=?")
+				args = append(args, ptrEmpty(in.Phone))
 			}
 			if in.Organization != nil {
-				_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET organization=?,updated_at=? WHERE id=?`, ptrEmpty(in.Organization), db.Now(), id)
+				sets = append(sets, "organization=?")
+				args = append(args, ptrEmpty(in.Organization))
+			}
+			if len(sets) > 0 {
+				sets = append(sets, "updated_at=?")
+				args = append(args, db.Now(), id)
+				res, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET `+strings.Join(sets, ",")+` WHERE id=? AND deleted_at IS NULL`, args...)
+				if err != nil {
+					return nil, err
+				}
+				if n, _ := res.RowsAffected(); n == 0 {
+					return nil, ops.NotFound("user")
+				}
+			}
+			u, err := loadUser(e, id)
+			if err != nil {
+				return nil, err
 			}
 			publish(e, "user.updated", id)
-			return loadUser(e, id)
+			return u, nil
 		})
 
 	ops.Register(ops.Op{Name: "user.preferences.update", Summary: "Update language, theme, density, colour-blind mode, auto-logout, editor mode, home view, project order and subscription defaults", Method: "PATCH", Path: "/users/{id}/preferences", UI: "POST /ui/settings/preferences"},
@@ -390,10 +418,22 @@ func init() {
 			if err := os.WriteFile(filepath.Join(dir, name), png, 0o644); err != nil {
 				return nil, err
 			}
-			removeAvatarFile(e, id)
-			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET avatar=?,updated_at=? WHERE id=?`, name, db.Now(), id); err != nil {
+			var oldFile string
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COALESCE(avatar,'') FROM users WHERE id=? AND deleted_at IS NULL`, id).Scan(&oldFile); err != nil {
+					if db.IsNoRows(err) {
+						return ops.NotFound("user")
+					}
+					return err
+				}
+				_, err := tx.ExecContext(e.Ctx, `UPDATE users SET avatar=?,updated_at=? WHERE id=?`, name, db.Now(), id)
+				return err
+			})
+			if err != nil {
+				_ = os.Remove(filepath.Join(dir, name))
 				return nil, err
 			}
+			removeAvatarFilename(e, oldFile)
 			publish(e, "user.updated", id)
 			return loadUser(e, id)
 		})
@@ -404,8 +444,21 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			removeAvatarFile(e, id)
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET avatar=NULL,updated_at=? WHERE id=?`, db.Now(), id)
+			var oldFile string
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				if err := tx.QueryRowContext(e.Ctx, `SELECT COALESCE(avatar,'') FROM users WHERE id=? AND deleted_at IS NULL`, id).Scan(&oldFile); err != nil {
+					if db.IsNoRows(err) {
+						return ops.NotFound("user")
+					}
+					return err
+				}
+				_, err := tx.ExecContext(e.Ctx, `UPDATE users SET avatar=NULL,updated_at=? WHERE id=?`, db.Now(), id)
+				return err
+			})
+			if err != nil {
+				return nil, err
+			}
+			removeAvatarFilename(e, oldFile)
 			publish(e, "user.updated", id)
 			return loadUser(e, id)
 		})
@@ -435,11 +488,27 @@ func init() {
 			if u.ID == e.User.UserID {
 				return nil, ops.Conflict("you cannot deactivate yourself")
 			}
-			if u.Role == "admin" && countOtherAdmins(e, u.ID) == 0 {
-				return nil, ops.Conflict("cannot deactivate the last administrator")
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				var role string
+				var isAgent bool
+				if err := tx.QueryRowContext(e.Ctx, `SELECT role,is_agent FROM users WHERE id=? AND deleted_at IS NULL`, u.ID).Scan(&role, &isAgent); err != nil {
+					if db.IsNoRows(err) {
+						return ops.NotFound("user")
+					}
+					return err
+				}
+				if role == "admin" && !isAgent && countOtherAdmins(e.Ctx, tx, u.ID) == 0 {
+					return ops.Conflict("cannot deactivate the last administrator")
+				}
+				if _, err := tx.ExecContext(e.Ctx, `UPDATE users SET is_deactivated=1,presence='offline',updated_at=? WHERE id=?`, db.Now(), u.ID); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(e.Ctx, `DELETE FROM sessions WHERE user_id=?`, u.ID)
+				return err
+			})
+			if err != nil {
+				return nil, err
 			}
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET is_deactivated=1,presence='offline',updated_at=? WHERE id=?`, db.Now(), u.ID)
-			_, _ = e.DB.ExecContext(e.Ctx, `DELETE FROM sessions WHERE user_id=?`, u.ID)
 			publish(e, "user.updated", u.ID)
 			return loadUser(e, u.ID)
 		})
@@ -450,7 +519,9 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			_, _ = e.DB.ExecContext(e.Ctx, `UPDATE users SET is_deactivated=0,updated_at=? WHERE id=?`, db.Now(), u.ID)
+			if _, err := e.DB.ExecContext(e.Ctx, `UPDATE users SET is_deactivated=0,updated_at=? WHERE id=?`, db.Now(), u.ID); err != nil {
+				return nil, err
+			}
 			publish(e, "user.updated", u.ID)
 			return loadUser(e, u.ID)
 		})
@@ -464,13 +535,26 @@ func init() {
 			if u.ID == e.User.UserID {
 				return nil, ops.Conflict("you cannot delete yourself")
 			}
-			if u.Role == "admin" && countOtherAdmins(e, u.ID) == 0 {
-				return nil, ops.Conflict("cannot delete the last administrator")
-			}
-			removeAvatarFile(e, u.ID)
-			if _, err := e.DB.ExecContext(e.Ctx, `DELETE FROM users WHERE id=?`, u.ID); err != nil {
+			var avatarFile string
+			err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+				var role string
+				var isAgent bool
+				if err := tx.QueryRowContext(e.Ctx, `SELECT role,is_agent,COALESCE(avatar,'') FROM users WHERE id=? AND deleted_at IS NULL`, u.ID).Scan(&role, &isAgent, &avatarFile); err != nil {
+					if db.IsNoRows(err) {
+						return ops.NotFound("user")
+					}
+					return err
+				}
+				if role == "admin" && !isAgent && countOtherAdmins(e.Ctx, tx, u.ID) == 0 {
+					return ops.Conflict("cannot delete the last administrator")
+				}
+				_, err := tx.ExecContext(e.Ctx, `DELETE FROM users WHERE id=?`, u.ID)
+				return err
+			})
+			if err != nil {
 				return nil, err
 			}
+			removeAvatarFilename(e, avatarFile)
 			publish(e, "user.deleted", u.ID)
 			return u, nil
 		})

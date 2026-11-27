@@ -144,26 +144,12 @@ func applyArchive(ctx context.Context, tx *sql.Tx, listID string, keep int, ids 
 	a.ArchiveID = arch
 	base := maxPos(ctx, tx, "card_placements", "list_id=?", arch)
 	now := db.Now()
-	for i := 0; i < len(ids); i += archiveChunk {
-		chunk := ids[i:min(i+archiveChunk, len(ids))]
-		in := "(?" + strings.Repeat(",?", len(chunk)-1) + ")"
-		args := make([]any, 0, 4+3*len(chunk))
-		args = append(args, arch, listID, now)
-		for k, id := range chunk {
-			args = append(args, id, base+float64(i+k+1)*db.PositionGap)
-		}
-		args = append(args, listID)
-		for _, id := range chunk {
-			args = append(args, id)
-		}
-		// the cards' placements in this column move (the mirror updates the cards columns), then updated_at
-		if _, err := tx.ExecContext(ctx, `UPDATE card_placements SET list_id=?,prev_list_id=?,list_changed_at=?,position=CASE card_id`+
-			strings.Repeat(" WHEN ? THEN ?", len(chunk))+` END WHERE list_id=? AND card_id IN `+in, args...); err != nil {
-			return a, err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE cards SET updated_at=? WHERE id IN `+in, append([]any{now}, args[len(args)-len(chunk):]...)...); err != nil {
-			return a, err
-		}
+	moves := make([]placementMove, len(ids))
+	for i, id := range ids {
+		moves[i] = placementMove{CardID: id, FromListID: listID, Position: base + float64(i+1)*db.PositionGap}
+	}
+	if err := movePlacements(ctx, tx, a.BoardID, arch, now, moves); err != nil {
+		return a, err
 	}
 	a.CardIDs = ids
 	return a, nil
@@ -234,8 +220,8 @@ func EmitClosedElsewhere(e *ops.Env, boardID string, res LandResult) {
 		return
 	}
 	multi := map[string]bool{}
-	for i := 0; i < len(ids); i += 500 {
-		chunk := ids[i:min(i+500, len(ids))]
+	for i := 0; i < len(ids); i += archiveChunk {
+		chunk := ids[i:min(i+archiveChunk, len(ids))]
 		args := make([]any, len(chunk))
 		for j, id := range chunk {
 			args[j] = id
