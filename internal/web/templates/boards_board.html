@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/static/boards_inbox.css">
 {{template "boards_sprite"}}
 <div class="boards-shell boards-shell-{{.View}}" id="board-shell" data-show="{{.Show}}"{{boardsBoardAttr .Board}}>
+  {{template "boards_bg" .}}
   {{template "boards_filterbar" .}}
   {{template "boards_body_in" .}}
   <div id="board-live" data-board="{{.LiveBoardID}}" hidden></div>

@@ -34,7 +34,7 @@
 <script src="/static/boards_colors.js" defer></script>{{end}}
 
 {{define "boards_set_general"}}{{template "boards_set_general_in" .Data}}{{end}}
-{{define "boards_set_general_in"}}<section id="set-general" class="boards-sec bs-panel" data-panel="general" aria-labelledby="set-general-h">
+{{define "boards_set_general_in"}}<section id="set-general" class="boards-sec bs-panel{{if eq .Active "general"}} is-active{{end}}" data-panel="general" aria-labelledby="set-general-h">
   <div class="bs-sec-head"><h2 id="set-general-h">General</h2>{{template "bs_status" .}}</div>
   <form hx-patch="/ui/boards/{{.Board.ID}}" hx-trigger="change, submit" hx-target="#set-general" hx-swap="outerHTML" class="bs-form">
     <input type="hidden" name="_section" value="general">
@@ -42,16 +42,44 @@
       <span class="bs-text"><b><label for="bs-name">Board name</label></b><small>Shown in the project, in the top bar and in notifications.</small></span>
       <input id="bs-name" name="name" value="{{.Board.Name}}" required maxlength="128"{{if .Caps.CanEdit}} data-cap="board-edit"{{else}} disabled{{end}}>
     </div>
-    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-color-l">Board colour</b><small>Tints the board background and adds an accent bar under the filters. Shown as a stripe on the project page.</small></span>
+    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-color-l">Board colour</b><small>Tints the board background. Shown as a stripe on the project page.</small></span>
       {{template "boards_color_picker" dict "Name" "color" "Current" .Board.Color "Label" "Board colour" "Off" (not .CanEdit)}}</div>
+    <div class="bs-row bs-row-stack bs-appearance"><span class="bs-text"><b id="bs-pat-l">Background pattern</b><small>A subtle repeating pattern over the board canvas (combines with the board colour above; picking one replaces a background image).</small></span>
+      {{$curPat := deref .Board.BackgroundPattern}}{{$off := not .CanEdit}}
+      <div class="bs-patterns"{{if .Board.Color}} data-board-color style="--board-color:{{boardsHexOf .Board.Color}}"{{end}} role="radiogroup" aria-labelledby="bs-pat-l">
+        <label class="bs-pat bs-pat-none" title="No pattern"><input type="radio" name="backgroundPattern" value=""{{if not $curPat}} checked{{end}}{{if $off}} disabled{{end}}><span class="bs-pat-sw" aria-hidden="true"></span><span class="bs-pat-lbl">None</span></label>
+        {{range boardsPatterns}}<label class="bs-pat" title="{{.Label}}"><input type="radio" name="backgroundPattern" value="{{.Slug}}"{{if eq .Slug $curPat}} checked{{end}}{{if $off}} disabled{{end}}><span class="bs-pat-sw" data-pat="{{.Slug}}" aria-hidden="true"></span><span class="bs-pat-lbl">{{.Label}}</span></label>{{end}}
+      </div>
+    </div>
     <div class="bs-row"><span class="bs-text"><b>Project</b><small>The project this board belongs to.</small></span><span class="bs-value">{{if .ProjectName}}<a href="/projects/{{.Board.ProjectID}}">{{.ProjectName}}</a>{{else}}-{{end}}</span></div>
     <div class="bs-row"><span class="bs-text"><b>Your access</b><small>What you may do on this board.</small></span><span class="bs-value"><span class="boards-badge">{{.Level}}</span></span></div>
   </form>
+  <div class="bs-row bs-row-stack bs-bgimg-sec">
+    <div class="bs-bgimg-head">
+      <span class="bs-text"><b>Background image</b><small>Anchored bottom-left behind the columns at a subtle opacity (PNG, JPEG, GIF or WebP, max 20 MB). Selecting one replaces any pattern.</small></span>
+      {{if and .CanEdit .Board.BackgroundImageID}}<form hx-patch="/ui/boards/{{.Board.ID}}" hx-target="#set-general" hx-swap="outerHTML"><input type="hidden" name="_section" value="general"><input type="hidden" name="backgroundImageId" value=""><button type="submit">Remove image</button></form>{{end}}
+    </div>
+    {{$curImg := deref .Board.BackgroundImageID}}
+    {{if .BackgroundImages}}<div class="bs-bg-imgs" role="group" aria-label="Uploaded board background images">
+      {{range .BackgroundImages}}<div class="bs-bg-img">
+        {{if $.CanEdit}}<form hx-patch="/ui/boards/{{$.Board.ID}}" hx-target="#set-general" hx-swap="outerHTML"><input type="hidden" name="_section" value="general"><input type="hidden" name="backgroundImageId" value="{{.ID}}">
+          <button class="bs-bg-thumb{{if eq .ID $curImg}} is-on{{end}}" aria-label="Use this background image"{{if eq .ID $curImg}} aria-pressed="true"{{end}}><img src="/boards/{{$.Board.ID}}/background-images/{{.ID}}/thumbnail" alt="" loading="lazy" decoding="async"></button></form>
+          <button type="button" class="bs-x" aria-label="Delete background image" title="Delete image" hx-delete="/ui/boards/{{$.Board.ID}}/background-images/{{.ID}}" hx-target="#set-general" hx-swap="outerHTML" hx-confirm="Delete this background image?">&times;</button>
+        {{else}}<span class="bs-bg-thumb{{if eq .ID $curImg}} is-on{{end}}"><img src="/boards/{{$.Board.ID}}/background-images/{{.ID}}/thumbnail" alt="" loading="lazy" decoding="async"></span>{{end}}
+      </div>{{end}}
+    </div>{{else}}<p class="bs-empty-row">No background images uploaded yet.</p>{{end}}
+    {{if .CanEdit}}<form class="bs-add bs-bg-upload" data-cap="board-background-upload" hx-post="/ui/boards/{{.Board.ID}}/background-images" hx-target="#set-general" hx-swap="outerHTML" hx-encoding="multipart/form-data">
+      <input type="hidden" name="apply" value="true">
+      <label class="sr-only" for="bs-bg-file">Background image file</label>
+      <input id="bs-bg-file" type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required>
+      <button class="primary">Upload and use</button>
+    </form>{{end}}
+  </div>
   {{if .CanEdit}}<p class="bs-hint">Changes save automatically.</p>{{end}}
 </section>{{end}}
 
 {{define "boards_set_views"}}{{template "boards_set_views_in" .Data}}{{end}}
-{{define "boards_set_views_in"}}{{$off := not .CanEdit}}<section id="set-views" class="boards-sec bs-panel" data-panel="views" aria-labelledby="set-views-h">
+{{define "boards_set_views_in"}}{{$off := not .CanEdit}}<section id="set-views" class="boards-sec bs-panel{{if eq .Active "views"}} is-active{{end}}" data-panel="views" aria-labelledby="set-views-h">
   <div class="bs-sec-head"><h2 id="set-views-h">Views &amp; cards</h2>{{template "bs_status" .}}</div>
   <form hx-patch="/ui/boards/{{.Board.ID}}" hx-trigger="change" hx-target="#set-views" hx-swap="outerHTML" class="bs-form">
     <input type="hidden" name="_section" value="views">
@@ -70,7 +98,7 @@
 </section>{{end}}
 
 {{define "boards_set_members"}}{{template "boards_set_members_in" .Data}}{{end}}
-{{define "boards_set_members_in"}}<section id="set-members" class="boards-sec bs-panel" data-panel="members" aria-labelledby="set-members-h">
+{{define "boards_set_members_in"}}<section id="set-members" class="boards-sec bs-panel{{if eq .Active "members"}} is-active{{end}}" data-panel="members" aria-labelledby="set-members-h">
   <div class="bs-sec-head"><h2 id="set-members-h">Members &amp; access</h2></div>
   <p class="bs-desc">Owners manage this board: its settings, members and sharing (not the project or its other boards). Editors can change cards, commenters can read and comment, viewers can only read. Group members get access through the group.{{if not .Caps.CanManageMembers}} Ask an owner of this board or a project manager to add people or change roles.{{end}}</p>
   {{if .Caps.CanManageMembers}}<form class="bs-add" data-cap="board-members-add" hx-post="/ui/boards/{{.Board.ID}}/members" hx-target="#set-members" hx-swap="outerHTML">
@@ -97,7 +125,7 @@
 </section>{{end}}
 
 {{define "boards_set_labels"}}{{template "boards_set_labels_in" .Data}}{{end}}
-{{define "boards_set_labels_in"}}<section id="set-labels" class="boards-sec bs-panel" data-panel="labels" aria-labelledby="set-labels-h">
+{{define "boards_set_labels_in"}}<section id="set-labels" class="boards-sec bs-panel{{if eq .Active "labels"}} is-active{{end}}" data-panel="labels" aria-labelledby="set-labels-h">
   <div class="bs-sec-head"><h2 id="set-labels-h">Labels</h2></div>
   <p class="bs-desc">Colour-code cards.{{if .Caps.CanEditLabels}} Drag the handle (or use the arrows) to reorder; rename inline.{{end}}{{if .UseProjectLabels}} This project uses project-wide labels, which only project managers can change.{{else if not .Caps.CanEditLabels}} Editors and owners change labels.{{end}}</p>
   {{$lo := not .Caps.CanEditLabels}}{{if .Caps.CanEditLabels}}<form class="bs-add bs-add-label" data-cap="board-labels-add" hx-post="/ui/boards/{{.Board.ID}}/labels" hx-target="#set-labels" hx-swap="outerHTML">
@@ -108,7 +136,7 @@
     <label class="sr-only" for="bs-newlabel-g">Group</label>
     <select id="bs-newlabel-g" name="groupId"><option value="">No group</option>{{range .LabelGroups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
     <input type="hidden" name="_board" value="{{.Board.ID}}"><button class="primary">Add label</button></form>{{end}}
-  <div class="bs-labels"{{if not $lo}} data-sortable="/ui/boards/{{.Board.ID}}/labels/drop" data-target="#set-labels"{{end}}>
+  <div class="bs-labels"{{if not $lo}} data-sortable="/ui/boards/{{.Board.ID}}/labels/drop" data-target="#set-labels" data-swap="outerHTML"{{end}}>
   {{range .LabelRows}}{{$cur := .Color}}{{$grp := deref .GroupID}}{{if $lo}}<div class="bs-label bs-ro" data-id="{{.ID}}"><span class="bs-swatch" style="background:{{boardsColor .Color}}" role="img" aria-label="Colour: {{.Color}}"></span><span class="bs-ro-name">{{if .Name}}{{deref .Name}}{{else}}<i>Unnamed label</i>{{end}}</span>{{range $.LabelGroups}}{{if eq .ID $grp}}<span class="boards-badge">{{.Name}}</span>{{end}}{{end}}</div>{{else}}<form class="bs-label" data-id="{{.ID}}" hx-patch="/ui/labels/{{.ID}}" hx-trigger="change" hx-target="#set-labels" hx-swap="outerHTML">
     <span class="bs-grip" aria-hidden="true" title="Drag to reorder">&#8942;&#8942;</span>
     <details class="bs-pop"><summary class="bs-swatch" style="background:{{boardsColor .Color}}" aria-label="Colour: {{.Color}}"></summary>
@@ -138,7 +166,7 @@
 </section>{{end}}
 
 {{define "boards_set_filters"}}{{template "boards_set_filters_in" .Data}}{{end}}
-{{define "boards_set_filters_in"}}<section id="set-filters" class="boards-sec bs-panel" data-panel="filters" aria-labelledby="set-filters-h">
+{{define "boards_set_filters_in"}}<section id="set-filters" class="boards-sec bs-panel{{if eq .Active "filters"}} is-active{{end}}" data-panel="filters" aria-labelledby="set-filters-h">
   <div class="bs-sec-head"><h2 id="set-filters-h">Saved filters</h2></div>
   <p class="bs-desc">Reusable searches shown in the board's filter bar. Create one from the filter bar, then rename or edit the query here.</p>
   {{range .Saved}}<form class="bs-group" hx-patch="/ui/filters/{{.ID}}" hx-trigger="change" hx-target="#set-filters" hx-swap="outerHTML">
@@ -150,7 +178,7 @@
 </section>{{end}}
 
 {{define "boards_set_sharing"}}{{template "boards_set_sharing_in" .Data}}{{end}}
-{{define "boards_set_sharing_in"}}<section id="set-sharing" class="boards-sec bs-panel" data-panel="sharing" aria-labelledby="set-sharing-h">
+{{define "boards_set_sharing_in"}}<section id="set-sharing" class="boards-sec bs-panel{{if eq .Active "sharing"}} is-active{{end}}" data-panel="sharing" aria-labelledby="set-sharing-h">
   <div class="bs-sec-head"><h2 id="set-sharing-h">Sharing &amp; public link</h2>{{template "bs_status" .}}</div>
   {{if .Caps.CanShare}}<form class="bs-form" data-cap="board-share" hx-post="/ui/boards/{{.Board.ID}}/public" hx-trigger="change" hx-target="#set-sharing" hx-swap="outerHTML">
     {{template "bs_toggle" dict "ID" "bs-public" "Name" "isPublic" "Title" "Public board" "Help" "Anyone with the link can view this board, read-only, without signing in." "On" .Board.IsPublic "Off" false}}
@@ -164,7 +192,7 @@
 </section>{{end}}
 
 {{define "boards_set_templates"}}{{template "boards_set_templates_in" .Data}}{{end}}
-{{define "boards_set_templates_in"}}<section id="set-templates" class="boards-sec bs-panel" data-panel="templates" aria-labelledby="set-templates-h">
+{{define "boards_set_templates_in"}}<section id="set-templates" class="boards-sec bs-panel{{if eq .Active "templates"}} is-active{{end}}" data-panel="templates" aria-labelledby="set-templates-h">
   <div class="bs-sec-head"><h2 id="set-templates-h">{{if .Caps.CanPublishTemplate}}Templates &amp; export{{else}}Export{{end}}</h2>{{template "bs_status" .}}</div>
   {{if .Caps.CanPublishTemplate}}{{$b := .Board}}{{$groups := .AllGroups}}<form class="bs-form" data-cap="board-template-publish" hx-post="/ui/boards/{{.Board.ID}}/template" hx-trigger="change" hx-target="#set-templates" hx-swap="outerHTML">
     {{template "bs_toggle" dict "ID" "bs-tpl" "Name" "isTemplate" "Title" "Publish as board template" "Help" "Let people start new boards from this one's columns, labels, custom fields and cards. Due dates are kept as days after the moment you publish." "On" .Board.IsTemplate "Off" false}}
@@ -219,7 +247,7 @@
 
 {{/* "Agents": connect AI agents to this board (the "Connect an agent" dialog, shown to everyone who can view the board). */}}
 {{define "boards_set_agents"}}{{template "boards_set_agents_in" .Data}}{{end}}
-{{define "boards_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel" data-panel="agents" aria-labelledby="set-agents-h">
+{{define "boards_set_agents_in"}}<section id="set-agents" class="boards-sec bs-panel{{if eq .Active "agents"}} is-active{{end}}" data-panel="agents" aria-labelledby="set-agents-h">
   <div class="bs-sec-head"><h2 id="set-agents-h">Agents</h2>{{template "bs_status" .}}</div>
   <p class="bs-desc">Connect AI agents to this board. The prompt never contains a key; it uses <code>$WEAVE_TOKEN</code>. A personal key acts with your full role, and an agent needs Edit access to claim cards.{{if .Caps.CanManageAgents}} For unattended work, create a dedicated agent account below: it can only reach the boards you give it.{{else}} For unattended work, an owner of this board (or a project manager) creates a dedicated agent account for it.{{end}}</p>
   <div class="bs-row"><span class="bs-text"><b>Board prompt</b><small>Interviews you about what to attach to (columns, destinations, authority), then listens.</small></span>

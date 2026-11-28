@@ -190,6 +190,49 @@ func registerUI() {
 		pd.PageURL = "/public/" + c.R.PathValue("token")
 		return c.Render("boards_public.html", pd)
 	})
+	web.RoutePublic("GET /public/{token}/background-image", func(c *web.Ctx) error {
+		b, err := publicBoard(c.Env, c.R.PathValue("token"))
+		if err != nil {
+			return err
+		}
+		if b.BackgroundImageID == nil || *b.BackgroundImageID == "" {
+			return ops.NotFound("background image")
+		}
+		st, err := readBoardBackgroundFile(c.Env, b.ID, *b.BackgroundImageID, "original")
+		if err != nil {
+			return err
+		}
+		c.W.Header().Set("Content-Type", st.ContentType)
+		c.W.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = c.W.Write(st.Data)
+		return nil
+	})
+	web.Route("GET /ui/boards/{id}/settings/background", func(c *web.Ctx) error {
+		return renderSection(c, c.R.PathValue("id"), "boards_set_general")
+	})
+	web.Route("POST /ui/boards/{id}/background-images", func(c *web.Ctx) error {
+		if _, err := c.Do("board.background.upload"); err != nil {
+			return err
+		}
+		return renderSectionSaved(c, c.R.PathValue("id"), "boards_set_general")
+	})
+	web.Route("DELETE /ui/boards/{id}/background-images/{imageId}", func(c *web.Ctx) error {
+		if _, err := c.Do("board.background.delete"); err != nil {
+			return err
+		}
+		return renderSectionSaved(c, c.R.PathValue("id"), "boards_set_general")
+	})
+	web.Route("GET /boards/{id}/background-images/{imageId}/{variant}", func(c *web.Ctx) error {
+		out, err := c.Do("board.background.file")
+		if err != nil {
+			return err
+		}
+		st := out.(*ops.Stream)
+		c.W.Header().Set("Content-Type", st.ContentType)
+		c.W.Header().Set("Cache-Control", "private, max-age=86400")
+		_, _ = c.W.Write(st.Data)
+		return nil
+	})
 	web.Route("GET /boards/{id}/settings", func(c *web.Ctx) error {
 		// settings are for members and managers; someone who can only view a public board goes back to the board
 		if id := c.R.PathValue("id"); authz.BoardLevel(c.Env, id) > authz.None && !authz.IsBoardMember(c.Env, id) {
@@ -416,8 +459,9 @@ type SettingsData struct {
 	Active           string // section shown first (?section=)
 	Done             bool   // render the "Saved" confirmation
 	Sections         []SettingsSection
-	AgentCols        []AgentCol // "Agents" section: one row per column with its live listeners
-	Prompt           PromptEdit // "Agents" section: the board prompt text editor (managers)
+	AgentCols        []AgentCol        // "Agents" section: one row per column with its live listeners
+	Prompt           PromptEdit        // "Agents" section: the board prompt text editor (managers)
+	BackgroundImages []BackgroundImage // "General" section: uploaded board background images
 	// Leave board: the caller's own direct membership (board.member.remove allows any member to remove their own),
 	// and whether the last-owner rule refuses it right now (LeaveBlocked, the same check the op runs).
 	MyMemberID   string
@@ -497,6 +541,8 @@ func loadSettings(c *web.Ctx, boardID, section string) (*SettingsData, error) {
 				}
 			}
 		}
+	} else {
+		sd.Active = strings.TrimPrefix(section, "boards_set_")
 	}
 	if full || section == "boards_set_agents" {
 		if caps.CanEditPrompt {
@@ -517,6 +563,11 @@ func loadSettings(c *web.Ctx, boardID, section string) (*SettingsData, error) {
 	}
 	if full || section == "boards_set_general" || section == "boards_set_labels" {
 		_ = c.Env.DB.QueryRowContext(c.R.Context(), `SELECT name,use_project_labels FROM projects WHERE id=?`, d.Board.ProjectID).Scan(&sd.ProjectName, &sd.UseProjectLabels)
+	}
+	if full || section == "boards_set_general" {
+		if imgs, err := ListBoardBackgrounds(c.Env, boardID); err == nil {
+			sd.BackgroundImages = imgs
+		}
 	}
 	if full || section == "boards_set_members" {
 		if caps.CanRemoveSelfMember {

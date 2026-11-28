@@ -33,6 +33,10 @@ weave_auth_terms_accept POST
 weave_auth_terms_get GET readOnly,idempotent
 weave_auth_terms_set PUT idempotent
 weave_auth_whoami GET readOnly,idempotent
+weave_board_background_delete DELETE destructive,idempotent
+weave_board_background_file GET openWorld
+weave_board_background_list GET readOnly,idempotent
+weave_board_background_upload POST openWorld
 weave_board_create POST 
 weave_board_delete DELETE destructive,idempotent
 weave_board_export GET openWorld

@@ -369,6 +369,11 @@ var capRows = []capRow{
 		op: func(w *capWorld, t capTarget) (string, string, any) {
 			return "PATCH", "/boards/" + t.board, map[string]any{"name": ""} // empty name: refused after authz
 		}, okCodes: []int{422}},
+	{name: "board settings: Background upload", target: mainT, page: boardSettings, hook: "board-background-upload", hidden: boardSeen,
+		cap: func(c capSet) bool { return c.board.CanEdit && c.board.CanOpenSettings },
+		op: func(w *capWorld, t capTarget) (string, string, any) {
+			return "PATCH", "/boards/" + t.board, map[string]any{"backgroundPattern": "!"} // invalid pattern: refused after authz (Edit)
+		}, okCodes: []int{422}},
 	{name: "board settings: Add member", target: mainT, page: boardSettings, hook: "board-members-add", hidden: boardSeen,
 		cap: func(c capSet) bool { return c.board.CanManageMembers },
 		op: func(w *capWorld, t capTarget) (string, string, any) {

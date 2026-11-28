@@ -141,8 +141,8 @@ weave inbox [--assigned|--claimed]                # my open cards across boards
 weave list stats --board B [--list L]             # per list: cards, claimed, unclaimed, overdue, closed
 weave board stats --project P [--boardId B]        # per board: open, done, overdue, due soon, claimed, listening, columns; newest activity first
 
-weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label bug --assign me --due 2026-12-01T00:00:00Z
-printf '%s\n' '{"name":"A","labels":["bug"]}' 'plain title' | weave card create --board B --list Backlog --from-stdin   # bulk, NDJSON out
+weave card create --board B --list Backlog --name "Fix login" --desc @spec.md --label Bug --label "Needs info" --assign me --due 2026-12-01T00:00:00Z   # --label takes name or id, repeatable or comma-separated (aliases: --labels, --label-id, --label-ids)
+printf '%s\n' '{"name":"A","labels":["bug"]}' 'plain title' | weave card create --board B --list Backlog --from-stdin   # bulk, NDJSON out (also accepts labelIds)
 weave card show CARD [--full]                     # --full adds comments, checklists, attachments
 weave card move CARD --to-list Review [--position N] [--board B] [--boardId FROM]   # several boards: --board B moves B's placement, --boardId FROM relocates FROM's
 weave card place CARD_ID --board B2 --listId Ready   # put the same card on board B2 too (any project; Edit on the card and on B2)

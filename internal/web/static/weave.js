@@ -237,23 +237,66 @@
   })();
 
   // ---- Sortable: any container with data-sortable="<url>" and children with data-id ----
-  document.addEventListener('dragstart', function (e) {
-    var el = e.target.closest && e.target.closest('[data-sortable] > [data-id]');
-    if (el) { window._drag = el; el.classList.add('dragging'); }
-  });
-  document.addEventListener('dragend', function () { if (window._drag) window._drag.classList.remove('dragging'); window._drag = null; });
-  document.addEventListener('dragover', function (e) { if (window._drag && e.target.closest && e.target.closest('[data-sortable]')) e.preventDefault(); });
-  document.addEventListener('drop', function (e) {
-    var box = e.target.closest && e.target.closest('[data-sortable]'), d = window._drag; if (!box || !d) return;
-    e.preventDefault();
+  function clearDropHints(root) {
+    (root || document).querySelectorAll('.is-drop-before,.is-drop-after').forEach(function (el) {
+      el.classList.remove('is-drop-before', 'is-drop-after');
+    });
+  }
+  function dropSlot(box, d, e) {
     var kids = [].slice.call(box.querySelectorAll(':scope > [data-id]')).filter(function (k) { return k !== d; });
     var idx = kids.findIndex(function (k) {
       var r = k.getBoundingClientRect();
       return box.dataset.axis === 'x' ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2;
     });
     if (idx < 0) idx = kids.length;
+    return { kids: kids, idx: idx };
+  }
+  function sameSortable(box, d) {
+    var from = d && d.parentElement && d.parentElement.closest && d.parentElement.closest('[data-sortable]');
+    return !!(box && from && (from === box || (from.dataset.sortable && from.dataset.sortable === box.dataset.sortable)));
+  }
+  document.addEventListener('dragstart', function (e) {
+    var el = e.target.closest && e.target.closest('[data-sortable] > [data-id]');
+    if (!el) return;
+    window._drag = el;
+    el.classList.add('dragging');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', el.dataset.id || ''); } catch (x) {}
+    }
+  });
+  document.addEventListener('dragend', function () {
+    clearDropHints();
+    if (window._drag) window._drag.classList.remove('dragging');
+    window._drag = null;
+  });
+  document.addEventListener('dragover', function (e) {
+    var box = e.target.closest && e.target.closest('[data-sortable]'), d = window._drag;
+    if (!d || !sameSortable(box, d)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    clearDropHints(box);
+    var slot = dropSlot(box, d, e);
+    if (slot.idx < slot.kids.length) slot.kids[slot.idx].classList.add('is-drop-before');
+    else if (slot.kids.length) slot.kids[slot.kids.length - 1].classList.add('is-drop-after');
+  });
+  document.addEventListener('dragleave', function (e) {
+    var box = e.target.closest && e.target.closest('[data-sortable]');
+    if (box && (!e.relatedTarget || !box.contains(e.relatedTarget))) clearDropHints(box);
+  });
+  document.addEventListener('drop', function (e) {
+    var box = e.target.closest && e.target.closest('[data-sortable]'), d = window._drag;
+    if (!d || !sameSortable(box, d)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearDropHints();
+    d.classList.remove('dragging');
+    window._drag = null;
+    var slot = dropSlot(box, d, e), kids = slot.kids, idx = slot.idx;
     var prev = (kids[idx - 1] && kids[idx - 1].dataset.id) || '', next = (kids[idx] && kids[idx].dataset.id) || '';
-    htmx.ajax('POST', box.dataset.sortable, { target: box.dataset.target || '#main', swap: 'none',
+    // Move the dragged row optimistically so the UI reflects the new order immediately before the server responds.
+    box.insertBefore(d, kids[idx] || null);
+    htmx.ajax('POST', box.dataset.sortable, { source: box, target: box.dataset.target || '#main', swap: box.dataset.swap || 'none',
       values: { id: d.dataset.id, container: box.dataset.container || '', index: idx, afterId: prev, beforeId: next } });
   });
 

@@ -28,7 +28,8 @@ Open cards assigned to me or claimed by me across every board I can see.`,
 	"card renew":   `weave card renew CARD [--ttl 15m]`,
 	"card done":    `weave card done CARD [--note TEXT] [--to-list NAME] [--keep-claim]   comment, move, release.`,
 	"card create": `weave card create --board B --list L --name "Title" [--desc TEXT|@file|-] [--label X]... [--assign USER]... [--due RFC3339] [--position N] [--claim]
-weave card create --board B --list L --from-stdin     one card per stdin line: JSON {"name","description","labels":[],"assign":[],"list","dueDate"} or a bare title`,
+  --label accepts a label name or id (repeatable or comma-separated, e.g. --label Bug --label "Needs info" or --label Bug,Feature; aliases: --labels, --label-id, --label-ids).
+weave card create --board B --list L --from-stdin     one card per stdin line: JSON {"name","description","labels":[],"labelIds":[],"assign":[],"list","dueDate"} or a bare title`,
 	"task add":     `weave task add CARD "text" ["text"...] [--list CHECKLIST] [--assignee USER]`,
 	"task check":   `weave task check TASK_ID...  |  weave task check --card CARD (--n INDEX | --text PREFIX)`,
 	"task uncheck": `weave task uncheck TASK_ID...  |  weave task uncheck --card CARD (--n INDEX | --text PREFIX)`,

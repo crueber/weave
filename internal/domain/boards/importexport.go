@@ -59,9 +59,10 @@ type impCard struct {
 	Values                   []FieldValueDoc
 }
 type impBoard struct {
-	Name          string
-	Color         string // normalised #rrggbb or ""
-	CardColorMode string // pill|fill or ""
+	Name              string
+	Color             string // normalised #rrggbb or ""
+	BackgroundPattern string // validated pattern slug or ""
+	CardColorMode     string // pill|fill or ""
 	AgentPrompt   string // the board's own agent prompt text (normalised), "" = default
 	View          string // default view; "" = the board view (stored as kanban)
 	Flags         impFlags
@@ -316,8 +317,8 @@ func writeImportSettings(ctx context.Context, tx *sql.Tx, boardID string, ib imp
 		mode = CardColorPill
 	}
 	f := ib.Flags
-	_, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,card_color_mode=?,always_display_card_creator=?,
-		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=?,agent_prompt=? WHERE id=?`, nullStr(ib.Color), mode,
+	_, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,background_pattern=?,card_color_mode=?,always_display_card_creator=?,
+		expand_task_lists_by_default=?,show_card_counter=?,show_card_ages=?,has_inbox=?,agent_prompt=? WHERE id=?`, nullStr(ib.Color), nullStr(ib.BackgroundPattern), mode,
 		boolInt(f.AlwaysCreator), boolInt(f.ExpandTasks), boolInt(f.CardCounter), boolInt(f.CardAges), boolInt(f.Inbox), nullStr(ib.AgentPrompt), boardID)
 	return err
 }
@@ -596,6 +597,7 @@ func impFromDoc(d *exportDoc) impBoard {
 	ib.Name = str("name")
 	// Colours from a file are untrusted: anything that does not validate is dropped, never stored.
 	ib.Color, _ = NormalizeColor(str("color"))
+	ib.BackgroundPattern, _ = NormalizePattern(str("backgroundPattern"))
 	if m := str("cardColorMode"); validCardColorMode(m) {
 		ib.CardColorMode = m
 	}
@@ -882,6 +884,9 @@ func buildExport(ctx context.Context, d querier, b Board, opts exportOpts) (*exp
 		"showCardCounter": b.ShowCardCounter, "showCardAges": b.ShowCardAges, "hasInbox": b.HasInbox}}
 	if b.Color != nil {
 		doc.Board["color"] = *b.Color
+	}
+	if b.BackgroundPattern != nil && ValidPattern(*b.BackgroundPattern) {
+		doc.Board["backgroundPattern"] = *b.BackgroundPattern
 	}
 	if b.AgentPrompt != "" {
 		doc.Board["agentPrompt"] = b.AgentPrompt

@@ -912,6 +912,115 @@
   "fields": null
  },
  {
+  "name": "board.background.delete",
+  "tag": "board",
+  "summary": "Delete an uploaded board background image",
+  "method": "DELETE",
+  "path": "/boards/{id}/background-images/{imageId}",
+  "auth": "user",
+  "ui": "DELETE /ui/boards/{id}/background-images/{imageId}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Board id"
+   },
+   {
+    "name": "imageId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Background image id"
+   }
+  ]
+ },
+ {
+  "name": "board.background.file",
+  "tag": "board",
+  "summary": "Download a board background image (variant: original|thumbnail)",
+  "method": "GET",
+  "path": "/boards/{id}/background-images/{imageId}/{variant}",
+  "auth": "user",
+  "ui": "GET /boards/{id}/background-images/{imageId}/{variant}",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Board id"
+   },
+   {
+    "name": "imageId",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Background image id"
+   },
+   {
+    "name": "variant",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "original | thumbnail"
+   }
+  ],
+  "binary": true
+ },
+ {
+  "name": "board.background.list",
+  "tag": "board",
+  "summary": "List uploaded background images of a board",
+  "method": "GET",
+  "path": "/boards/{id}/background-images",
+  "auth": "user",
+  "ui": "GET /ui/boards/{id}/settings/background",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "board id"
+   }
+  ]
+ },
+ {
+  "name": "board.background.upload",
+  "tag": "board",
+  "summary": "Upload a board background image (png, jpeg, gif, webp; thumbnail generated)",
+  "method": "POST",
+  "path": "/boards/{id}/background-images",
+  "auth": "user",
+  "ui": "POST /ui/boards/{id}/background-images",
+  "fields": [
+   {
+    "name": "id",
+    "in": "path",
+    "type": "string",
+    "required": true,
+    "desc": "Board id"
+   },
+   {
+    "name": "file",
+    "in": "file",
+    "type": "file",
+    "required": true,
+    "desc": "Image file (png, jpeg, gif, webp; max 20MB)"
+   },
+   {
+    "name": "apply",
+    "in": "body",
+    "type": "bool",
+    "required": false,
+    "desc": "Also set it as the board's background image"
+   }
+  ],
+  "maxBytes": 22020096
+ },
+ {
   "name": "board.create",
   "tag": "board",
   "summary": "Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)",
@@ -1649,6 +1758,20 @@
     "desc": "board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it"
    },
    {
+    "name": "backgroundPattern",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo); empty string clears it"
+   },
+   {
+    "name": "backgroundImageId",
+    "in": "body",
+    "type": "string",
+    "required": false,
+    "desc": "uploaded board background image id; empty string clears it"
+   },
+   {
     "name": "cardColorMode",
     "in": "body",
     "type": "string",
@@ -1942,6 +2065,13 @@
     "type": "number",
     "required": false,
     "desc": "explicit position; default end of list"
+   },
+   {
+    "name": "labelIds",
+    "in": "body",
+    "type": "array\u003cstring\u003e",
+    "required": false,
+    "desc": "label ids on this board to attach on creation (single-select groups keep the last one)"
    }
   ]
  },

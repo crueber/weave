@@ -11,15 +11,84 @@
 :root[data-theme="dark"]{--tint-board:6%;--tint-list:6%;--tint-fill:24%}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--tint-board:6%;--tint-list:6%;--tint-fill:24%}}
 
-/* ---- board colour: tinted canvas (full-bleed inside <main>) + a 4px accent bar under the filter row (the text header on the public page) ---- */
+/* ---- board background: tinted canvas (full-bleed inside <main>), optional flat pattern or bottom-left image ---- */
+.boards-shell[data-board-bg]{
+  position:relative;
+  isolation:isolate;
+  box-sizing:border-box;
+  margin:calc(-1*var(--shell-pt,var(--space-5))) calc(-1*var(--space-4)) calc(-1*var(--space-5));
+  padding:var(--shell-pt,var(--space-4)) var(--space-4) var(--space-5);
+  min-height:calc(100vh - var(--topbar-h));
+  min-height:calc(100dvh - var(--topbar-h));
+}
+.boards-shell-kanban[data-board-bg]{
+  min-height:0;
+  height:calc(100vh - var(--topbar-h,56px));
+  height:calc(100dvh - var(--topbar-h,56px));
+  padding-bottom:0;
+}
 .boards-shell[data-board-color]{
   background:color-mix(in oklab,var(--board-color) var(--tint-board),var(--bg));
-  margin:calc(-1*var(--shell-pt,var(--space-5))) calc(-1*var(--space-4)) 0;padding:var(--shell-pt,var(--space-4)) var(--space-4) var(--space-5);
-  min-height:calc(100vh - var(--topbar-h));
 }
-@media(max-width:640px){.boards-shell[data-board-color]{margin:calc(-1*var(--shell-pt,var(--space-4))) calc(-1*var(--space-3)) 0;padding:var(--shell-pt,var(--space-3)) var(--space-3) var(--space-3)}}
-.boards-shell:not(.boards-public)[data-board-color] .boards-filterbar{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
+@media(max-width:640px){
+  .boards-shell[data-board-bg]{margin:calc(-1*var(--shell-pt,var(--space-4))) calc(-1*var(--space-3)) calc(-1*var(--space-4));padding:var(--shell-pt,var(--space-3)) var(--space-3) var(--space-3)}
+  .boards-shell-kanban[data-board-bg]{padding-bottom:0}
+}
 .boards-public[data-board-color] .boards-head{padding-bottom:var(--space-3);border-bottom:4px solid var(--board-color)}
+
+/* Background layer: sits behind columns/filters/popovers, never intercepts clicks, anchored to the board viewport below the top bar. */
+.boards-shell[data-board-bg]>:not(.boards-bg){position:relative;z-index:1}
+.boards-bg{position:fixed;top:var(--topbar-h,56px);left:0;right:0;bottom:0;z-index:0;pointer-events:none;overflow:hidden}
+/* Columns sit solidly above any background (opaque --list-bg with a crisp subtle shadow) so cards and headers stay effortless to scan. */
+.boards-shell[data-board-bg] .boards-col{box-shadow:var(--shadow-1)}
+.boards-shell[data-board-bg] .boards-inbox{background:color-mix(in oklab,var(--bg) 82%,transparent)}
+/* Keep list/grid/empty views crisp over patterns and images */
+.boards-shell[data-board-bg] .boards-gridsec>h2,.boards-shell[data-board-bg] .boards-nomatch{background:color-mix(in oklab,var(--bg) 82%,transparent);border-radius:var(--radius-sm);padding:.2rem .5rem;display:inline-block}
+
+/* Pattern layer: flat tile SVG masks tinted by the board colour (or subtle --fg when neutral). Zero gradients. */
+.boards-bg-pat{position:absolute;inset:0;background-color:var(--fg);opacity:.065;-webkit-mask-repeat:repeat;mask-repeat:repeat;-webkit-mask-position:left top;mask-position:left top}
+.boards-shell[data-board-color] .boards-bg-pat{background-color:color-mix(in oklab,var(--board-color) 70%,var(--fg));opacity:.12}
+:root[data-theme="dark"] .boards-bg-pat{opacity:.085}
+:root[data-theme="dark"] .boards-shell[data-board-color] .boards-bg-pat{background-color:color-mix(in oklab,var(--board-color) 65%,var(--fg));opacity:.14}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .boards-bg-pat{opacity:.085}
+  :root:not([data-theme="light"]) .boards-shell[data-board-color] .boards-bg-pat{background-color:color-mix(in oklab,var(--board-color) 65%,var(--fg));opacity:.14}
+}
+[data-board-pattern="fill"] .boards-bg-pat,.bs-pat-sw[data-pat="fill"]::after{-webkit-mask-image:url("/static/patterns/fill.svg");mask-image:url("/static/patterns/fill.svg");-webkit-mask-size:16px 16px;mask-size:16px 16px}
+/* Soft solid fill: gentler than line patterns so a full-canvas colour wash stays calm and never eye-popping. */
+.boards-shell[data-board-pattern="fill"] .boards-bg-pat{background-color:var(--fg);opacity:.04}
+.boards-shell[data-board-color][data-board-pattern="fill"] .boards-bg-pat{background-color:var(--board-color);opacity:.09}
+:root[data-theme="dark"] .boards-shell[data-board-pattern="fill"] .boards-bg-pat{opacity:.05}
+:root[data-theme="dark"] .boards-shell[data-board-color][data-board-pattern="fill"] .boards-bg-pat{background-color:var(--board-color);opacity:.08}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .boards-shell[data-board-pattern="fill"] .boards-bg-pat{opacity:.05}
+  :root:not([data-theme="light"]) .boards-shell[data-board-color][data-board-pattern="fill"] .boards-bg-pat{background-color:var(--board-color);opacity:.08}
+}
+[data-board-pattern="dots"] .boards-bg-pat,.bs-pat-sw[data-pat="dots"]::after{-webkit-mask-image:url("/static/patterns/dots.svg");mask-image:url("/static/patterns/dots.svg");-webkit-mask-size:24px 24px;mask-size:24px 24px}
+[data-board-pattern="grid"] .boards-bg-pat,.bs-pat-sw[data-pat="grid"]::after{-webkit-mask-image:url("/static/patterns/grid.svg");mask-image:url("/static/patterns/grid.svg");-webkit-mask-size:32px 32px;mask-size:32px 32px}
+[data-board-pattern="diagonal"] .boards-bg-pat,.bs-pat-sw[data-pat="diagonal"]::after{-webkit-mask-image:url("/static/patterns/diagonal.svg");mask-image:url("/static/patterns/diagonal.svg");-webkit-mask-size:16px 16px;mask-size:16px 16px}
+[data-board-pattern="crosshatch"] .boards-bg-pat,.bs-pat-sw[data-pat="crosshatch"]::after{-webkit-mask-image:url("/static/patterns/crosshatch.svg");mask-image:url("/static/patterns/crosshatch.svg");-webkit-mask-size:20px 20px;mask-size:20px 20px}
+[data-board-pattern="diamonds"] .boards-bg-pat,.bs-pat-sw[data-pat="diamonds"]::after{-webkit-mask-image:url("/static/patterns/diamonds.svg");mask-image:url("/static/patterns/diamonds.svg");-webkit-mask-size:32px 32px;mask-size:32px 32px}
+[data-board-pattern="hexagons"] .boards-bg-pat,.bs-pat-sw[data-pat="hexagons"]::after{-webkit-mask-image:url("/static/patterns/hexagons.svg");mask-image:url("/static/patterns/hexagons.svg");-webkit-mask-size:28px 48px;mask-size:28px 48px}
+[data-board-pattern="waves"] .boards-bg-pat,.bs-pat-sw[data-pat="waves"]::after{-webkit-mask-image:url("/static/patterns/waves.svg");mask-image:url("/static/patterns/waves.svg");-webkit-mask-size:48px 24px;mask-size:48px 24px}
+[data-board-pattern="topography"] .boards-bg-pat,.bs-pat-sw[data-pat="topography"]::after{-webkit-mask-image:url("/static/patterns/topography.svg");mask-image:url("/static/patterns/topography.svg");-webkit-mask-size:120px 120px;mask-size:120px 120px}
+[data-board-pattern="herringbone"] .boards-bg-pat,.bs-pat-sw[data-pat="herringbone"]::after{-webkit-mask-image:url("/static/patterns/herringbone.svg");mask-image:url("/static/patterns/herringbone.svg");-webkit-mask-size:32px 32px;mask-size:32px 32px}
+[data-board-pattern="isometric"] .boards-bg-pat,.bs-pat-sw[data-pat="isometric"]::after{-webkit-mask-image:url("/static/patterns/isometric.svg");mask-image:url("/static/patterns/isometric.svg");-webkit-mask-size:36px 62px;mask-size:36px 62px}
+[data-board-pattern="arches"] .boards-bg-pat,.bs-pat-sw[data-pat="arches"]::after{-webkit-mask-image:url("/static/patterns/arches.svg");mask-image:url("/static/patterns/arches.svg");-webkit-mask-size:40px 24px;mask-size:40px 24px}
+[data-board-pattern="terrazzo"] .boards-bg-pat,.bs-pat-sw[data-pat="terrazzo"]::after{-webkit-mask-image:url("/static/patterns/terrazzo.svg");mask-image:url("/static/patterns/terrazzo.svg");-webkit-mask-size:96px 96px;mask-size:96px 96px}
+
+/* Background image: left-aligned at the bottom of the window. Wide images scale proportionally to fit; narrow/smaller
+   images stay crisp at natural scale without stretching or tiling, framed cleanly on the board canvas at calm opacity. */
+.boards-bg-img{
+  position:absolute;left:0;bottom:0;display:block;
+  width:auto;height:auto;max-width:100%;max-height:100%;
+  object-fit:contain;object-position:left bottom;
+  border-top-right-radius:var(--radius-lg,10px);
+  box-shadow:0 0 0 1px color-mix(in oklab,var(--fg) 7%,transparent);
+  opacity:.22;
+}
+:root[data-theme="dark"] .boards-bg-img{opacity:.17}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .boards-bg-img{opacity:.17}}
 
 /* ---- column colour: full-colour 3px top bar always; a faint tint of the body in PILL mode only ----
    In FILL mode (data-card-mode="fill") the column body stays neutral: a filled card inside a tinted column would mix two
@@ -75,10 +144,35 @@
 .bcp-hex[aria-invalid=true]{border-color:var(--danger)}
 .bcp-apply{padding:.3rem .65rem;font-size:var(--text-sm)}
 
-/* ---- board settings: appearance + card colouring ---- */
+/* ---- board settings: appearance + pattern & image pickers + card colouring ---- */
 .bs-appearance{flex-direction:column;align-items:stretch;gap:var(--space-3)}
 .bs-appearance .bcp{width:100%}
 .bs-appearance>.bs-text{flex:none}
+.bs-patterns{display:grid;grid-template-columns:repeat(auto-fill,minmax(5.5rem,1fr));gap:.5rem;width:100%}
+.bs-pat{position:relative;display:flex;flex-direction:column;align-items:center;gap:.3rem;cursor:pointer;min-width:0}
+.bs-pat input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.bs-pat-sw{position:relative;display:block;width:100%;height:3rem;border-radius:var(--radius-sm);border:1px solid var(--border-strong);background:var(--bg);overflow:hidden;box-sizing:border-box;transition:border-color var(--dur-fast),box-shadow var(--dur-fast)}
+.bs-patterns[data-board-color] .bs-pat-sw{background:color-mix(in oklab,var(--board-color) var(--tint-board),var(--bg))}
+.bs-pat-sw[data-pat]::after{content:"";position:absolute;inset:0;background-color:var(--fg);opacity:.26;-webkit-mask-repeat:repeat;mask-repeat:repeat;-webkit-mask-position:center;mask-position:center}
+.bs-patterns[data-board-color] .bs-pat-sw[data-pat]::after{background-color:color-mix(in oklab,var(--board-color) 75%,var(--fg));opacity:.34}
+.bs-pat-sw[data-pat="fill"]::after{opacity:.11}
+.bs-patterns[data-board-color] .bs-pat-sw[data-pat="fill"]::after{background-color:var(--board-color);opacity:.2}
+.bs-pat-none .bs-pat-sw::after{content:"";position:absolute;left:50%;margin-left:-1px;top:16%;bottom:16%;width:2px;background:var(--muted);transform:rotate(45deg)}
+.bs-pat-lbl{font-size:var(--text-xs);color:var(--fg-2);text-align:center;line-height:1.2}
+.bs-pat:hover .bs-pat-sw{border-color:var(--fg)}
+.bs-pat input:checked+.bs-pat-sw{border:2px solid var(--accent);box-shadow:0 0 0 2px var(--surface) inset}
+.bs-pat input:checked~.bs-pat-lbl{color:var(--fg);font-weight:600}
+.bs-pat input:focus-visible+.bs-pat-sw{outline:2px solid var(--focus-ring);outline-offset:2px}
+.bs-pat input:disabled+.bs-pat-sw{opacity:.5}
+.bs-bgimg-sec{flex-direction:column;align-items:stretch;gap:var(--space-3)}
+.bs-bgimg-head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;width:100%}
+.bs-bg-imgs{display:flex;flex-wrap:wrap;gap:.6rem}
+.bs-bg-img{position:relative;display:inline-flex;align-items:flex-start}
+.bs-bg-img .bs-x{position:absolute;top:-.35rem;right:-.35rem;width:1.45rem;height:1.45rem;border-radius:50%;background:var(--surface);border:1px solid var(--border-strong);font-size:.95rem;box-shadow:var(--shadow-1)}
+.bs-bg-thumb{display:block;width:6.5rem;height:4.25rem;padding:0;border:2px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-2);overflow:hidden;cursor:pointer}
+.bs-bg-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.bs-bg-thumb.is-on{border-color:var(--accent);box-shadow:0 0 0 2px var(--surface) inset}
+.bs-bg-upload{margin-bottom:0}
 .bs-cardcolor{align-items:flex-start}
 .bs-cardcolor .bs-seg span{text-transform:none}
 .bs-cc-preview{flex:1 1 100%;display:flex;align-items:flex-start;gap:var(--space-3);padding:var(--space-3);border:1px dashed var(--border-strong);border-radius:var(--radius);background:var(--list-bg)}

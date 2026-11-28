@@ -315,7 +315,10 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .bs-empty-row{margin:var(--space-3) 0;color:var(--muted);font-size:var(--text-sm)}
 .bs-labels{display:flex;flex-direction:column;gap:6px}
 .bs-label,.bs-group{display:flex;align-items:center;gap:var(--space-2);padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
-.bs-label.dragging{opacity:.5}.bs-label>input[name=name]{flex:1 1 8rem;min-width:0}.bs-group{margin-bottom:6px}.bs-group>input:first-of-type{flex:1 1 8rem;min-width:0}.bs-group>.bs-mono{flex:2 1 10rem}.bs-mono{font-family:var(--font-mono);font-size:var(--text-sm)}
+.bs-label.dragging{opacity:.5}
+[data-sortable]>[data-id].is-drop-before{box-shadow:0 -2px 0 0 var(--drop-indicator,var(--accent))}
+[data-sortable]>[data-id].is-drop-after{box-shadow:0 2px 0 0 var(--drop-indicator,var(--accent))}
+.bs-label>input[name=name]{flex:1 1 8rem;min-width:0}.bs-group{margin-bottom:6px}.bs-group>input:first-of-type{flex:1 1 8rem;min-width:0}.bs-group>.bs-mono{flex:2 1 10rem}.bs-mono{font-family:var(--font-mono);font-size:var(--text-sm)}
 .bs-label select{flex:0 1 9rem;min-width:0}
 .bs-ro{min-height:2.75rem}.bs-ro-name{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}.bs-ro-name i{color:var(--muted)} /* read-only label and group rows */
 .bs-grip{cursor:grab;color:var(--muted);letter-spacing:-3px;user-select:none;padding:0 4px}

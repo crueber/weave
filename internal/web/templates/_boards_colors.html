@@ -14,3 +14,6 @@
     <button type="button" class="bcp-apply" data-bcp-apply>Use</button>
   </div>{{end}}
 </div>{{end}}
+
+{{/* Fixed, non-interactive board background layer (pattern tile or bottom-left image). Args: PageData. */}}
+{{define "boards_bg"}}{{if .Board.BackgroundImageID}}<div class="boards-bg" aria-hidden="true"><img class="boards-bg-img" src="{{boardsBgImageURL .Board .PageURL}}" alt="" decoding="async"></div>{{else if .Board.BackgroundPattern}}<div class="boards-bg" aria-hidden="true"><div class="boards-bg-pat"></div></div>{{end}}{{end}}

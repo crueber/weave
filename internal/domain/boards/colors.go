@@ -234,12 +234,23 @@ func init() {
 	web.AddFuncs(template.FuncMap{
 		// boardsListAttr: attributes for a column root; empty when the list has no colour.
 		"boardsListAttr": func(c any) template.HTMLAttr { return colorVarAttr("--list-color", "data-colored", c) },
-		// boardsBoardAttr: attributes for the board shell.
+		// boardsBoardAttr: attributes for the board shell (colour, pattern, image).
 		"boardsBoardAttr": func(b Board) template.HTMLAttr {
-			if b.Color == nil {
-				return ""
+			var sb strings.Builder
+			if b.Color != nil {
+				sb.WriteString(string(colorVarAttr("--board-color", "data-board-color", *b.Color)))
 			}
-			return colorVarAttr("--board-color", "data-board-color", *b.Color)
+			hasImg := b.BackgroundImageID != nil && *b.BackgroundImageID != ""
+			hasPat := !hasImg && b.BackgroundPattern != nil && ValidPattern(*b.BackgroundPattern)
+			switch {
+			case hasImg:
+				sb.WriteString(` data-board-bg="image"`)
+			case hasPat:
+				sb.WriteString(` data-board-bg="pattern" data-board-pattern="` + *b.BackgroundPattern + `"`)
+			case b.Color != nil && *b.Color != "":
+				sb.WriteString(` data-board-bg="color"`)
+			}
+			return template.HTMLAttr(sb.String())
 		},
 		// boardsTileFill: attributes for a tile root in fill mode.
 		"boardsTileFill": func(t Tile, p *PageData) template.HTMLAttr {

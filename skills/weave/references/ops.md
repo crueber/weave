@@ -356,6 +356,47 @@ The caller (user, role, isAgent) and every board they can access with their role
 
 ## board
 
+### `weave board background.delete`
+
+Delete an uploaded board background image  
+`DELETE /boards/{id}/background-images/{imageId}` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | Board id |
+| `--imageId` | path | string | yes | Background image id |
+
+### `weave board background.file`
+
+Download a board background image (variant: original|thumbnail)  
+`GET /boards/{id}/background-images/{imageId}/{variant}` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | Board id |
+| `--imageId` | path | string | yes | Background image id |
+| `--variant` | path | string | yes | original \| thumbnail |
+
+### `weave board background.list`
+
+List uploaded background images of a board  
+`GET /boards/{id}/background-images` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | board id |
+
+### `weave board background.upload`
+
+Upload a board background image (png, jpeg, gif, webp; thumbnail generated)  
+`POST /boards/{id}/background-images` (auth: user)
+
+| flag | in | type | required | description |
+|---|---|---|---|---|
+| `--id` | path | string | yes | Board id |
+| `--file` | file | file | yes | Image file (png, jpeg, gif, webp; max 20MB) |
+| `--apply` | body | bool |  | Also set it as the board's background image |
+
 ### `weave board create`
 
 Create a board in a project (project manager; when the project's boardCreation is members, also any project member, who becomes the board's owner)  
@@ -617,6 +658,8 @@ Update board name and settings
 | `--showCardAges` | body | bool |  |  |
 | `--hasInbox` | body | bool |  |  |
 | `--color` | body | string |  | board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it |
+| `--backgroundPattern` | body | string |  | board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo); empty string clears it |
+| `--backgroundImageId` | body | string |  | uploaded board background image id; empty string clears it |
 | `--cardColorMode` | body | string |  | pill (label pills, default) \| fill (the card's first label by label order colours the whole card; colours are never mixed) |
 | `--agentPrompt` | body | string |  | board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default |
 
@@ -707,6 +750,7 @@ Create a card at the end (or given position) of a list
 | `--description` | body | string |  |  |
 | `--dueDate` | body | string |  | RFC3339, YYYY-MM-DD or YYYY-MM-DDTHH:MM |
 | `--position` | body | number |  | explicit position; default end of list |
+| `--labelIds` | body | array<string> |  | label ids on this board to attach on creation (single-select groups keep the last one) |
 
 ### `weave card delete`
 

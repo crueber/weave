@@ -38,12 +38,17 @@ func beforeBoardsDelete(e *ops.Env, tx *sql.Tx, boardIDs []string) (func(), erro
 // once the caller's own events are out. No authz: callers check Manage first.
 func DeleteBoards(e *ops.Env, boardIDs []string, del func(tx *sql.Tx) error) (after func(), err error) {
 	after = func() {}
+	var bgFiles []string
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
+		bgFiles = collectBoardBackgroundFiles(e, tx, boardIDs)
 		a, err := beforeBoardsDelete(e, tx, boardIDs)
 		if err != nil {
 			return err
 		}
-		after = a
+		after = func() {
+			removeBoardBackgroundFiles(bgFiles)
+			a()
+		}
 		if del != nil {
 			return del(tx)
 		}
@@ -65,6 +70,7 @@ func DeleteBoards(e *ops.Env, boardIDs []string, del func(tx *sql.Tx) error) (af
 // Returns the hook's after function to call once the caller's own events are out. No authz: callers check Manage first.
 func DeleteProjectBoards(e *ops.Env, projectID string, del func(tx *sql.Tx) error) (after func(), err error) {
 	after = func() {}
+	var bgFiles []string
 	err = e.DB.Tx(e.Ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(e.Ctx, `SELECT id FROM boards WHERE project_id=?`, projectID)
 		if err != nil {
@@ -85,11 +91,15 @@ func DeleteProjectBoards(e *ops.Env, projectID string, del func(tx *sql.Tx) erro
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		bgFiles = collectBoardBackgroundFiles(e, tx, boardIDs)
 		a, err := beforeBoardsDelete(e, tx, boardIDs)
 		if err != nil {
 			return err
 		}
-		after = a
+		after = func() {
+			removeBoardBackgroundFiles(bgFiles)
+			a()
+		}
 		if del != nil {
 			return del(tx)
 		}

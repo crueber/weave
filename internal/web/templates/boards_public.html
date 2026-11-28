@@ -2,6 +2,7 @@
 {{define "page"}}{{with .Data}}<link rel="stylesheet" href="/static/boards_board.css">
 <link rel="stylesheet" href="/static/boards_colors.css">
 <div class="boards-shell boards-public" id="board-shell"{{boardsBoardAttr .Board}}>
+  {{template "boards_bg" .}}
   <header class="boards-head">
     <h1>{{.Board.Name}}</h1>
     <nav class="boards-views" aria-label="Board views">

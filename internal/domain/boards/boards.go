@@ -28,6 +28,8 @@ type Board struct {
 	IsTemplate               bool    `json:"isTemplate"`
 	HasInbox                 bool    `json:"hasInbox"`
 	Color                    *string `json:"color,omitempty" desc:"custom board colour, #rrggbb"`
+	BackgroundPattern        *string `json:"backgroundPattern,omitempty" desc:"board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo)"`
+	BackgroundImageID        *string `json:"backgroundImageId,omitempty" desc:"uploaded board background image id"`
 	CardColorMode            string  `json:"cardColorMode" desc:"pill (label pills) | fill (first label colours the whole card)"`
 	TemplateVisibility       string  `json:"templateVisibility,omitempty" desc:"published templates only: private (the publisher and people with access to the board) | group | public (every signed-in user)"`
 	TemplateGroupID          *string `json:"templateGroupId,omitempty" desc:"the user group a group-visible template is shared with"`
@@ -37,13 +39,13 @@ type Board struct {
 }
 
 const boardCols = `id,project_id,position,name,default_view,always_display_card_creator,
-	expand_task_lists_by_default,show_card_counter,show_card_ages,is_public,COALESCE(public_token,''),is_template,has_inbox,color,card_color_mode,template_visibility,template_group_id,COALESCE(agent_prompt,''),created_at,updated_at`
+	expand_task_lists_by_default,show_card_counter,show_card_ages,is_public,COALESCE(public_token,''),is_template,has_inbox,color,background_pattern,background_image_id,card_color_mode,template_visibility,template_group_id,COALESCE(agent_prompt,''),created_at,updated_at`
 
 func scanBoard(r interface{ Scan(...any) error }) (Board, error) {
 	var b Board
 	err := r.Scan(&b.ID, &b.ProjectID, &b.Position, &b.Name, &b.DefaultView,
 		&b.AlwaysDisplayCardCreator, &b.ExpandTaskListsByDefault, &b.ShowCardCounter, &b.ShowCardAges, &b.IsPublic, &b.PublicToken,
-		&b.IsTemplate, &b.HasInbox, &b.Color, &b.CardColorMode, &b.TemplateVisibility, &b.TemplateGroupID, &b.AgentPrompt, &b.CreatedAt, &b.UpdatedAt)
+		&b.IsTemplate, &b.HasInbox, &b.Color, &b.BackgroundPattern, &b.BackgroundImageID, &b.CardColorMode, &b.TemplateVisibility, &b.TemplateGroupID, &b.AgentPrompt, &b.CreatedAt, &b.UpdatedAt)
 	if !b.IsTemplate {
 		b.TemplateVisibility, b.TemplateGroupID = "", nil // only published templates have a visibility
 	}
@@ -149,6 +151,8 @@ type BoardUpdateIn struct {
 	ShowCardAges             *bool    `json:"showCardAges"`
 	HasInbox                 *bool    `json:"hasInbox"`
 	Color                    *string  `json:"color" desc:"board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it"`
+	BackgroundPattern        *string  `json:"backgroundPattern" desc:"board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo); empty string clears it"`
+	BackgroundImageID        *string  `json:"backgroundImageId" desc:"uploaded board background image id; empty string clears it"`
 	CardColorMode            *string  `json:"cardColorMode" desc:"pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"`
 	AgentPrompt              *string  `json:"agentPrompt" desc:"board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default"`
 }
@@ -233,6 +237,7 @@ func registerBoardOps() {
 	})
 	registerTemplateOps()
 	registerTemplateApplyOp()
+	registerBoardBackgroundOps()
 }
 
 func publicBoard(e *ops.Env, token string) (Board, error) {
@@ -384,6 +389,38 @@ func boardUpdate(e *ops.Env, in BoardUpdateIn) (Board, error) {
 			add("color", nil)
 		} else {
 			add("color", hex)
+		}
+	}
+	if in.BackgroundPattern != nil {
+		pat, err := NormalizePattern(*in.BackgroundPattern)
+		if err != nil {
+			return Board{}, err
+		}
+		if pat == "" {
+			add("background_pattern", nil)
+		} else {
+			add("background_pattern", pat)
+			if in.BackgroundImageID == nil {
+				add("background_image_id", nil)
+			}
+		}
+	}
+	if in.BackgroundImageID != nil {
+		imgID := strings.TrimSpace(*in.BackgroundImageID)
+		if imgID == "" {
+			add("background_image_id", nil)
+		} else {
+			var n int
+			if err := e.DB.QueryRowContext(e.Ctx, `SELECT COUNT(*) FROM board_background_images WHERE id=? AND board_id=?`, imgID, in.ID).Scan(&n); err != nil {
+				return Board{}, err
+			}
+			if n == 0 {
+				return Board{}, ops.Invalid("background image not found")
+			}
+			add("background_image_id", imgID)
+			if in.BackgroundPattern == nil {
+				add("background_pattern", nil)
+			}
 		}
 	}
 	if in.CardColorMode != nil {

@@ -131,6 +131,34 @@ func TestCRUDAndAuthz(t *testing.T) {
 	}
 }
 
+func TestCardCreateWithLabelIDs(t *testing.T) {
+	f := seed(t)
+	// Valid labels: single-select group keeps the last one (lab-b replaces lab-a), ungrouped lab-x also attached.
+	c := call[Card](t, f.e, "card.create", CreateIn{ListID: f.todo, Name: "Labeled", LabelIDs: []string{f.labelA, "lab-x", f.labelB}})
+	if len(c.LabelIDs) != 2 {
+		t.Fatalf("want 2 labels (lab-b + lab-x), got %v", c.LabelIDs)
+	}
+	has := map[string]bool{}
+	for _, id := range c.LabelIDs {
+		has[id] = true
+	}
+	if !has[f.labelB] || !has["lab-x"] || has[f.labelA] {
+		t.Fatalf("unexpected labels %v", c.LabelIDs)
+	}
+	// Label from another board fails atomically: no orphan card is created.
+	before := call[ListOut](t, f.e, "card.list", ListCardsIn{BoardID: f.board})
+	if _, err := ops.Typed[Card](f.e, "card.create", CreateIn{ListID: f.todo, Name: "Orphan", LabelIDs: []string{f.labelOther}}); err == nil || err.(*ops.Error).Status != 404 {
+		t.Fatalf("other-board label: got %v, want 404", err)
+	}
+	if _, err := ops.Typed[Card](f.e, "card.create", CreateIn{ListID: f.todo, Name: "EmptyLab", LabelIDs: []string{"  "}}); err == nil || err.(*ops.Error).Status != 422 {
+		t.Fatalf("empty labelId: got %v, want 422", err)
+	}
+	after := call[ListOut](t, f.e, "card.list", ListCardsIn{BoardID: f.board})
+	if len(after.Items) != len(before.Items) {
+		t.Fatalf("failed create left orphan card: %d -> %d", len(before.Items), len(after.Items))
+	}
+}
+
 func TestMoveRules(t *testing.T) {
 	f := seed(t)
 	a, b, c := f.card(t, f.todo, "a"), f.card(t, f.todo, "b"), f.card(t, f.todo, "c")

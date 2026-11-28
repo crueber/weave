@@ -233,6 +233,7 @@ func newWorld(t *testing.T) *world {
 	I["basegroup"] = id(e.mk(A, "POST", "/projects/"+I["project"]+"/base-custom-field-groups", map[string]any{"name": "BFG CANARY"}))
 	I["basefield"] = id(e.mk(A, "POST", "/base-custom-field-groups/"+I["basegroup"]+"/custom-fields", map[string]any{"name": "BF CANARY", "type": "text"}))
 	I["image"] = id(e.upload(A, "/projects/"+I["project"]+"/background-images", "bg.png", pngBytes()))
+	I["boardimage"] = id(e.upload(A, "/boards/"+I["board"]+"/background-images", "bbg.png", pngBytes()))
 	h := sha256.Sum256([]byte("sweep-session-token-A"))
 	if _, err := e.d.Exec(`INSERT INTO sessions(id,user_id,token_hash,pending_totp,pending_terms,created_at,expires_at) VALUES(?,?,?,0,0,?,?)`,
 		"sess-A", w.uid["A"], hex.EncodeToString(h[:]), db.Now(), time.Now().Add(24*time.Hour).UTC().Format(time.RFC3339)); err != nil {
@@ -271,6 +272,9 @@ func (w *world) val(o *ops.Op, f ops.Field, caller string) (string, bool) {
 	case "attachmentId":
 		return I["attachment"], true
 	case "imageId":
+		if strings.HasPrefix(o.Name, "board.") {
+			return I["boardimage"], true
+		}
 		return I["image"], true
 	case "managerId":
 		return I["userA"], true
@@ -622,7 +626,7 @@ func TestAuthzSweepOwnerBaseline(t *testing.T) {
 // special bodies, tokens or state); their authorization is covered by the domain tests.
 var ownerUnverified = map[string]bool{
 	"attachment.cover": true, "attachment.create": true, "attachment.thumbnail": true, "auth.oidc.authorize": true, "auth.oidc.callback": true,
-	"board.member.add": true, "card.cover.set": true, "card.delete": true, "card.due.complete": true, "card.recurrence.run": true,
+	"board.background.upload": true, "board.member.add": true, "card.cover.set": true, "card.delete": true, "card.due.complete": true, "card.recurrence.run": true,
 	"card.renew": true, "card.restore": true, "config.logo.get": true, "customfieldgroup.create": true, "customfieldvalue.clear": true,
 	"customfieldvalue.set": true, "label.project.create": true, "list.clear": true, "notification.read": true, "notification_service.test": true,
 	"project.background.upload": true, "project.manager.add": true, "project.manager.remove": true, "time.stop": true,

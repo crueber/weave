@@ -49,12 +49,19 @@ func (a *App) runGeneric(args []string) int {
 func fieldSpecs(o *Op) []FlagSpec {
 	var specs []FlagSpec
 	for _, f := range o.Fields {
-		s := FlagSpec{Name: f.Name, Bool: f.Type == "bool"}
+		s := FlagSpec{Name: f.Name, Bool: f.Type == "bool", Multi: strings.HasPrefix(f.Type, "array")}
 		if kindOfField(f.Name, o.Tag) != "" && f.Name != "id" && strings.HasSuffix(f.Name, "Id") {
 			s.Aliases = append(s.Aliases, strings.TrimSuffix(f.Name, "Id"))
 		}
 		if f.Name == "assigneeUserId" {
 			s.Aliases = append(s.Aliases, "assignee")
+		}
+		if f.Name == "labelIds" {
+			for _, al := range []string{"label", "labels", "label-id"} {
+				if o.Field(al) == nil {
+					s.Aliases = append(s.Aliases, al)
+				}
+			}
 		}
 		for _, al := range fieldAliases[f.Name] {
 			if o.Field(al) == nil {
@@ -136,7 +143,21 @@ func (a *App) cmdOp(o *Op, args []string) int {
 	needBoard := raws["boardId"] != "" || p.Has("board") || (o.Tag == "board" && raws["id"] != "")
 	for _, f := range o.Fields {
 		raw, ok := raws[f.Name]
-		if !ok || f.In == "file" || f.Type != "string" {
+		if !ok || f.In == "file" {
+			continue
+		}
+		if f.Name == "labelIds" && strings.HasPrefix(f.Type, "array") {
+			if items, err := parseLabelArgs(p.All(f.Name)); err == nil {
+				for _, it := range items {
+					if !looksLikeID(it) {
+						needBoard = true
+						break
+					}
+				}
+			}
+			continue
+		}
+		if f.Type != "string" {
 			continue
 		}
 		switch kindOfField(f.Name, o.Tag) {
@@ -187,6 +208,42 @@ func (a *App) cmdOp(o *Op, args []string) int {
 		}
 		if f.In == "file" {
 			vals[f.Name] = raw
+			continue
+		}
+		if f.Name == "labelIds" && strings.HasPrefix(f.Type, "array") {
+			var items []string
+			rawVals := p.All(f.Name)
+			if len(rawVals) == 1 && strings.HasPrefix(strings.TrimSpace(rawVals[0]), "[") {
+				var arr []string
+				if err := json.Unmarshal([]byte(rawVals[0]), &arr); err != nil {
+					return a.failUsage("invalid --labelIds JSON array: " + err.Error())
+				}
+				items = arr
+			} else {
+				var perr error
+				items, perr = parseLabelArgs(rawVals)
+				if perr != nil {
+					return a.fail(perr)
+				}
+			}
+			lsc := sc
+			if lsc.BoardID == "" && looksLikeID(raws["listId"]) {
+				if li, err := a.Item(ctx, "list.get", Params{"id": raws["listId"]}); err == nil {
+					lsc.BoardID = firstStr(li, "boardId")
+				}
+			}
+			resolved := make([]string, 0, len(items))
+			for _, it := range items {
+				if strings.TrimSpace(it) == "" {
+					return a.failUsage("empty --label value (give a label name or id)")
+				}
+				id, err := a.Resolve(ctx, "label", it, lsc)
+				if err != nil {
+					return a.fail(err)
+				}
+				resolved = append(resolved, id)
+			}
+			vals[f.Name] = resolved
 			continue
 		}
 		if kind := kindOfField(f.Name, o.Tag); kind != "" && f.Type == "string" {

@@ -40,6 +40,7 @@ type CreateIn struct {
 	Description string   `json:"description"`
 	DueDate     string   `json:"dueDate" desc:"RFC3339, YYYY-MM-DD or YYYY-MM-DDTHH:MM"`
 	Position    *float64 `json:"position" desc:"explicit position; default end of list"`
+	LabelIDs    []string `json:"labelIds" desc:"label ids on this board to attach on creation (single-select groups keep the last one)"`
 }
 
 type UpdateIn struct {
@@ -293,6 +294,17 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 	if in.Description != "" {
 		desc = in.Description
 	}
+	var labelIDs []string
+	for _, raw := range in.LabelIDs {
+		lid := strings.TrimSpace(raw)
+		if lid == "" {
+			return Card{}, ops.Invalid("labelIds must not contain empty values")
+		}
+		if !labelAllowed(e.Ctx, e.DB, boardID, lid) {
+			return Card{}, ops.NotFound("label")
+		}
+		labelIDs = append(labelIDs, lid)
+	}
 	id := db.NewID()
 	now := db.Now()
 	var landed boards.LandResult
@@ -308,6 +320,20 @@ func cardCreate(e *ops.Env, in CreateIn) (Card, error) {
 		}
 		if landed, err = boards.Landed(e.Ctx, tx, boards.Landing{CardID: id, ListID: in.ListID}); err != nil {
 			return err
+		}
+		for _, lid := range labelIDs {
+			var group sql.NullString
+			var single bool
+			_ = tx.QueryRowContext(e.Ctx, `SELECT l.group_id,COALESCE(g.single_select,0) FROM labels l LEFT JOIN label_groups g ON g.id=l.group_id WHERE l.id=?`, lid).Scan(&group, &single)
+			if group.Valid && single {
+				if _, err := tx.ExecContext(e.Ctx, `DELETE FROM card_labels WHERE card_id=? AND label_id<>? AND label_id IN (SELECT id FROM labels WHERE group_id=?)`,
+					id, lid, group.String); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(e.Ctx, `INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?,?)`, id, lid); err != nil {
+				return err
+			}
 		}
 		autoWatch(e.Ctx, tx, id, e.User.UserID, "subscribe_own_cards") // "Watch cards I create"
 		return nil

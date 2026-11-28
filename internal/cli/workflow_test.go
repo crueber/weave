@@ -11,23 +11,72 @@ import (
 
 func TestCardCreateWithLabelsAssignAndBulk(t *testing.T) {
 	f := newFake(t)
-	f.json("GET /api/v1/boards/{boardId}/labels", map[string]any{"items": []any{map[string]any{"id": "lb1", "name": "bug"}, map[string]any{"id": "lb2", "name": "feature"}}})
+	f.json("GET /api/v1/boards/{boardId}/labels", map[string]any{"items": []any{
+		map[string]any{"id": "lb1", "name": "bug"},
+		map[string]any{"id": "lb2", "name": "feature"},
+		map[string]any{"id": "01a20faba2a50000000c33cc776e1f", "name": "Needs info"},
+	}})
 	f.json("GET /api/v1/users", map[string]any{"items": []any{map[string]any{"id": "u7", "name": "Ada Lovelace", "username": "ada", "email": "ada@x.io"}}})
-	f.json("POST /api/v1/lists/{listId}/cards", map[string]any{"item": map[string]any{"id": "c1", "name": "T"}})
-	f.json("POST /api/v1/cards/{id}/labels", map[string]any{"item": map[string]any{}})
-	f.json("POST /api/v1/cards/{id}/members", map[string]any{"item": map[string]any{}})
+	f.json("POST /api/v1/lists/{listId}/cards", map[string]any{"item": map[string]any{"id": "c1", "name": "T", "labelIds": []any{"lb1"}}})
+	f.json("POST /api/v1/cards/{id}/labels", map[string]any{"item": map[string]any{"id": "c1", "name": "T", "labelIds": []any{"lb1"}}})
+	f.json("POST /api/v1/cards/{id}/members", map[string]any{"item": map[string]any{"id": "c1", "name": "T", "labelIds": []any{"lb1"}, "memberIds": []any{"u7", "u1"}}})
 	code, out, errs := f.run("card", "create", "--board", "Product", "--list", "Ready", "--name", "T", "--desc", "d", "--label", "bug", "--assign", "ada", "--assign", "me")
 	if code != 0 {
 		t.Fatalf("%d %s %s", code, out, errs)
 	}
-	if !strings.Contains(f.body("POST /api/v1/cards/c1/labels"), `"labelId":"lb1"`) {
-		t.Fatalf("labels: %v", f.calls)
+	createBody := f.body("POST /api/v1/lists/l1/cards")
+	if !strings.Contains(createBody, `"labelIds":["lb1"]`) && !strings.Contains(f.body("POST /api/v1/cards/c1/labels"), `"labelId":"lb1"`) {
+		t.Fatalf("labels not sent: create=%s calls=%v", createBody, f.calls)
+	}
+	if !strings.Contains(out, `"lb1"`) || !strings.Contains(out, `"u7"`) {
+		t.Fatalf("stdout missing final labelIds/memberIds: %s", out)
 	}
 	if f.called("POST /api/v1/cards/c1/members") != 2 || !strings.Contains(f.body("POST /api/v1/cards/c1/members"), `"userId":"u1"`) {
 		t.Fatalf("members: %v", f.calls)
 	}
-	// bulk from stdin: NDJSON and bare lines, default list/label applied
-	stdin := `{"name":"One","labels":["feature"],"description":"x"}` + "\nplain title\n"
+	// Repeated --label, comma-separated --label, spaces in name, and label ID
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"repeated", []string{"--label", "bug", "--label", "feature"}, []string{`"lb1"`, `"lb2"`}},
+		{"comma", []string{"--label", "bug,feature"}, []string{`"lb1"`, `"lb2"`}},
+		{"spaces", []string{"--label", "Needs info"}, []string{`"01a20faba2a50000000c33cc776e1f"`}},
+		{"id", []string{"--label", "01a20faba2a50000000c33cc776e1f"}, []string{`"01a20faba2a50000000c33cc776e1f"`}},
+		{"alias-labels", []string{"--labels", "bug,Needs info"}, []string{`"lb1"`, `"01a20faba2a50000000c33cc776e1f"`}},
+	} {
+		f.calls = nil
+		args := append([]string{"card", "create", "--board", "Product", "--list", "Ready", "--name", tc.name}, tc.args...)
+		code, _, errs = f.run(args...)
+		if code != 0 {
+			t.Fatalf("%s: %d %s", tc.name, code, errs)
+		}
+		got := f.body("POST /api/v1/lists/l1/cards") + f.body("POST /api/v1/cards/c1/labels")
+		for _, w := range tc.want {
+			if !strings.Contains(got, w) {
+				t.Fatalf("%s: expected %s in %s", tc.name, w, got)
+			}
+		}
+	}
+	// Unresolvable label fails loudly BEFORE creating the card (zero POSTs to cards)
+	f.calls = nil
+	code, _, errs = f.run("card", "create", "--board", "Product", "--list", "Ready", "--name", "NoOrphan", "--label", "DoesNotExist")
+	if code == 0 || !strings.Contains(errs, "DoesNotExist") {
+		t.Fatalf("unknown label should fail naming it: code=%d errs=%s", code, errs)
+	}
+	if f.called("POST /api/v1/lists/") != 0 {
+		t.Fatalf("unknown label must not create an orphan card: %v", f.calls)
+	}
+	// Empty --label fails loudly instead of silently skipping
+	f.calls = nil
+	code, _, errs = f.run("card", "create", "--board", "Product", "--list", "Ready", "--name", "BlankLab", "--label", "  ")
+	if code != ExitUsage || !strings.Contains(errs, "empty --label") {
+		t.Fatalf("empty label should fail usage: code=%d errs=%s", code, errs)
+	}
+	// bulk from stdin: NDJSON (labels + labelIds) and bare lines, default list/label applied
+	stdin := `{"name":"One","labels":["feature"],"labelIds":["01a20faba2a50000000c33cc776e1f"],"description":"x"}` + "\nplain title\n"
+	f.calls = nil
 	code, out, errs = f.runIn(stdin, "card", "create", "--board", "Product", "--list", "Backlog", "--from-stdin", "--label", "bug")
 	if code != 0 {
 		t.Fatalf("%d %s", code, errs)
@@ -40,7 +89,7 @@ func TestCardCreateWithLabelsAssignAndBulk(t *testing.T) {
 	}
 	// dry run creates nothing beyond reads
 	n := f.called("POST /api/v1/lists/")
-	f.run("card", "create", "--board", "Product", "--list", "Ready", "--name", "Z", "--dry-run")
+	f.run("card", "create", "--board", "Product", "--list", "Ready", "--name", "Z", "--label", "bug", "--dry-run")
 	if f.called("POST /api/v1/lists/") != n {
 		t.Fatal("dry-run sent a POST")
 	}

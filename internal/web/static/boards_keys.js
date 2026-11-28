@@ -11,7 +11,32 @@
   // ---- open a card (links keep working without JS / with ctrl+click) ----
   B.openCard = function (id) { if (window.CardSheet) CardSheet.open(id); else location.href = '/cards/' + id; };
 
-  var hovered = null;
+  var hovered = null, lastPtrX = -1, lastPtrY = -1;
+  function canHoverSelect(e) {
+    if (e.pointerType === 'touch' || e.buttons) return false;
+    if (B.dragging || (B.grab && B.grab.active)) return false;
+    if (W.typing(document.activeElement) || modalOpen() || helpOpen() || popOpen() || W.confirmOpen()) return false;
+    if (document.querySelector('details.boards-menu[open], details.boards-dd[open]')) return false;
+    return true;
+  }
+  function selectHoveredTile(e) {
+    var t = e.target && e.target.closest && e.target.closest('.boards-tile:not(.is-pending)');
+    if (!t) return;
+    hovered = t;
+    // Ignore synthetic pointer/mouse enter fired under a stationary cursor (e.g. while j/k scrolls the column).
+    if (e.clientX === lastPtrX && e.clientY === lastPtrY) return;
+    lastPtrX = e.clientX; lastPtrY = e.clientY;
+    if (!canHoverSelect(e) || t.contains(document.activeElement)) return;
+    var a = t.querySelector('.boards-tile-link');
+    if (a) a.focus({ preventScroll: true });
+  }
+  document.addEventListener('pointerover', selectHoveredTile);
+  document.addEventListener('pointermove', function (e) {
+    if (e.clientX === lastPtrX && e.clientY === lastPtrY) return;
+    var t = e.target && e.target.closest && e.target.closest('.boards-tile:not(.is-pending)');
+    if (!t) { lastPtrX = e.clientX; lastPtrY = e.clientY; return; }
+    selectHoveredTile(e);
+  });
   document.addEventListener('mouseover', function (e) { var t = e.target.closest && e.target.closest('.boards-tile'); if (t) hovered = t; });
   document.addEventListener('mouseout', function (e) { var t = e.target.closest && e.target.closest('.boards-tile'); if (t && !t.contains(e.relatedTarget) && hovered === t) hovered = null; });
 

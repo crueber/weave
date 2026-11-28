@@ -846,13 +846,31 @@ func cmdCardDone(a *App, args []string) int {
 // ---- card create ----
 
 var cardCreateFlags = []FlagSpec{{Name: "list", Aliases: []string{"list-id"}}, {Name: "name"}, {Name: "desc", Aliases: []string{"description"}},
-	{Name: "label", Multi: true}, {Name: "assign", Aliases: []string{"assignee", "member"}, Multi: true}, {Name: "due"},
+	{Name: "label", Aliases: []string{"labels", "label-id", "label-ids"}, Multi: true}, {Name: "assign", Aliases: []string{"assignee", "member"}, Multi: true}, {Name: "due"},
 	{Name: "position"}, {Name: "from-stdin", Bool: true}, {Name: "claim", Bool: true}}
 
 type cardSpec struct {
 	Name, Desc, List, Due string
 	Labels, Assign        []string
 	Position              any
+}
+
+func parseLabelArgs(raw []string) ([]string, error) {
+	var out []string
+	for _, v := range raw {
+		parts := strings.Split(v, ",")
+		anyPart := false
+		for _, s := range parts {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+				anyPart = true
+			}
+		}
+		if !anyPart {
+			return nil, usageErr("empty --label value (give a label name or id)")
+		}
+	}
+	return out, nil
 }
 
 func cmdCardCreate(a *App, args []string) int {
@@ -865,8 +883,12 @@ func cmdCardCreate(a *App, args []string) int {
 	if err != nil {
 		return a.fail(err)
 	}
+	labels, err := parseLabelArgs(p.All("label"))
+	if err != nil {
+		return a.fail(err)
+	}
 	base := cardSpec{Name: p.Str("name"), List: p.Str("list"), Due: p.Str("due"),
-		Labels: splitMulti(p.All("label")), Assign: splitMulti(p.All("assign"))}
+		Labels: labels, Assign: splitMulti(p.All("assign"))}
 	if d := p.Str("desc"); d != "" {
 		if base.Desc, err = a.readValueMaybe(d); err != nil {
 			return a.fail(err)
@@ -875,7 +897,10 @@ func cmdCardCreate(a *App, args []string) int {
 	if p.Has("position") {
 		base.Position = parseValue("number", p.Str("position"))
 	}
-	if len(p.Pos) > 0 && base.Name == "" {
+	if len(p.Pos) > 0 {
+		if base.Name != "" {
+			return a.failUsage("unexpected argument " + strconv.Quote(p.Pos[0]) + " (title already set with --name)")
+		}
 		base.Name = strings.Join(p.Pos, " ")
 	}
 	var specs []cardSpec
@@ -893,7 +918,9 @@ func cmdCardCreate(a *App, args []string) int {
 				Desc2     string   `json:"desc"`
 				List      string   `json:"list"`
 				Due       string   `json:"dueDate"`
+				Label     string   `json:"label"`
 				Labels    []string `json:"labels"`
+				LabelIDs  []string `json:"labelIds"`
 				Assign    []string `json:"assign"`
 				Assignees []string `json:"assignees"`
 				Members   []string `json:"members"`
@@ -923,7 +950,15 @@ func cmdCardCreate(a *App, args []string) int {
 			if in.Position != nil {
 				s.Position = in.Position
 			}
-			s.Labels = append(s.Labels, in.Labels...)
+			if in.Label != "" {
+				s.Labels = append(s.Labels, in.Label)
+			}
+			for _, l := range append(append([]string{}, in.Labels...), in.LabelIDs...) {
+				if strings.TrimSpace(l) == "" {
+					return a.failUsage(fmt.Sprintf("stdin line %d has an empty label", n))
+				}
+				s.Labels = append(s.Labels, strings.TrimSpace(l))
+			}
 			s.Assign = append(append(append(s.Assign, in.Assign...), in.Assignees...), in.Members...)
 			if s.Name == "" {
 				return a.failUsage(fmt.Sprintf("stdin line %d has no name", n))
@@ -970,6 +1005,40 @@ func (a *App) createCard(ctx context.Context, boardID string, s cardSpec, claim 
 	if err != nil {
 		return nil, err
 	}
+	// Resolve labels and assignees BEFORE creating the card so an unknown name fails loudly without
+	// leaving an unlabeled card behind. When --board was omitted and only a list id was given, fetch
+	// the list to learn its board id before resolving label names.
+	needBoardForLabels := false
+	for _, l := range s.Labels {
+		if !looksLikeID(strings.TrimSpace(l)) {
+			needBoardForLabels = true
+			break
+		}
+	}
+	if needBoardForLabels && boardID == "" && lid != "" {
+		if li, err := a.Item(ctx, "list.get", Params{"id": lid}); err == nil {
+			boardID = firstStr(li, "boardId")
+		}
+	}
+	labelIDs := make([]string, 0, len(s.Labels))
+	for _, l := range s.Labels {
+		if strings.TrimSpace(l) == "" {
+			return nil, usageErr("empty --label value (give a label name or id)")
+		}
+		id, err := a.Resolve(ctx, "label", l, Scope{BoardID: boardID})
+		if err != nil {
+			return nil, err
+		}
+		labelIDs = append(labelIDs, id)
+	}
+	assignIDs := make([]string, 0, len(s.Assign))
+	for _, u := range s.Assign {
+		id, err := a.Resolve(ctx, "user", u, Scope{})
+		if err != nil {
+			return nil, err
+		}
+		assignIDs = append(assignIDs, id)
+	}
 	params := Params{"listId": lid, "name": s.Name}
 	if s.Desc != "" {
 		params["description"] = s.Desc
@@ -980,6 +1049,11 @@ func (a *App) createCard(ctx context.Context, boardID string, s cardSpec, claim 
 	if s.Position != nil {
 		params["position"] = s.Position
 	}
+	createOp := a.catalogNow(false).Get("card.create")
+	inlineLabels := len(labelIDs) > 0 && createOp != nil && createOp.Field("labelIds") != nil
+	if inlineLabels {
+		params["labelIds"] = labelIDs
+	}
 	item, err := a.Item(ctx, "card.create", params)
 	if err != nil {
 		return nil, err
@@ -988,22 +1062,24 @@ func (a *App) createCard(ctx context.Context, boardID string, s cardSpec, claim 
 	if a.DryRun {
 		return item, nil
 	}
-	for _, l := range s.Labels {
-		id, err := a.Resolve(ctx, "label", l, Scope{BoardID: boardID, CardID: cid})
-		if err != nil {
-			return item, err
-		}
-		if _, err := a.Do(ctx, "card.label.add", Params{"id": cid, "labelId": id}); err != nil {
-			return item, err
+	if !inlineLabels {
+		for _, id := range labelIDs {
+			r, err := a.Do(ctx, "card.label.add", Params{"id": cid, "labelId": id})
+			if err != nil {
+				return item, err
+			}
+			if it := itemOf(r.JSON()); it != nil && str(it, "id") != "" {
+				item = it
+			}
 		}
 	}
-	for _, u := range s.Assign {
-		id, err := a.Resolve(ctx, "user", u, Scope{})
+	for _, id := range assignIDs {
+		r, err := a.Do(ctx, "card.member.add", Params{"id": cid, "userId": id})
 		if err != nil {
 			return item, err
 		}
-		if _, err := a.Do(ctx, "card.member.add", Params{"id": cid, "userId": id}); err != nil {
-			return item, err
+		if it := itemOf(r.JSON()); it != nil && str(it, "id") != "" {
+			item = it
 		}
 	}
 	if claim {
