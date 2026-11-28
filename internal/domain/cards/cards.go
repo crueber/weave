@@ -28,6 +28,7 @@ type Card struct {
 	IsDueCompleted    *bool    `json:"isDueCompleted"`
 	CommentsTotal     int      `json:"commentsTotal"`
 	IsClosed          bool     `json:"isClosed"`
+	ClosedAt          *string  `json:"closedAt,omitempty"`
 	IsDraft           bool     `json:"isDraft"`
 	IsTemplate        bool     `json:"isTemplate"`
 	Lat               *float64 `json:"lat"`
@@ -79,7 +80,7 @@ type Placement struct {
 // cardCols reads a card with the board, column, position, previous column and column-changed time of ONE placement
 // (alias p, joined by loadCardOn); every other column is the card's own (alias c).
 const cardCols = `c.id,p.board_id,p.list_id,c.creator_user_id,p.prev_list_id,c.cover_attachment_id,p.position,c.name,c.description,c.due_date,c.is_due_completed,
-c.comments_total,c.is_closed,c.is_draft,c.is_template,c.lat,c.lng,c.location_name,c.recurrence,c.share_token,p.list_changed_at,c.created_at,c.updated_at,c.template_project_id,c.claimed_by,c.claimed_until,c.claim_note`
+c.comments_total,c.is_closed,c.closed_at,c.is_draft,c.is_template,c.lat,c.lng,c.location_name,c.recurrence,c.share_token,p.list_changed_at,c.created_at,c.updated_at,c.template_project_id,c.claimed_by,c.claimed_until,c.claim_note`
 
 type querier interface {
 	QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
@@ -102,7 +103,7 @@ func loadCardOn(e *ops.Env, q querier, id, boardID string) (Card, error) {
 	err := q.QueryRowContext(e.Ctx, `SELECT `+cardCols+` FROM cards c JOIN card_placements p ON p.card_id=c.id AND (p.board_id=?2 OR (?2='' AND p.is_home=1))
 		WHERE c.id=?1`, id, boardID).Scan(&c.ID, &c.BoardID, &c.ListID, &c.CreatorUserID,
 		&c.PrevListID, &c.CoverAttachmentID, &c.Position, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.CommentsTotal,
-		&c.IsClosed, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
+		&c.IsClosed, &c.ClosedAt, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.TemplateProjectID, &c.ClaimedBy, &c.ClaimedUntil, &c.ClaimNote)
 	if err == sql.ErrNoRows {
 		return c, ops.NotFound("card")
@@ -177,7 +178,7 @@ func loadCardsOn(e *ops.Env, q querier, boardID string, ids []string) ([]Card, e
 			var byName sql.NullString
 			if err := rows.Scan(&c.ID, &c.BoardID, &c.ListID, &c.CreatorUserID,
 				&c.PrevListID, &c.CoverAttachmentID, &c.Position, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.CommentsTotal,
-				&c.IsClosed, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
+				&c.IsClosed, &c.ClosedAt, &c.IsDraft, &c.IsTemplate, &c.Lat, &c.Lng, &c.LocationName, &c.Recurrence, &c.ShareToken, &c.ListChangedAt,
 				&c.CreatedAt, &c.UpdatedAt, &c.TemplateProjectID, &c.ClaimedBy, &c.ClaimedUntil, &c.ClaimNote, &byName); err != nil {
 				rows.Close()
 				return nil, err

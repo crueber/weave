@@ -60,6 +60,7 @@
     <p class="boards-help-note">On the focused or hovered card, and in an open card.</p><dl>
       <dt><kbd>e</kbd></dt><dd>Quick edit (board)</dd>
       <dt><kbd>L</kbd></dt><dd>Labels</dd>
+      <dt><kbd>m</kbd></dt><dd>Assign members</dd>
       <dt><kbd>d</kbd></dt><dd>Due date</dd>
       <dt><kbd>p</kbd></dt><dd>Location (place)</dd>
       <dt><kbd>s</kbd> <kbd>S</kbd></dt><dd>Start / stop time tracking</dd>
@@ -128,11 +129,11 @@
   {{else}}<p class="boards-kpick-empty">This card is not on any other board you can see.</p>{{end}}
 </div>{{end}}
 
-{{/* Keyboard pickers of the card shortcuts (boards_cardkeys.js, quick.go renderPicker): L labels, d due date, p location.
+{{/* Keyboard pickers of the card shortcuts (boards_cardkeys.js, quick.go renderPicker): L labels, m members, d due date, p location.
    Rendered into #boards-pop next to the tile (a bottom sheet on phones). No hx-* here: the script posts to the existing
-   routes (quick/label, due, location) so it can keep focus and the filter across the re-render. */}}
+   routes (quick/label, quick/member, due, location) so it can keep focus and the filter across the re-render. */}}
 {{define "boards_kpick"}}{{$d := .Data}}{{$t := $d.T}}<div class="boards-quick boards-kpick" role="dialog" tabindex="-1" aria-labelledby="kpick-h-{{$t.ID}}" data-kpick="{{$d.Kind}}" data-card="{{$t.ID}}">
-  <div class="boards-kpick-head"><span class="boards-kpick-h" id="kpick-h-{{$t.ID}}">{{if eq $d.Kind "labels"}}Labels{{else if eq $d.Kind "due"}}Due date{{else}}Location{{end}}</span><span class="boards-kpick-card">{{$t.Name}}</span></div>
+  <div class="boards-kpick-head"><span class="boards-kpick-h" id="kpick-h-{{$t.ID}}">{{if eq $d.Kind "labels"}}Labels{{else if eq $d.Kind "members"}}Assign members{{else if eq $d.Kind "due"}}Due date{{else}}Location{{end}}</span><span class="boards-kpick-card">{{$t.Name}}</span></div>
 {{- if eq $d.Kind "labels"}}
   {{if $d.Labels}}<input type="search" class="boards-kpick-filter" placeholder="Type to filter" aria-label="Filter labels" autocomplete="off" data-kpick-filter>
   <div class="boards-kpick-list" role="group" aria-label="Labels of {{$t.Name}}">
@@ -141,6 +142,14 @@
   </div>
   <p class="boards-kpick-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> &middot; <kbd>Enter</kbd> toggle &middot; <kbd>1</kbd>&ndash;<kbd>9</kbd> &middot; <kbd>Esc</kbd> done</p>
   {{else}}<p class="boards-kpick-empty">This board has no labels yet. Add them in the board settings.</p>{{end}}
+{{- else if eq $d.Kind "members"}}
+  {{if $d.Members}}<input type="search" class="boards-kpick-filter" placeholder="Type to filter" aria-label="Filter members" autocomplete="off" data-kpick-filter>
+  <div class="boards-kpick-list" role="group" aria-label="Members of {{$t.Name}}">
+    {{range $d.Members}}<button type="button" class="boards-qlabel boards-kopt boards-kmem{{if .On}} is-on{{end}}" aria-pressed="{{if .On}}true{{else}}false{{end}}" data-member="{{.ID}}" data-text="{{.Name}}{{if .Username}} @{{.Username}}{{end}}" data-name="{{.Name}}"><kbd class="boards-kn" aria-hidden="true"></kbd><img class="avatar boards-kmem-av" src="/avatars/{{.ID}}" alt=""><span class="boards-kopt-t">{{.Name}}{{if .Username}} <small>@{{.Username}}</small>{{end}}</span>{{if .IsAgent}}<span class="boards-kmem-tag">Agent</span>{{end}}{{if .On}}<span class="boards-qlabel-tick" aria-hidden="true">&#10003;</span>{{end}}</button>{{end}}
+    <p class="boards-kpick-none" hidden>No members match.</p>
+  </div>
+  <p class="boards-kpick-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> &middot; <kbd>Enter</kbd> toggle &middot; <kbd>1</kbd>&ndash;<kbd>9</kbd> &middot; <kbd>Esc</kbd> done</p>
+  {{else}}<p class="boards-kpick-empty">This board has no assignable members yet.</p>{{end}}
 {{- else if eq $d.Kind "due"}}
   <div class="boards-kpick-list" role="group" aria-label="Quick choices">
     <button type="button" class="boards-kopt boards-kdue" data-due-days="0"><kbd class="boards-kn" aria-hidden="true">1</kbd><span class="boards-kopt-t">Today</span><small data-due-when></small></button>

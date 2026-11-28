@@ -1,9 +1,9 @@
 // Card action shortcuts (docs/FEATURES.md "Keyboard shortcuts"). They act on the focused tile (else the hovered one,
 // the same targeting as `e`) and, while the card sheet is open, on the open card:
-//   L labels picker   d due date   p location   s start / S stop time tracking   x close or re-open
+//   L labels picker   m assign members   d due date   p location   s start / S stop time tracking   x close or re-open
 //   A archive (Undo)  Delete / Backspace: move to trash, after a confirmation (Undo); an Inbox draft or a card already
 //   in the trash is deleted permanently, after a confirmation that says so.
-// In the sheet, d / l / L / p open the sheet's own popovers (cards_ui.js); the rest is handled here.
+// In the sheet, d / l / L / m / p open the sheet's own popovers (cards_ui.js); the rest is handled here.
 // Never while typing, while a dialog, picker, menu or the grab mode owns the keyboard, or with Ctrl / Meta / Alt.
 // Viewers get a small "read-only" toast. Every write goes through an existing UI route, which calls the owning op.
 (function () {
@@ -132,11 +132,11 @@
       if (B.setPopTile) B.setPopTile(t);
       p.innerHTML = html; p.hidden = false; p._anchor = t; pick = { id: id, kind: kind };
       if (kind === 'due') fillDue(p);
-      if (kind === 'labels') number(p);
+      if (kind === 'labels' || kind === 'members') number(p);
       place(p);
-      var f = kind === 'labels' ? (p.querySelector('.boards-kopt') || p.querySelector('[data-kpick-filter]'))
+      var f = (kind === 'labels' || kind === 'members') ? (p.querySelector('.boards-kopt') || p.querySelector('[data-kpick-filter]'))
         : kind === 'due' ? p.querySelector('.boards-kopt') : p.querySelector('input[name=locationName]');
-      (f || p.querySelector('.boards-kpick')).focus({ preventScroll: true });   // (a board without labels: the picker itself)
+      (f || p.querySelector('.boards-kpick')).focus({ preventScroll: true });   // (a board without labels/members: the picker itself)
     }).catch(function () { if (B.popSeq && seq !== B.popSeq()) return; B.toast('Could not open the picker', { error: true }); });
   }
   function place(p) {
@@ -150,7 +150,7 @@
     visibleOpts(box).forEach(function (o, i) { var k = o.querySelector('.boards-kn'); if (k) k.textContent = i < 9 ? String(i + 1) : ''; });
     box.querySelectorAll('.boards-kopt[hidden] .boards-kn').forEach(function (k) { k.textContent = ''; });
   }
-  function filterLabels(box) {
+  function filterOpts(box) {
     var f = box.querySelector('[data-kpick-filter]'), q = f ? f.value.trim().toLowerCase() : '';
     var n = 0;
     box.querySelectorAll('.boards-kopt').forEach(function (o) { var hide = !!q && (o.dataset.text || '').toLowerCase().indexOf(q) < 0; o.hidden = hide; if (!hide) n++; });
@@ -168,12 +168,34 @@
       p.innerHTML = r.html;                                   // single-select groups may have dropped a sibling label: re-render
       var nb = p.querySelector('.boards-kpick'); if (!nb) return;
       var nf = nb.querySelector('[data-kpick-filter]'); if (nf) nf.value = q;
-      filterLabels(nb); place(p);
+      filterOpts(nb); place(p);
       if (focusedFilter && nf) nf.focus({ preventScroll: true });
       else { var same = nb.querySelector('.boards-kopt[data-label="' + esc(label) + '"]'); (same || nb.querySelector('.boards-kopt') || nf).focus({ preventScroll: true }); }
       B.announce('Label ' + name + (on ? ' added' : ' removed'));
       refreshTile(id, false);
     });
+  }
+  function toggleMember(box, opt) {
+    var id = box.dataset.card, on = opt.getAttribute('aria-pressed') !== 'true', member = opt.dataset.member, name = (opt.dataset.name || opt.dataset.text || 'member');
+    var f = box.querySelector('[data-kpick-filter]'), q = f ? f.value : '', focusedFilter = document.activeElement === f;
+    opt.disabled = true;
+    B.post('/ui/cards/' + id + '/quick/member', { userId: member, on: on ? '1' : '0', board: B.boardId() }).then(function (r) {
+      var p = pop();
+      if (!r.ok) { opt.disabled = false; B.toast(r.error || 'Could not change the members', { error: true }); return; }
+      if (!p || p.hidden || !pick || pick.id !== id) return;
+      p.innerHTML = r.html;
+      var nb = p.querySelector('.boards-kpick'); if (!nb) return;
+      var nf = nb.querySelector('[data-kpick-filter]'); if (nf) nf.value = q;
+      filterOpts(nb); place(p);
+      if (focusedFilter && nf) nf.focus({ preventScroll: true });
+      else { var same = nb.querySelector('.boards-kopt[data-member="' + esc(member) + '"]'); (same || nb.querySelector('.boards-kopt') || nf).focus({ preventScroll: true }); }
+      B.announce((on ? 'Assigned ' : 'Unassigned ') + name);
+      refreshTile(id, false);
+    });
+  }
+  function toggleOpt(box, opt) {
+    if (box.dataset.kpick === 'members') toggleMember(box, opt);
+    else toggleLabel(box, opt);
   }
   function pad(n) { return String(n).padStart(2, '0'); }
   function dueTarget(btn, cur) {
@@ -216,6 +238,7 @@
     var box = e.target.closest && e.target.closest('#boards-pop .boards-kpick'); if (!box) return;
     var opt = e.target.closest('.boards-kopt');
     if (box.dataset.kpick === 'labels' && opt && opt.dataset.label) { e.preventDefault(); toggleLabel(box, opt); return; }
+    if (box.dataset.kpick === 'members' && opt && opt.dataset.member) { e.preventDefault(); toggleMember(box, opt); return; }
     if (box.dataset.kpick === 'due' && opt) {
       e.preventDefault();
       if (opt.hasAttribute('data-due-clear')) { setDue(box, '', ''); return; }
@@ -232,7 +255,7 @@
     else setPlace(box, { locationName: f.elements.locationName.value, lat: f.elements.lat.value, lng: f.elements.lng.value });
   });
   document.addEventListener('input', function (e) {
-    if (e.target.matches && e.target.matches('#boards-pop [data-kpick-filter]')) filterLabels(e.target.closest('.boards-kpick'));
+    if (e.target.matches && e.target.matches('#boards-pop [data-kpick-filter]')) filterOpts(e.target.closest('.boards-kpick'));
   });
   // keys inside a picker (Esc is handled by boards_keys.js: it closes #boards-pop and puts focus back on the tile)
   document.addEventListener('keydown', function (e) {
@@ -249,16 +272,16 @@
       return;
     }
     if (inField) {
-      if (k === 'Enter' && e.target === filter) { e.preventDefault(); if (opts[0]) toggleLabel(box, opts[0]); }
+      if (k === 'Enter' && e.target === filter) { e.preventDefault(); if (opts[0]) toggleOpt(box, opts[0]); }
       return;
     }
     if ((k === 'Home' || k === 'End') && opts.length) { e.preventDefault(); opts[k === 'Home' ? 0 : opts.length - 1].focus(); return; }
-    if (box.dataset.kpick === 'labels') {
-      if (/^[1-9]$/.test(k)) { e.preventDefault(); var o = opts[+k - 1]; if (o) toggleLabel(box, o); return; }
+    if (box.dataset.kpick === 'labels' || box.dataset.kpick === 'members') {
+      if (/^[1-9]$/.test(k)) { e.preventDefault(); var o = opts[+k - 1]; if (o) toggleOpt(box, o); return; }
       if (filter && (k === 'Backspace' || (k.length === 1 && k !== ' '))) {   // typing on an option goes to the filter
         e.preventDefault();
         filter.value = k === 'Backspace' ? filter.value.slice(0, -1) : filter.value + k;
-        filter.focus(); filterLabels(box);
+        filter.focus(); filterOpts(box);
       }
       return;
     }
@@ -339,13 +362,13 @@
   }
 
   // ---------------------------------------------------------------- the key handler ----
-  var KEYS = { L: 1, d: 1, p: 1, s: 1, S: 1, x: 1, A: 1, Delete: 1, Backspace: 1 };
+  var KEYS = { L: 1, m: 1, d: 1, p: 1, s: 1, S: 1, x: 1, A: 1, Delete: 1, Backspace: 1 };
   document.addEventListener('keydown', function (e) {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || !KEYS[e.key]) return;
     if (W.typing(e.target) || confirmOpen()) return;
     var cm = sheet();
     if (cm) {
-      if (sheetBusy(cm) || e.key === 'L' || e.key === 'd' || e.key === 'p') return;   // the sheet's own popovers (cards_ui.js)
+      if (sheetBusy(cm) || e.key === 'L' || e.key === 'm' || e.key === 'd' || e.key === 'p') return;   // the sheet's own popovers (cards_ui.js)
       var tag = e.target && e.target.tagName; if (tag === 'SUMMARY' && e.key === ' ') return;
       if (!cm.dataset.canEdit) { readOnly(); e.preventDefault(); return; }
       if (sheetKey(cm, e)) e.preventDefault();
@@ -364,6 +387,7 @@
     if (e.repeat && (k === 'Delete' || k === 'Backspace' || k === 'A' || k === 'x')) return;
     switch (k) {
       case 'L': openPicker(t, 'labels'); break;
+      case 'm': openPicker(t, 'members'); break;
       case 'd': openPicker(t, 'due'); break;
       case 'p': openPicker(t, 'place'); break;
       case 's': case 'S':

@@ -23,7 +23,7 @@
    "name": "Sprint board",
    "defaultView": "kanban",
    "color": "indigo",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

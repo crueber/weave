@@ -15,8 +15,8 @@
       {{range $d.Weekdays}}<div class="cards-cal-dow" role="columnheader">{{.}}</div>{{end}}
       {{range $d.Days}}<div class="cards-cal-cell {{if not .InMonth}}cards-cal-out{{end}} {{if .Today}}cards-cal-today{{end}}" data-date="{{.Date}}" role="gridcell">
         <span class="cards-cal-num">{{.Num}}</span>
-        {{range .Cards}}<a class="cards-cal-chip {{if .IsDueCompleted}}cards-due-done{{end}}{{if .IsClosed}} is-closed{{end}}" draggable="true" data-card="{{.ID}}" href="/cards/{{.ID}}?board={{$d.BoardID}}"
-          hx-get="/ui/cards/{{.ID}}?board={{$d.BoardID}}" hx-target="#modal" hx-swap="innerHTML" hx-trigger="click" title="{{if .IsClosed}}Closed: {{end}}{{.Name}} — {{cards_when .DueDate}}">{{if .IsClosed}}{{template "closed_mark" true}}{{end}}{{range .Colors}}<i class="cards-dot cards-color-{{.}}"></i>{{end}}{{.Name}}</a>{{end}}
+        {{range .Cards}}<a class="cards-cal-chip {{if .IsDueCompleted}}cards-due-done{{end}}{{if .IsClosed}} is-closed{{end}}{{if .IsArchived}} is-archived{{end}}" draggable="{{if or .IsClosed .IsArchived}}false{{else}}true{{end}}" data-card="{{.ID}}" href="/cards/{{.ID}}?board={{$d.BoardID}}"
+          hx-get="/ui/cards/{{.ID}}?board={{$d.BoardID}}" hx-target="#modal" hx-swap="innerHTML" hx-trigger="click" title="{{if .IsArchived}}Archived · {{end}}{{if .IsClosed}}Closed: {{.Name}} — closed {{cards_when .ClosedAt}}{{else}}{{.Name}} — {{cards_when .DueDate}}{{end}}">{{if .IsArchived}}<span class="sr-only">Archived: </span>{{end}}{{if .IsClosed}}{{template "closed_mark" true}}{{end}}{{range .Colors}}<i class="cards-dot cards-color-{{.}}"></i>{{end}}{{.Name}}</a>{{end}}
       </div>{{end}}
     </div>
     <aside class="cards-cal-unsched"><h3>No due date</h3><p class="cards-muted">Drag a card onto a day to schedule it.</p>

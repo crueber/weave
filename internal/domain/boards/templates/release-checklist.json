@@ -23,7 +23,7 @@
    "name": "Release checklist",
    "defaultView": "kanban",
    "color": "slate",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

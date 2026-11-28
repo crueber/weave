@@ -514,7 +514,8 @@ func uiCalendar(c *web.Ctx) error {
 	to, _ := time.Parse("2006-01-02", out.To)
 	byDay := map[string][]CalendarCard{}
 	for _, cd := range out.Cards {
-		byDay[strings.SplitN(cd.DueDate, "T", 2)[0]] = append(byDay[strings.SplitN(cd.DueDate, "T", 2)[0]], cd)
+		day := strings.SplitN(cd.CalendarDate, "T", 2)[0]
+		byDay[day] = append(byDay[day], cd)
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 	var days []calDay

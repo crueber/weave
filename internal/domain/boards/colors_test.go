@@ -32,16 +32,16 @@ func TestColorValidation(t *testing.T) {
 func TestBoardColorOps(t *testing.T) {
 	e := fixture(t)
 	b := newBoard(t, e, "Colours")
-	if b.Color != nil || b.CardColorMode != "pill" {
+	if b.Color != nil || b.CardColorMode != "fill" {
 		t.Fatalf("defaults: %+v", b)
 	}
-	b = call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("#ABCDEF"), CardColorMode: sp("fill")})
-	if b.Color == nil || *b.Color != "#abcdef" || b.CardColorMode != "fill" {
+	b = call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("#ABCDEF"), CardColorMode: sp("pill")})
+	if b.Color == nil || *b.Color != "#abcdef" || b.CardColorMode != "pill" {
 		t.Fatalf("update: %+v", b)
 	}
-	b = call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("teal")})
-	if *b.Color != "#1fa1a1" {
-		t.Fatalf("preset must resolve to hex, got %s", *b.Color)
+	b = call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("teal"), CardColorMode: sp("fill")})
+	if *b.Color != "#1fa1a1" || b.CardColorMode != "fill" {
+		t.Fatalf("preset must resolve to hex, got %s %s", *b.Color, b.CardColorMode)
 	}
 	for _, bad := range []string{"red;background:url(x)", "#12", "javascript:1"} {
 		mustFail(t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp(bad)}, "validation")
@@ -92,14 +92,14 @@ func TestColorsInSchemaAndExport(t *testing.T) {
 
 	e := fixture(t)
 	b := newBoard(t, e, "Export me")
-	call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("pink"), CardColorMode: sp("fill")})
+	call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, Color: sp("pink"), CardColorMode: sp("pill")})
 	call[boards.List](t, e, "list.create", boards.ListCreateIn{BoardID: b.ID, Name: "Col", Color: "#010203"})
 	st := call[*ops.Stream](t, e, "board.export", boards.ExportIn{ID: b.ID})
-	if !strings.Contains(string(st.Data), `"color": "#d6579a"`) || !strings.Contains(string(st.Data), `"cardColorMode": "fill"`) {
+	if !strings.Contains(string(st.Data), `"color": "#d6579a"`) || !strings.Contains(string(st.Data), `"cardColorMode": "pill"`) {
 		t.Fatalf("export lacks board colour/mode: %s", st.Data)
 	}
 	b2 := call[boards.Board](t, e, "board.import", &boards.ImportIn{ProjectID: "p2", Format: "planka", Data: string(st.Data), Name: "Copy"})
-	if b2.Color == nil || *b2.Color != "#d6579a" || b2.CardColorMode != "fill" {
+	if b2.Color == nil || *b2.Color != "#d6579a" || b2.CardColorMode != "pill" {
 		t.Fatalf("import lost colours: %+v", b2)
 	}
 	d2 := call[boards.BoardDetail](t, e, "board.get", boards.BoardGetIn{ID: b2.ID})
@@ -116,7 +116,7 @@ func TestColorsInSchemaAndExport(t *testing.T) {
 	// hostile import values are dropped, never stored
 	evil := `{"format":"weave-board","version":1,"board":{"name":"Evil","color":"red;background:url(x)","cardColorMode":"zzz"},"lists":[{"id":"l","name":"A","type":"active","color":"x;y:z","position":1}],"cards":[]}`
 	b3 := call[boards.Board](t, e, "board.import", &boards.ImportIn{ProjectID: "p2", Format: "planka", Data: evil})
-	if b3.Color != nil || b3.CardColorMode != "pill" {
+	if b3.Color != nil || b3.CardColorMode != "fill" {
 		t.Fatalf("hostile import stored colours: %+v", b3)
 	}
 	d3 := call[boards.BoardDetail](t, e, "board.get", boards.BoardGetIn{ID: b3.ID})
@@ -129,7 +129,7 @@ func TestColorsInSchemaAndExport(t *testing.T) {
 	// templates carry colours
 	call[boards.Board](t, e, "board.template.publish", boards.TemplatePublishIn{ID: b.ID, IsTemplate: true})
 	nb := call[boards.Board](t, e, "board.instantiate", boards.InstantiateIn{ProjectID: "p2", TemplateID: b.ID, Name: "From tpl"})
-	if nb.Color == nil || *nb.Color != "#d6579a" || nb.CardColorMode != "fill" {
+	if nb.Color == nil || *nb.Color != "#d6579a" || nb.CardColorMode != "pill" {
 		t.Fatalf("instantiate lost colours: %+v", nb)
 	}
 	dn := call[boards.BoardDetail](t, e, "board.get", boards.BoardGetIn{ID: nb.ID})
@@ -235,7 +235,8 @@ func TestColorRendering(t *testing.T) {
 		t.Error("old colour select must be gone")
 	}
 
-	// pill mode (default): no fill attributes, pills as before
+	// pill mode: no fill attributes, pills as before
+	call[boards.Board](t, e, "board.update", boards.BoardUpdateIn{ID: b.ID, CardColorMode: sp("pill")})
 	_, body := get(t, m, "/ui/boards/"+b.ID+"/body", true)
 	if strings.Contains(body, "data-card-fill") || strings.Contains(body, "--card-color") {
 		t.Fatal("pill mode must not emit fill attributes")

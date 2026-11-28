@@ -23,7 +23,7 @@
    "name": "Hiring pipeline",
    "defaultView": "kanban",
    "color": "violet",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

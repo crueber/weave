@@ -24,6 +24,9 @@ func TestCardShortcutRoutes(t *testing.T) {
 	if code, body := get(t, m, "/ui/cards/k1/quick/labels", true); code != 200 || !strings.Contains(body, `data-kpick="labels"`) || !strings.Contains(body, `data-label="`+lab.ID+`"`) || !strings.Contains(body, `aria-pressed="false"`) {
 		t.Fatalf("labels picker: %d %s", code, body)
 	}
+	if code, body := get(t, m, "/ui/cards/k1/quick/members", true); code != 200 || !strings.Contains(body, `data-kpick="members"`) || !strings.Contains(body, `data-member="`+viewer.UserID+`"`) || !strings.Contains(body, `aria-pressed="false"`) {
+		t.Fatalf("members picker: %d %s", code, body)
+	}
 	if code, body := get(t, m, "/ui/cards/k1/quick/due", true); code != 200 || !strings.Contains(body, `value="2030-01-15T09:30"`) || !strings.Contains(body, "data-due-clear") {
 		t.Fatalf("due picker: %d %s", code, body)
 	}
@@ -34,6 +37,24 @@ func TestCardShortcutRoutes(t *testing.T) {
 	w := post(m, "/ui/cards/k1/quick/label", url.Values{"labelId": {lab.ID}, "on": {"1"}, "_part": {"labels"}}, true)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `data-kpick="labels"`) || !strings.Contains(w.Body.String(), `aria-pressed="true"`) || strings.Contains(w.Body.String(), "data-quick-name") {
 		t.Fatalf("picker label toggle: %d %s", w.Code, w.Body.String())
+	}
+	// toggling a member from the picker assigns/unassigns and re-renders the members picker
+	w = post(m, "/ui/cards/k1/quick/member", url.Values{"userId": {viewer.UserID}, "on": {"1"}}, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `data-kpick="members"`) || !strings.Contains(w.Body.String(), `aria-pressed="true"`) {
+		t.Fatalf("picker member assign: %d %s", w.Code, w.Body.String())
+	}
+	var assigned int
+	_ = e.DB.QueryRow(`SELECT COUNT(*) FROM card_memberships WHERE card_id='k1' AND user_id=?`, viewer.UserID).Scan(&assigned)
+	if assigned != 1 {
+		t.Fatalf("expected member assigned, count=%d", assigned)
+	}
+	w = post(m, "/ui/cards/k1/quick/member", url.Values{"userId": {viewer.UserID}, "on": {"0"}}, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `data-kpick="members"`) || strings.Contains(w.Body.String(), `aria-pressed="true"`) {
+		t.Fatalf("picker member unassign: %d %s", w.Code, w.Body.String())
+	}
+	_ = e.DB.QueryRow(`SELECT COUNT(*) FROM card_memberships WHERE card_id='k1' AND user_id=?`, viewer.UserID).Scan(&assigned)
+	if assigned != 0 {
+		t.Fatalf("expected member unassigned, count=%d", assigned)
 	}
 	// due date and location from the pickers answer 204 (the board refreshes the tile itself)
 	if w = post(m, "/ui/cards/k1/due", url.Values{"dueDate": {"2031-02-03T17:00"}, "_part": {"none"}}, true); w.Code != 204 {
@@ -74,7 +95,7 @@ func TestCardShortcutRoutes(t *testing.T) {
 
 	// viewers: no pickers, no writes
 	vm := mux(testutil.As(e, viewer))
-	for _, k := range []string{"labels", "due", "place"} {
+	for _, k := range []string{"labels", "members", "due", "place"} {
 		if code, _ := get(t, vm, "/ui/cards/k1/quick/"+k, true); code != 403 && code != 404 {
 			t.Errorf("viewer picker %s: %d", k, code)
 		}
@@ -83,6 +104,7 @@ func TestCardShortcutRoutes(t *testing.T) {
 		"/ui/cards/k1/quick/archive": {"trash": {"1"}}, "/ui/cards/k1/close": {"closed": {"true"}, "_part": {"none"}},
 		"/ui/cards/k1/due": {"dueDate": {""}, "_part": {"none"}}, "/ui/cards/k1/location": {"clear": {"true"}, "_part": {"none"}},
 		"/ui/cards/k1/time/start": {}, "/ui/cards/k1/quick/label": {"labelId": {lab.ID}, "on": {"0"}, "_part": {"labels"}},
+		"/ui/cards/k1/quick/member": {"userId": {viewer.UserID}, "on": {"1"}},
 	} {
 		if w := post(vm, path, vals, true); w.Code != 403 && w.Code != 404 {
 			t.Errorf("viewer POST %s: %d", path, w.Code)

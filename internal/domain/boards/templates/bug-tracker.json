@@ -23,7 +23,7 @@
    "name": "Bug tracker",
    "defaultView": "kanban",
    "color": "crimson",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

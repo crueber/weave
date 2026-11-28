@@ -425,6 +425,8 @@ label.chk{flex-direction:row;display:inline-flex;gap:.4rem;align-items:center}
 .boards-kopt-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .boards-kopt small{color:var(--muted,#6b7280);font-size:var(--text-xs,.75rem);white-space:nowrap}
 .boards-kopt .boards-qlabel-tick{margin-left:0}
+.boards-kmem-av{width:1.3rem;height:1.3rem;border-radius:var(--radius-pill,999px);object-fit:cover;flex:none}
+.boards-kmem-tag{flex:none;font-size:var(--text-xs,.75rem);color:var(--fg-2,#3f3f46);background:var(--surface-2,#f4f4f5);border:1px solid var(--border,#d4d4d8);border-radius:var(--radius-pill,999px);padding:0 .35rem;line-height:1.3}
 .boards-kdue.is-clear{color:var(--danger,#c9372c)}
 .boards-kn{flex:none;min-width:1.2rem;text-align:center;font:inherit;font-family:var(--font-mono,monospace);font-size:var(--text-xs,.75rem);color:var(--fg-2,#3f3f46);padding:0 .25rem;border:1px solid var(--border-strong,#a1a1aa);border-bottom-width:2px;border-radius:var(--radius-sm,4px);background:var(--surface-2,#f4f4f5);line-height:1.35}
 .boards-kn:empty{visibility:hidden}

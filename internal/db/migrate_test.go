@@ -215,6 +215,53 @@ func TestClosedColumnBackfill(t *testing.T) {
 	}
 }
 
+// 0405: existing closed cards are backfilled with closed_at, open cards stay NULL, and triggers keep closed_at in sync.
+func TestCardClosedAtMigration(t *testing.T) {
+	d := openWithout(t, map[string]bool{"0405_card_closed_at.sql": true})
+	created := "2025-01-10T08:00:00Z"
+	changed := "2025-02-11T09:00:00Z"
+	updated := "2025-03-12T10:00:00Z"
+	for _, q := range []string{
+		`INSERT INTO projects(id,name,created_at) VALUES('p1','Proj','` + created + `')`,
+		`INSERT INTO boards(id,project_id,position,name,created_at) VALUES('b1','p1',1,'B','` + created + `')`,
+		`INSERT INTO lists(id,board_id,type,position,name,created_at) VALUES('la','b1','active',1,'Todo','` + created + `'),('lc','b1','closed',2,'Done','` + created + `')`,
+		`INSERT INTO cards(id,board_id,list_id,position,name,is_closed,is_draft,is_template,list_changed_at,created_at,updated_at) VALUES
+			('c-open','b1','la',1,'Open',0,0,0,'` + changed + `','` + created + `','` + updated + `'),
+			('c-closed-upd','b1','lc',1,'Closed with updated',1,0,0,'` + changed + `','` + created + `','` + updated + `'),
+			('c-closed-chg','b1','lc',2,'Closed no updated',1,0,0,'` + changed + `','` + created + `',NULL)`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	if err := d.migrate(); err != nil {
+		t.Fatalf("upgrade 0405: %v", err)
+	}
+	var got sql.NullString
+	if err := d.QueryRow(`SELECT closed_at FROM cards WHERE id='c-open'`).Scan(&got); err != nil || got.Valid {
+		t.Fatalf("open card closed_at=%v (valid=%v), want NULL (err=%v)", got.String, got.Valid, err)
+	}
+	if err := d.QueryRow(`SELECT closed_at FROM cards WHERE id='c-closed-upd'`).Scan(&got); err != nil || !got.Valid || got.String != updated {
+		t.Fatalf("closed with updated: closed_at=%q want %q (err=%v)", got.String, updated, err)
+	}
+	if err := d.QueryRow(`SELECT closed_at FROM cards WHERE id='c-closed-chg'`).Scan(&got); err != nil || !got.Valid || got.String != changed {
+		t.Fatalf("closed no updated: closed_at=%q want %q (err=%v)", got.String, changed, err)
+	}
+	// triggers fill closed_at on raw is_closed=1 and clear it on is_closed=0
+	if _, err := d.Exec(`UPDATE cards SET is_closed=1 WHERE id='c-open'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT closed_at FROM cards WHERE id='c-open'`).Scan(&got); err != nil || !got.Valid || got.String == "" {
+		t.Fatalf("trigger did not populate closed_at on close: %v %v", got, err)
+	}
+	if _, err := d.Exec(`UPDATE cards SET is_closed=0 WHERE id='c-open'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT closed_at FROM cards WHERE id='c-open'`).Scan(&got); err != nil || got.Valid {
+		t.Fatalf("trigger did not clear closed_at on reopen: %v %v", got, err)
+	}
+}
+
 // openWithout builds a database with every migration applied except skip (the state of an existing install).
 func openWithout(t *testing.T, skip map[string]bool) *DB {
 	t.Helper()

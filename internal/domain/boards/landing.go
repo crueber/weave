@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+
+	"github.com/crueber/weave/internal/db"
 )
 
 // Landing is one card arriving in one column. Every path that puts a card into a column (create, move, drop,
@@ -176,18 +178,29 @@ func land(ctx context.Context, tx *sql.Tx, o landOpts, lands ...Landing) (LandRe
 
 // closeLanded writes the closed state want on the landed cards of one column (only rows whose value differs).
 func closeLanded(ctx context.Context, tx *sql.Tx, listID string, want bool, ids []string, res *LandResult) error {
+	now := db.Now()
 	for len(ids) > 0 {
 		n := min(len(ids), landChunk)
 		chunk := ids[:n]
 		ids = ids[n:]
-		args := make([]any, 0, n+3)
-		args = append(args, want, listID, want)
+		var q string
+		var args []any
+		if want {
+			args = make([]any, 0, n+2)
+			args = append(args, now, listID)
+			q = `UPDATE cards SET is_closed=1, closed_at=COALESCE(closed_at,?) WHERE id IN (SELECT card_id FROM card_placements WHERE list_id=?) AND is_draft=0 AND is_template=0 AND is_closed=0
+				AND id IN (?` + strings.Repeat(",?", n-1) + `) RETURNING id`
+		} else {
+			args = make([]any, 0, n+1)
+			args = append(args, listID)
+			q = `UPDATE cards SET is_closed=0, closed_at=NULL WHERE id IN (SELECT card_id FROM card_placements WHERE list_id=?) AND is_draft=0 AND is_template=0 AND is_closed=1
+				AND id IN (?` + strings.Repeat(",?", n-1) + `) RETURNING id`
+		}
 		for _, id := range chunk {
 			args = append(args, id)
 		}
 		// closed is per CARD: a card placed in this column (whichever board is its home) takes the column's rule
-		rows, err := tx.QueryContext(ctx, `UPDATE cards SET is_closed=? WHERE id IN (SELECT card_id FROM card_placements WHERE list_id=?) AND is_draft=0 AND is_template=0 AND is_closed<>?
-				AND id IN (?`+strings.Repeat(",?", n-1)+`) RETURNING id`, args...)
+		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
 			return err
 		}

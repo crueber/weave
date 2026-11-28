@@ -49,8 +49,9 @@ type impCard struct {
 	Key                      string // id inside the document; custom-field values are addressed by it
 	ListKey, Name, Desc, Due string
 	DueDone                  bool
-	Closed                   bool // closed in the file; a card landing in a closed-type column is closed regardless
-	DueOffsetDays            *int // relative due date (days from the moment the board is created); wins over Due
+	Closed                   bool   // closed in the file; a card landing in a closed-type column is closed regardless
+	ClosedAt                 string // optional RFC3339 UTC timestamp from export
+	DueOffsetDays            *int   // relative due date (days from the moment the board is created); wins over Due
 	Pos                      float64
 	LabelKeys                []string
 	MemberEmails             []string
@@ -137,6 +138,7 @@ type exportCard struct {
 	DueOffsetDays  *int             `json:"dueOffsetDays,omitempty"`
 	IsDueCompleted bool             `json:"isDueCompleted,omitempty"`
 	IsClosed       bool             `json:"isClosed,omitempty"`
+	ClosedAt       string           `json:"closedAt,omitempty"`
 	Position       float64          `json:"position"`
 	LabelIDs       []string         `json:"labelIds,omitempty"`
 	MemberEmails   []string         `json:"memberEmails,omitempty"`
@@ -314,7 +316,7 @@ func writeImport(e *ops.Env, tx *sql.Tx, boardID, projectID string, ib impBoard,
 func writeImportSettings(ctx context.Context, tx *sql.Tx, boardID string, ib impBoard) error {
 	mode := ib.CardColorMode
 	if mode == "" {
-		mode = CardColorPill
+		mode = CardColorFill
 	}
 	f := ib.Flags
 	_, err := tx.ExecContext(ctx, `UPDATE boards SET color=?,background_pattern=?,card_color_mode=?,always_display_card_creator=?,
@@ -497,8 +499,16 @@ func writeCards(e *ops.Env, tx *sql.Tx, boardID string, cards []impCard, w *writ
 			due = c.Due
 			done = boolInt(c.DueDone)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_due_completed,is_closed,comments_total,list_changed_at,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), pos, c.Name, nullStr(c.Desc), due, done, boolInt(c.Closed), len(c.Comments), now, now); err != nil {
+		var closedAt any
+		if c.Closed {
+			if c.ClosedAt != "" {
+				closedAt = c.ClosedAt
+			} else {
+				closedAt = now
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cards(id,board_id,list_id,creator_user_id,position,name,description,due_date,is_due_completed,is_closed,closed_at,comments_total,list_changed_at,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, cid, boardID, lid, userOrNil(e), pos, c.Name, nullStr(c.Desc), due, done, boolInt(c.Closed), closedAt, len(c.Comments), now, now); err != nil {
 			return out, err
 		}
 		out.lands = append(out.lands, Landing{CardID: cid, ListID: lid})
@@ -627,7 +637,7 @@ func impFromDoc(d *exportDoc) impBoard {
 		ib.Labels = append(ib.Labels, impLabel{Key: l.ID, Name: l.Name, Color: l.Color, Group: l.GroupID})
 	}
 	for _, c := range d.Cards {
-		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, Closed: c.IsClosed, DueOffsetDays: c.DueOffsetDays, Pos: c.Position,
+		ic := impCard{Key: c.ID, ListKey: c.ListID, Name: c.Name, Desc: c.Description, Due: c.DueDate, DueDone: c.IsDueCompleted, Closed: c.IsClosed, ClosedAt: c.ClosedAt, DueOffsetDays: c.DueOffsetDays, Pos: c.Position,
 			LabelKeys: c.LabelIDs, MemberEmails: c.MemberEmails, Values: c.CustomValues}
 		for _, tl := range c.TaskLists {
 			x := impTaskList{Name: tl.Name, ShowOnFront: tl.ShowOnFront, HideDone: tl.HideCompleted}
@@ -948,14 +958,14 @@ func buildExport(ctx context.Context, d querier, b Board, opts exportOpts) (*exp
 	}
 	idx := map[string]int{}
 	if opts.includeCards {
-		rows, err = d.QueryContext(ctx, `SELECT c.id,p.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(p.position,0)
+		rows, err = d.QueryContext(ctx, `SELECT c.id,p.list_id,c.name,COALESCE(c.description,''),COALESCE(c.due_date,''),COALESCE(c.is_due_completed,0),c.is_closed,COALESCE(c.closed_at,''),COALESCE(p.position,0)
 			FROM card_placements p JOIN cards c ON c.id=p.card_id WHERE p.board_id=? AND c.is_draft=0 AND c.is_template=0 ORDER BY p.position, c.id`, b.ID)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var c exportCard
-			if err := rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.IsClosed, &c.Position); err != nil {
+			if err := rows.Scan(&c.ID, &c.ListID, &c.Name, &c.Description, &c.DueDate, &c.IsDueCompleted, &c.IsClosed, &c.ClosedAt, &c.Position); err != nil {
 				rows.Close()
 				return nil, err
 			}

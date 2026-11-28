@@ -23,7 +23,7 @@
    "name": "Product roadmap",
    "defaultView": "kanban",
    "color": "teal",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

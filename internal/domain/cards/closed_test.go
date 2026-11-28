@@ -12,8 +12,15 @@ import (
 func closedNow(t *testing.T, f *fx, id string) bool {
 	t.Helper()
 	var v bool
-	if err := f.e.DB.QueryRow(`SELECT is_closed FROM cards WHERE id=?`, id).Scan(&v); err != nil {
+	var closedAt *string
+	if err := f.e.DB.QueryRow(`SELECT is_closed, closed_at FROM cards WHERE id=?`, id).Scan(&v, &closedAt); err != nil {
 		t.Fatal(err)
+	}
+	if v && (closedAt == nil || *closedAt == "") {
+		t.Fatalf("card %s has is_closed=true but empty closed_at", id)
+	}
+	if !v && closedAt != nil {
+		t.Fatalf("card %s has is_closed=false but closed_at=%q", id, *closedAt)
 	}
 	return v
 }
@@ -137,25 +144,37 @@ func TestClosedMarkRendered(t *testing.T) {
 			t.Fatalf("%s: %d overdue chips, want 1 (the open card only)", view, strings.Count(body, "boards-due-overdue"))
 		}
 	}
-	// the calendar (both the month grid and the unscheduled rail) and its op output
+	// the calendar (month grid plots closed cards by closed_at, open cards by due_date) and its op output
+	mustExec(t, f.e, `UPDATE cards SET closed_at='2026-11-14T10:00:00Z' WHERE id=?`, done.ID)
 	cal := call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-11"})
 	got := map[string]bool{}
+	calDates := map[string]string{}
 	for _, c := range cal.Cards {
 		got[c.Name] = c.IsClosed
+		calDates[c.Name] = c.CalendarDate
 	}
 	if !got["Done card"] || got["Open card"] {
 		t.Fatalf("calendar isClosed: %v", got)
+	}
+	if calDates["Done card"] != "2026-11-14T10:00:00Z" || !strings.HasPrefix(calDates["Open card"], "2026-11-12") {
+		t.Fatalf("calendar dates: %v", calDates)
 	}
 	w := do(mux, "GET", "/boards/"+f.board+"/calendar?month=2026-11", nil)
 	if body := w.Body.String(); strings.Count(body, markHTML) != 1 || !strings.Contains(chunk(body, "Done card</a>"), markHTML) {
 		t.Fatalf("calendar marks: %d", strings.Count(body, markHTML))
 	}
-	// the unscheduled rail lists active-column cards only, so a card there is closed only when closed in place
-	nodue := call[Card](t, f.e, "card.create", CreateIn{ListID: f.todo, Name: "Unscheduled closed"})
-	mustExec(t, f.e, `UPDATE cards SET is_closed=1 WHERE id=?`, nodue.ID)
+	// a card closed in place (no due date) plots on its closed date rather than sitting in Unscheduled
+	nodue := call[Card](t, f.e, "card.create", CreateIn{ListID: f.todo, Name: "Closed no due"})
+	mustExec(t, f.e, `UPDATE cards SET is_closed=1, closed_at='2026-11-18T12:00:00Z' WHERE id=?`, nodue.ID)
+	cal = call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-11"})
+	for _, u := range cal.Unscheduled {
+		if u.ID == nodue.ID {
+			t.Fatal("closed card should not appear in Unscheduled")
+		}
+	}
 	w = do(mux, "GET", "/boards/"+f.board+"/calendar?month=2026-11", nil)
-	if body := w.Body.String(); !strings.Contains(chunk(body, "Unscheduled closed</a>"), markHTML) {
-		t.Fatal("unscheduled closed card lacks the mark")
+	if body := w.Body.String(); !strings.Contains(chunk(body, "Closed no due</a>"), markHTML) {
+		t.Fatal("closed card without due date lacks the mark on the calendar grid")
 	}
 	// the card sheet: a success badge with the mark and the word, nothing on an open card
 	if body := do(mux, "GET", "/ui/cards/"+done.ID, nil).Body.String(); !strings.Contains(body, `cards-badge cards-badge-closed`) || !strings.Contains(body, markHTML) {
@@ -183,5 +202,159 @@ func TestClosedMarkRendered(t *testing.T) {
 	w = do(mux, "GET", "/public/"+tok, nil, "X-Anon", "1")
 	if body := w.Body.String(); w.Code != 200 || !strings.Contains(chunk(body, ">Done card<"), markHTML) || strings.Contains(chunk(body, ">Open card<"), markHTML) {
 		t.Fatalf("public board marks (%d)", w.Code)
+	}
+}
+
+// Calendar plots open cards by due date and closed cards by closed_at (even if they had a due date in another month or none at all).
+func TestCalendarClosedDate(t *testing.T) {
+	f := seed(t)
+	mux := mount(f, f.e)
+
+	openDue := f.card(t, f.todo, "Open due")
+	call[Card](t, f.e, "card.due.set", DueIn{ID: openDue.ID, DueDate: "2026-06-10"})
+	openNone := f.card(t, f.todo, "Open unscheduled")
+
+	closedHadDue := f.card(t, f.todo, "Closed with earlier due")
+	call[Card](t, f.e, "card.due.set", DueIn{ID: closedHadDue.ID, DueDate: "2026-05-02"})
+	closedHadDue = call[Card](t, f.e, "card.close", CloseIn{ID: closedHadDue.ID})
+	if !closedHadDue.IsClosed || closedHadDue.ClosedAt == nil || *closedHadDue.ClosedAt == "" {
+		t.Fatalf("card.close must populate closedAt: %+v", closedHadDue)
+	}
+	mustExec(t, f.e, `UPDATE cards SET closed_at='2026-06-15T14:30:00Z' WHERE id=?`, closedHadDue.ID)
+
+	closedNoDue := f.card(t, f.closed, "Closed no due")
+	if !closedNoDue.IsClosed || closedNoDue.ClosedAt == nil || *closedNoDue.ClosedAt == "" {
+		t.Fatalf("creating in closed list must populate closedAt: %+v", closedNoDue)
+	}
+	mustExec(t, f.e, `UPDATE cards SET closed_at='2026-06-20T09:00:00Z' WHERE id=?`, closedNoDue.ID)
+
+	// May should NOT contain closedHadDue (its due date was May 2, but it closed in June)
+	may := call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-05"})
+	for _, c := range may.Cards {
+		if c.ID == closedHadDue.ID {
+			t.Fatalf("closed card appeared in due-date month May instead of closed month June: %+v", c)
+		}
+	}
+
+	// June should contain openDue (June 10), closedHadDue (June 15), and closedNoDue (June 20)
+	june := call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-06"})
+	byID := map[string]CalendarCard{}
+	for _, c := range june.Cards {
+		byID[c.ID] = c
+	}
+	if len(byID) != 3 {
+		t.Fatalf("expected 3 cards in June, got %d: %+v", len(byID), june.Cards)
+	}
+	if !strings.HasPrefix(byID[openDue.ID].CalendarDate, "2026-06-10") {
+		t.Errorf("openDue calendarDate=%q want 2026-06-10*", byID[openDue.ID].CalendarDate)
+	}
+	if byID[closedHadDue.ID].CalendarDate != "2026-06-15T14:30:00Z" || byID[closedHadDue.ID].ClosedAt != "2026-06-15T14:30:00Z" {
+		t.Errorf("closedHadDue=%+v", byID[closedHadDue.ID])
+	}
+	if byID[closedNoDue.ID].CalendarDate != "2026-06-20T09:00:00Z" {
+		t.Errorf("closedNoDue=%+v", byID[closedNoDue.ID])
+	}
+	// Unscheduled contains ONLY openNone
+	if len(june.Unscheduled) != 1 || june.Unscheduled[0].ID != openNone.ID {
+		t.Fatalf("unscheduled=%+v want only openNone", june.Unscheduled)
+	}
+
+	// HTML places closed chips in their closed_at day cell with draggable="false"
+	w := do(mux, "GET", "/boards/"+f.board+"/calendar?month=2026-06", nil)
+	if w.Code != 200 {
+		t.Fatalf("calendar HTML: %d", w.Code)
+	}
+	body := w.Body.String()
+	cell := func(date string) string {
+		marker := `data-date="` + date + `"`
+		i := strings.Index(body, marker)
+		if i < 0 {
+			t.Fatalf("day cell %s not found", date)
+		}
+		end := strings.Index(body[i:], "</div>")
+		return body[i : i+end]
+	}
+	if !strings.Contains(cell("2026-06-10"), "Open due") || !strings.Contains(cell("2026-06-10"), `draggable="true"`) {
+		t.Errorf("2026-06-10 cell: %s", cell("2026-06-10"))
+	}
+	if !strings.Contains(cell("2026-06-15"), "Closed with earlier due") || !strings.Contains(cell("2026-06-15"), `draggable="false"`) {
+		t.Errorf("2026-06-15 cell: %s", cell("2026-06-15"))
+	}
+	if !strings.Contains(cell("2026-06-20"), "Closed no due") || !strings.Contains(cell("2026-06-20"), `draggable="false"`) {
+		t.Errorf("2026-06-20 cell: %s", cell("2026-06-20"))
+	}
+
+	// Re-opening closedHadDue clears closedAt and returns it to its May 2 due date
+	falseVal := false
+	reopened := call[Card](t, f.e, "card.close", CloseIn{ID: closedHadDue.ID, Closed: &falseVal})
+	if reopened.IsClosed || reopened.ClosedAt != nil {
+		t.Fatalf("reopening must clear closedAt: %+v", reopened)
+	}
+	may = call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-05"})
+	if len(may.Cards) != 1 || may.Cards[0].ID != closedHadDue.ID {
+		t.Fatalf("reopened card should return to due-date month May: %+v", may.Cards)
+	}
+}
+
+// Archived cards (closed or with a due date) stay on the calendar marked isArchived; trashed cards and unscheduled
+// archived cards are excluded.
+func TestCalendarArchivedCards(t *testing.T) {
+	f := seed(t)
+	mux := mount(f, f.e)
+
+	// Closed card that is then archived keeps its closed_at and stays on the calendar
+	archClosed := f.card(t, f.closed, "Archived done")
+	mustExec(t, f.e, `UPDATE cards SET closed_at='2026-07-08T15:00:00Z' WHERE id=?`, archClosed.ID)
+	call[Card](t, f.e, "card.archive", ArchiveIn{ID: archClosed.ID})
+
+	// Open card with a due date that is archived stays on the calendar on its due date
+	archDue := f.card(t, f.todo, "Archived scheduled")
+	call[Card](t, f.e, "card.due.set", DueIn{ID: archDue.ID, DueDate: "2026-07-12"})
+	call[Card](t, f.e, "card.archive", ArchiveIn{ID: archDue.ID})
+
+	// Open card without a due date that is archived must NOT show up in Unscheduled
+	archNone := f.card(t, f.todo, "Archived unscheduled")
+	call[Card](t, f.e, "card.archive", ArchiveIn{ID: archNone.ID})
+
+	// Trashed card (even closed or with a due date) must NOT appear on the calendar
+	trashed := f.card(t, f.closed, "Trashed done")
+	mustExec(t, f.e, `UPDATE cards SET closed_at='2026-07-14T10:00:00Z' WHERE id=?`, trashed.ID)
+	call[Card](t, f.e, "card.archive", ArchiveIn{ID: trashed.ID, Trash: true})
+
+	july := call[CalendarOut](t, f.e, "card.calendar", CalendarIn{BoardID: f.board, Month: "2026-07"})
+	byID := map[string]CalendarCard{}
+	for _, c := range july.Cards {
+		byID[c.ID] = c
+	}
+	if len(byID) != 2 {
+		t.Fatalf("expected 2 archived cards in July, got %d: %+v", len(byID), july.Cards)
+	}
+	if c, ok := byID[archClosed.ID]; !ok || !c.IsArchived || !c.IsClosed || c.CalendarDate != "2026-07-08T15:00:00Z" {
+		t.Errorf("archClosed=%+v", c)
+	}
+	if c, ok := byID[archDue.ID]; !ok || !c.IsArchived || c.IsClosed || !strings.HasPrefix(c.CalendarDate, "2026-07-12") {
+		t.Errorf("archDue=%+v", c)
+	}
+	if _, ok := byID[trashed.ID]; ok {
+		t.Error("trashed card must not appear on the calendar")
+	}
+	for _, u := range july.Unscheduled {
+		if u.ID == archNone.ID {
+			t.Error("archived card without due date must not appear in Unscheduled")
+		}
+	}
+
+	w := do(mux, "GET", "/boards/"+f.board+"/calendar?month=2026-07", nil)
+	if w.Code != 200 {
+		t.Fatalf("calendar HTML: %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Archived done", "Archived scheduled", "is-archived", `draggable="false"`, "Archived · "} {
+		if !strings.Contains(body, want) {
+			t.Errorf("calendar HTML missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Trashed done") || strings.Contains(body, "Archived unscheduled") {
+		t.Error("trashed or unscheduled-archived card leaked into calendar HTML")
 	}
 }

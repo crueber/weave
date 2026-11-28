@@ -23,7 +23,7 @@
    "name": "OKRs",
    "defaultView": "kanban",
    "color": "orange",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

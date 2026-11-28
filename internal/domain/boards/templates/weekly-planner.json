@@ -23,7 +23,7 @@
    "name": "Weekly planner",
    "defaultView": "kanban",
    "color": "sky",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

@@ -24,7 +24,7 @@
    "name": "Content calendar",
    "defaultView": "calendar",
    "color": "pink",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

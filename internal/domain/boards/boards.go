@@ -153,7 +153,7 @@ type BoardUpdateIn struct {
 	Color                    *string  `json:"color" desc:"board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it"`
 	BackgroundPattern        *string  `json:"backgroundPattern" desc:"board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo); empty string clears it"`
 	BackgroundImageID        *string  `json:"backgroundImageId" desc:"uploaded board background image id; empty string clears it"`
-	CardColorMode            *string  `json:"cardColorMode" desc:"pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"`
+	CardColorMode            *string  `json:"cardColorMode" desc:"fill (default; the card's first label by label order colours the whole card; colours are never mixed) | pill (label pills)"`
 	AgentPrompt              *string  `json:"agentPrompt" desc:"board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default"`
 }
 type BoardMoveIn struct {
@@ -327,8 +327,8 @@ func insertBoard(e *ops.Env, tx *sql.Tx, id, projectID, name, view string, pos *
 		p = appendPos(e.Ctx, tx, "boards", "project_id=?", projectID)
 	}
 	now := db.Now()
-	if _, err := tx.ExecContext(e.Ctx, `INSERT INTO boards(id,project_id,position,name,default_view,show_card_counter,created_at) VALUES(?,?,?,?,?,1,?)`,
-		id, projectID, p, name, view, now); err != nil {
+	if _, err := tx.ExecContext(e.Ctx, `INSERT INTO boards(id,project_id,position,name,default_view,show_card_counter,card_color_mode,created_at) VALUES(?,?,?,?,?,1,?,?)`,
+		id, projectID, p, name, view, CardColorFill, now); err != nil {
 		return err
 	}
 	if err := EnsureSystemLists(e.Ctx, tx, id); err != nil {

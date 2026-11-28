@@ -22,7 +22,7 @@
    "name": "Kanban board",
    "defaultView": "kanban",
    "color": "blue",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

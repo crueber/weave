@@ -338,6 +338,20 @@ func registerQuick() {
 		}
 		return renderQuick(c, id, true)
 	})
+	web.Route("POST /ui/cards/{id}/quick/member", func(c *web.Ctx) error {
+		id := c.R.PathValue("id")
+		if err := c.R.ParseForm(); err != nil {
+			return ops.Invalid("bad form")
+		}
+		op := "card.member.add"
+		if c.R.Form.Get("on") == "0" {
+			op = "card.member.remove"
+		}
+		if _, err := CallByForm(c.Env, op, url.Values{"id": {id}, "userId": {c.R.Form.Get("userId")}}); err != nil {
+			return err
+		}
+		return renderPicker(c, id, "members")
+	})
 	// trash=1 moves the card to the trash list instead (the board's Delete shortcut); both offer Undo.
 	web.Route("POST /ui/cards/{id}/quick/archive", func(c *web.Ctx) error {
 		id := c.R.PathValue("id")
@@ -357,9 +371,9 @@ func registerQuick() {
 		c.W.WriteHeader(http.StatusNoContent)
 		return nil
 	})
-	// Keyboard pickers for the card shortcuts (boards_cardkeys.js): L labels, d due date, p location. Each is a
-	// fragment for #boards-pop; the pickers post to the existing routes (quick/label, due, location).
-	for _, kind := range []string{"labels", "due", "place"} {
+	// Keyboard pickers for the card shortcuts (boards_cardkeys.js): L labels, m members, d due date, p location. Each is a
+	// fragment for #boards-pop; the pickers post to the existing routes (quick/label, quick/member, due, location).
+	for _, kind := range []string{"labels", "members", "due", "place"} {
 		kind := kind
 		web.Route("GET /ui/cards/{id}/quick/"+kind, func(c *web.Ctx) error { return renderPicker(c, c.R.PathValue("id"), kind) })
 	}
@@ -393,10 +407,20 @@ func renderTile(c *web.Ctx, id, block string) error {
 	return c.RenderBlock("boards_board.html", block, TilesData{P: pd, Tiles: tiles})
 }
 
-// PickerData feeds the keyboard pickers (labels / due date / location) of the card shortcuts.
+// QuickMember is one assignable user row of the keyboard member picker.
+type QuickMember struct {
+	ID       string
+	Name     string
+	Username string
+	IsAgent  bool
+	On       bool
+}
+
+// PickerData feeds the keyboard pickers (labels / members / due date / location) of the card shortcuts.
 type PickerData struct {
 	QuickData
 	Kind     string
+	Members  []QuickMember
 	DueValue string // the due date as a datetime-local value (UTC wall time, like the card sheet), "" when none
 	Lat, Lng string // the location, "" when none
 	Place    string // the location's name
@@ -441,6 +465,33 @@ func renderPicker(c *web.Ctx, id, kind string) error {
 	d := PickerData{QuickData: qd, Kind: kind}
 	if t, ok := parseTime(qd.T.DueRaw); ok {
 		d.DueValue = t.UTC().Format("2006-01-02T15:04")
+	}
+	if kind == "members" {
+		assigned := map[string]bool{}
+		if rows, err := c.Env.DB.QueryContext(c.R.Context(), `SELECT user_id FROM card_memberships WHERE card_id=?`, id); err == nil {
+			for rows.Next() {
+				var uid string
+				if rows.Scan(&uid) == nil {
+					assigned[uid] = true
+				}
+			}
+			rows.Close()
+		}
+		if rows, err := c.Env.DB.QueryContext(c.R.Context(), `SELECT u.id,u.name,COALESCE(u.username,''),u.is_agent FROM users u
+			WHERE u.deleted_at IS NULL AND u.is_deactivated=0 AND (
+				u.id IN (SELECT user_id FROM board_memberships WHERE board_id=?1 AND user_id IS NOT NULL) OR
+				u.id IN (SELECT gm.user_id FROM user_group_members gm JOIN board_memberships bm ON bm.group_id=gm.group_id WHERE bm.board_id=?1) OR
+				u.id IN (SELECT pm.user_id FROM project_managers pm JOIN boards b ON b.project_id=pm.project_id WHERE b.id=?1))
+			ORDER BY u.name, u.id`, qd.P.Board.ID); err == nil {
+			for rows.Next() {
+				var m QuickMember
+				if rows.Scan(&m.ID, &m.Name, &m.Username, &m.IsAgent) == nil {
+					m.On = assigned[m.ID]
+					d.Members = append(d.Members, m)
+				}
+			}
+			rows.Close()
+		}
 	}
 	if kind == "place" { // read-only over the cards table, like the tile loader
 		var lat, lng *float64

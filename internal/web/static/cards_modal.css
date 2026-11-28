@@ -245,6 +245,9 @@ button.cm-lab{cursor:pointer}
 .cards-cal-chip{display:block;font-size:var(--text-xs);padding:.15rem .4rem;border:1px solid var(--tile-border);background:var(--tile-bg);color:var(--fg);border-radius:var(--radius-sm);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;box-shadow:var(--tile-shadow);border-left:3px solid var(--accent)}
 .cards-cal-chip:hover{box-shadow:var(--tile-shadow-hover);color:var(--fg)}
 .cards-cal-chip.cards-due-done{text-decoration:line-through;color:var(--muted);background:var(--surface-2);border-left-color:var(--success)}
+.cards-cal-chip.is-closed{cursor:pointer;border-left-color:var(--success)}
+.cards-cal-chip.is-archived{opacity:.58;cursor:pointer;border-style:dashed;border-left-style:solid}
+.cards-cal-chip.is-archived:hover{opacity:.9}
 .cards-cal-chip.cards-due-late{border-left-color:var(--danger);background:var(--tile-bg);color:var(--fg)}
 .cards-dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;margin-right:.2rem}
 .cards-cal-unsched{display:flex;flex-direction:column;gap:var(--space-2)}

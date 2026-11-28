@@ -23,7 +23,7 @@
    "name": "Home & chores",
    "defaultView": "kanban",
    "color": "lime",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

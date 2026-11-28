@@ -919,7 +919,13 @@ func cardClose(e *ops.Env, in CloseIn) (Card, error) {
 		}
 	}
 	was := c.IsClosed
-	if _, err := e.DB.ExecContext(e.Ctx, `UPDATE cards SET is_closed=?,updated_at=? WHERE id=?`, closing, db.Now(), in.ID); err != nil {
+	now := db.Now()
+	if closing {
+		_, err = e.DB.ExecContext(e.Ctx, `UPDATE cards SET is_closed=1,closed_at=COALESCE(closed_at,?),updated_at=? WHERE id=?`, now, now, in.ID)
+	} else {
+		_, err = e.DB.ExecContext(e.Ctx, `UPDATE cards SET is_closed=0,closed_at=NULL,updated_at=? WHERE id=?`, now, in.ID)
+	}
+	if err != nil {
 		return c, err
 	}
 	c, _ = loadCardOn(e, e.DB, in.ID, boardID)

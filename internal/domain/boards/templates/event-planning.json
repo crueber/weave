@@ -24,7 +24,7 @@
    "name": "Event planning",
    "defaultView": "kanban",
    "color": "amber",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

@@ -660,7 +660,7 @@ Update board name and settings
 | `--color` | body | string |  | board colour: #rrggbb or a preset name (crimson, orange, amber, lime, green, teal, sky, blue, indigo, violet, pink, slate); empty string clears it |
 | `--backgroundPattern` | body | string |  | board background pattern slug (fill, dots, grid, diagonal, crosshatch, diamonds, hexagons, waves, topography, herringbone, isometric, arches, terrazzo); empty string clears it |
 | `--backgroundImageId` | body | string |  | uploaded board background image id; empty string clears it |
-| `--cardColorMode` | body | string |  | pill (label pills, default) \| fill (the card's first label by label order colours the whole card; colours are never mixed) |
+| `--cardColorMode` | body | string |  | fill (default; the card's first label by label order colours the whole card; colours are never mixed) \| pill (label pills) |
 | `--agentPrompt` | body | string |  | board managers only: this board's text for the board agent prompt, plain text with {tokens} such as {board_name} {columns} {connect} {questionnaire} (weave agent prompt tokens; max 20000 characters); empty string, or text equal to the default, goes back to the admin default |
 
 ## card
@@ -697,7 +697,7 @@ List a board's archived or trashed cards with filters, stable cursor paging, boa
 
 ### `weave card calendar`
 
-Cards of a board by due date for a month grid  
+Cards of a board for a month grid (due date, or closed date once closed)  
 `GET /boards/{boardId}/calendar` (auth: user)
 
 | flag | in | type | required | description |

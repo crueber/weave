@@ -23,7 +23,7 @@
    "name": "Sales pipeline",
    "defaultView": "kanban",
    "color": "green",
-   "cardColorMode": "pill"
+   "cardColorMode": "fill"
   },
   "lists": [
    {

@@ -197,7 +197,28 @@
   });
 
   // ---- help overlay ----
-  B.showHelp = function () { var h = document.getElementById('boards-help'); if (h && !h.open) { if (h.showModal) h.showModal(); else h.setAttribute('open', ''); } };
+  function outsideBox(el, e) {
+    var r = el.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  }
+  B.showHelp = function (on) {
+    var h = document.getElementById('boards-help'); if (!h) return;
+    var want = on === undefined ? !h.open : !!on;
+    if (want && !h.open) { if (h.showModal) h.showModal(); else h.setAttribute('open', ''); }
+    else if (!want && h.open) { if (h.close) h.close(); else h.removeAttribute('open'); }
+  };
+  var helpBgDown = false;
+  document.addEventListener('pointerdown', function (e) {
+    var h = document.getElementById('boards-help');
+    helpBgDown = !!(h && h.open && e.target === h && outsideBox(h, e));
+  });
+  document.addEventListener('click', function (e) {
+    var h = document.getElementById('boards-help');
+    var ok = helpBgDown; helpBgDown = false;
+    if (ok && h && h.open && e.target === h && outsideBox(h, e)) {
+      if (h.close) h.close(); else h.removeAttribute('open');
+    }
+  });
 
   // ---- keyboard navigation + shortcuts ----
   function tilesOf(col) { return [].slice.call(col.querySelectorAll('.boards-tile:not(.is-pending) .boards-tile-link')); }

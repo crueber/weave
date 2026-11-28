@@ -174,8 +174,11 @@ type CalendarCard struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
 	DueDate        string   `json:"dueDate"`
+	ClosedAt       string   `json:"closedAt,omitempty" desc:"when the card was closed (UTC)"`
+	CalendarDate   string   `json:"calendarDate" desc:"date plotted on the calendar: closedAt when closed, otherwise dueDate"`
 	IsDueCompleted bool     `json:"isDueCompleted"`
 	IsClosed       bool     `json:"isClosed" desc:"the card is closed (done)"`
+	IsArchived     bool     `json:"isArchived,omitempty" desc:"the card is archived on this board"`
 	ListID         string   `json:"listId"`
 	Colors         []string `json:"labelColors"`
 }
@@ -185,7 +188,7 @@ type CalendarOut struct {
 	From        string         `json:"from" desc:"first grid day (Monday)"`
 	To          string         `json:"to" desc:"last grid day (Sunday)"`
 	Cards       []CalendarCard `json:"cards"`
-	Unscheduled []CalendarCard `json:"unscheduled" desc:"active cards without due date (up to 50)"`
+	Unscheduled []CalendarCard `json:"unscheduled" desc:"open active cards without due date (up to 50)"`
 }
 
 type MapPoint struct {
@@ -202,7 +205,7 @@ type MapOut struct {
 }
 
 func init() {
-	ops.Register(ops.Op{Name: "card.calendar", Summary: "Cards of a board by due date for a month grid", Method: "GET", Path: "/boards/{boardId}/calendar",
+	ops.Register(ops.Op{Name: "card.calendar", Summary: "Cards of a board for a month grid (due date, or closed date once closed)", Method: "GET", Path: "/boards/{boardId}/calendar",
 		UI: "GET /boards/{id}/calendar"}, calendar)
 	ops.Register(ops.Op{Name: "card.map", Summary: "Cards of a board that have a map location", Method: "GET", Path: "/boards/{boardId}/map",
 		UI: "GET /boards/{id}/map"}, func(e *ops.Env, in InboxIn) (MapOut, error) {
@@ -250,14 +253,20 @@ func calendar(e *ops.Env, in CalendarIn) (CalendarOut, error) {
 		}
 		for rows.Next() {
 			var c CalendarCard
-			var due *string
+			var due, closedAt, calDate *string
 			var done *bool
-			if err := rows.Scan(&c.ID, &c.Name, &due, &done, &c.IsClosed, &c.ListID); err != nil {
+			if err := rows.Scan(&c.ID, &c.Name, &due, &closedAt, &calDate, &done, &c.IsClosed, &c.IsArchived, &c.ListID); err != nil {
 				rows.Close()
 				return nil, err
 			}
 			if due != nil {
 				c.DueDate = *due
+			}
+			if closedAt != nil {
+				c.ClosedAt = *closedAt
+			}
+			if calDate != nil {
+				c.CalendarDate = *calDate
 			}
 			c.IsDueCompleted = done != nil && *done
 			c.Colors = []string{}
@@ -307,15 +316,18 @@ func calendar(e *ops.Env, in CalendarIn) (CalendarOut, error) {
 		}
 		return res, nil
 	}
+	// Closed cards plot on their closed date; open cards plot on their due date. Archived cards stay on the
+	// calendar (faded visually) while trashed cards are excluded.
+	const calExpr = `CASE WHEN c.is_closed=1 AND c.closed_at IS NOT NULL THEN c.closed_at ELSE c.due_date END`
 	var err error
-	out.Cards, err = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
-		WHERE p.board_id=? AND c.due_date>=? AND c.due_date<? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed') ORDER BY c.due_date, c.id`,
+	out.Cards, err = load(`SELECT c.id,c.name,c.due_date,c.closed_at,`+calExpr+` AS cal_date,c.is_due_completed,c.is_closed,(l.type='archive'),p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND `+calExpr+`>=? AND `+calExpr+`<? AND c.is_draft=0 AND c.is_template=0 AND l.type IN ('active','closed','archive') ORDER BY cal_date, c.id`,
 		in.BoardID, from.Format("2006-01-02"), to.AddDate(0, 0, 1).Format("2006-01-02"))
 	if err != nil {
 		return CalendarOut{}, err
 	}
-	out.Unscheduled, err = load(`SELECT c.id,c.name,c.due_date,c.is_due_completed,c.is_closed,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
-		WHERE p.board_id=? AND c.due_date IS NULL AND c.is_draft=0 AND c.is_template=0 AND l.type='active' ORDER BY c.updated_at DESC, c.id DESC LIMIT 50`, in.BoardID)
+	out.Unscheduled, err = load(`SELECT c.id,c.name,c.due_date,c.closed_at,NULL,c.is_due_completed,c.is_closed,0,p.list_id FROM card_placements p JOIN cards c ON c.id=p.card_id JOIN lists l ON l.id=p.list_id
+		WHERE p.board_id=? AND c.is_closed=0 AND c.due_date IS NULL AND c.is_draft=0 AND c.is_template=0 AND l.type='active' ORDER BY c.updated_at DESC, c.id DESC LIMIT 50`, in.BoardID)
 	if err != nil {
 		return CalendarOut{}, err
 	}

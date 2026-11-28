@@ -1776,7 +1776,7 @@
     "in": "body",
     "type": "string",
     "required": false,
-    "desc": "pill (label pills, default) | fill (the card's first label by label order colours the whole card; colours are never mixed)"
+    "desc": "fill (default; the card's first label by label order colours the whole card; colours are never mixed) | pill (label pills)"
    },
    {
     "name": "agentPrompt",
@@ -1909,7 +1909,7 @@
  {
   "name": "card.calendar",
   "tag": "card",
-  "summary": "Cards of a board by due date for a month grid",
+  "summary": "Cards of a board for a month grid (due date, or closed date once closed)",
   "method": "GET",
   "path": "/boards/{boardId}/calendar",
   "auth": "user",

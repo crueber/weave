@@ -49,7 +49,7 @@
   // ---- calendar: drag a chip onto a day cell to set the due date (time of day is kept) ----
   var dragged = null;
   document.addEventListener('dragstart', function (e) {
-    var chip = e.target.closest && e.target.closest('.cards-cal-chip[data-card]');
+    var chip = e.target.closest && e.target.closest('.cards-cal-chip[data-card][draggable="true"]');
     if (chip) { dragged = chip.dataset.card; e.dataTransfer.setData('text/plain', dragged); e.dataTransfer.effectAllowed = 'move'; }
   });
   document.addEventListener('dragover', function (e) {
